@@ -362,7 +362,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
           className={'rounded-lg border px-3 py-2 text-xs '+(t.code===selectedCode?'border-orange-500 bg-orange-50':'border-slate-200 text-slate-600')}>
           {t.nominalCapacityLitres/1000} KL · {t.name} · {t.status}
         </button>)}
-      </div>
+      </div>}
       {chosen&&<div className="mt-4 rounded-xl bg-[#F4F7FB] p-4">
         <div className="flex flex-wrap items-center justify-between gap-2"><div><h4 className="font-bold text-[#17365D]">{chosen.name}</h4>
           <p className="text-sm text-slate-600">
@@ -391,7 +391,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
             </>}
             {(chosen.isOverCapacityCeiling||chosen.requiresEngineeringReview||chosen.requiresDimensionVerification)&&
               <p className="mt-2 text-amber-900">Check the chart source and tank dimensions before approval.</p>}
-          </div>
+          </div>}
            {defaultCharts[chosen.nominalCapacityLitres]===chosen.id
              ? <span className="inline-block rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-800">
                  Selected automatically for NEW {chosen.nominalCapacityLitres/1000} KL tanks
