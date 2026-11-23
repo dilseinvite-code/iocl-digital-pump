@@ -143,7 +143,7 @@ export class ExcelCalibrationImportService {
 
     if (charts.length === 0) {
       throw new Error(
-        `NO_CALIBRATION_SHEETS:No 10 KL, 15 KL or 20 KL calibration sheets could be identified in workbook '${fileName}'.`
+        `NO_CALIBRATION_SHEETS:No 10 KL, 15 KL, 20 KL or 50 KL calibration sheets could be identified in workbook '${fileName}'.`
       );
     }
 
@@ -153,6 +153,7 @@ export class ExcelCalibrationImportService {
         EXCEL_10KL_REFERENCE: 1,
         EXCEL_15KL_REFERENCE: 2,
         EXCEL_20KL_REFERENCE: 3,
+        EXCEL_50KL_REFERENCE: 4,
       };
       return (order[a.templateCode] || 99) - (order[b.templateCode] || 99);
     });
@@ -189,14 +190,14 @@ export class ExcelCalibrationImportService {
   }
 
   /**
-   * Classifies a worksheet as '20KL' | '15KL' | '10KL' | null without mislabeling
+   * Classifies a worksheet as '50KL' | '20KL' | '15KL' | '10KL' | null without mislabeling
    * summary/auxiliary sheets that mention multiple capacities as 20KL.
    */
   private static classifyWorksheet(
     sheet: XLSX.WorkSheet,
     sheetName: string,
     totalSheetsInWorkbook: number
-  ): '20KL' | '15KL' | '10KL' | null {
+  ): '50KL' | '20KL' | '15KL' | '10KL' | null {
     const normName = sheetName.toUpperCase().replace(/\s+/g, '');
 
     // Ignore obvious auxiliary/note/summary tab names
@@ -208,10 +209,13 @@ export class ExcelCalibrationImportService {
     }
 
     // 1. Check actual dip-to-volume table signature first
-    const probe = this.parseDipVolumePairs(sheet, '20KL', 210);
+    const probe = this.parseDipVolumePairs(sheet, '20KL', 300);
     if (probe.points.length >= 150) {
       const maxDipCm = probe.points[probe.points.length - 1].dipCm;
       const maxVol = probe.points[probe.points.length - 1].volumeLitres;
+      if (maxDipCm === 300 && maxVol >= 45000 && maxVol <= 57500) {
+        return '50KL';
+      }
       if (maxDipCm === 210 && maxVol >= 19000 && maxVol <= 23000) {
         return '20KL';
       }
@@ -224,15 +228,17 @@ export class ExcelCalibrationImportService {
     }
 
     // 2. Check explicit single-capacity sheet tab name
+    const has50 = normName.includes('50KL') || normName === '50000L' || normName === '50000';
     const has20 = normName.includes('20KL') || normName === '20000L' || normName === '20000';
     const has15 = normName.includes('15KL') || normName === '15000L' || normName === '15000';
     const has10 = normName.includes('10KL') || normName === '10000L' || normName === '10000';
-    const matchCount = [has20, has15, has10].filter(Boolean).length;
+    const matchCount = [has50, has20, has15, has10].filter(Boolean).length;
 
     if (matchCount === 1) {
       if (probe.points.length < 2 && totalSheetsInWorkbook > 1) {
         return null;
       }
+      if (has50) return '50KL';
       if (has20) return '20KL';
       if (has15) return '15KL';
       if (has10) return '10KL';
@@ -241,11 +247,13 @@ export class ExcelCalibrationImportService {
     // 3. Inspect top header rows ONLY if the sheet has a calibration table AND mentions a single capacity
     if (probe.points.length >= 10) {
       const textSample = this.extractSheetTextSample(sheet);
+      const textHas50 = /EXCEL_50KL_REFERENCE|\b50\s*KL\b/i.test(textSample);
       const textHas20 = /EXCEL_20KL_REFERENCE|\b20\s*KL\b/i.test(textSample);
       const textHas15 = /EXCEL_15KL_REFERENCE|\b15\s*KL\b/i.test(textSample);
       const textHas10 = /EXCEL_10KL_REFERENCE|\b10\s*KL\b/i.test(textSample);
-      const textMatches = [textHas20, textHas15, textHas10].filter(Boolean).length;
+      const textMatches = [textHas50, textHas20, textHas15, textHas10].filter(Boolean).length;
       if (textMatches === 1) {
+        if (textHas50) return '50KL';
         if (textHas20) return '20KL';
         if (textHas15) return '15KL';
         if (textHas10) return '10KL';
@@ -279,7 +287,7 @@ export class ExcelCalibrationImportService {
   private static extractChartSheet(
     sheet: XLSX.WorkSheet,
     sheetName: string,
-    chartType: '20KL' | '15KL' | '10KL'
+    chartType: '50KL' | '20KL' | '15KL' | '10KL'
   ): ExtractedChartReport {
     const warnings: string[] = [];
     const errors: string[] = [];
@@ -295,7 +303,16 @@ export class ExcelCalibrationImportService {
     let conflictingAnnotation: string | null = null;
     let requiresDimensionVerification = false;
 
-    if (chartType === '20KL') {
+    if (chartType === '50KL') {
+      templateCode = 'EXCEL_50KL_REFERENCE';
+      templateName = 'Excel Reference 50,000 Litre Tank Calibration Chart';
+      nominalCapacityLitres = 50000;
+      tankDiameterMm = 3000;
+      tankLengthMm = 7500;
+      maxDipMm = 3000;
+      expectedPointCount = 301;
+      expectedMaxVolumeLitres = 50000;
+    } else if (chartType === '20KL') {
       templateCode = 'EXCEL_20KL_REFERENCE';
       templateName = 'Excel Reference 20,000 Litre Tank Calibration Chart';
       nominalCapacityLitres = 20000;
@@ -398,9 +415,9 @@ export class ExcelCalibrationImportService {
     }
 
     // Operational +10% capacity ceiling check:
-    const maxCapacityCeiling = nominalCapacityLitres * 1.1;
+    const maxCapacityCeiling = nominalCapacityLitres * 1.15;
     const requiresEngineeringReview = maxVolumeLitres > maxCapacityCeiling;
-    const eligibleForDraftImport = errors.length === 0;
+    const eligibleForDraftImport = errors.length === 0 && !requiresEngineeringReview;
 
     let status: ExtractedChartReport['status'] = 'ELIGIBLE_DRAFT';
     let reviewStatusLabel = 'DRAFT / PENDING VERIFICATION';
@@ -409,13 +426,13 @@ export class ExcelCalibrationImportService {
       status = 'BLOCKED';
       reviewStatusLabel = 'BLOCKED';
     } else if (requiresEngineeringReview) {
-      status = 'DRAFT_ENGINEERING_REVIEW';
-      reviewStatusLabel = 'DRAFT / ENGINEERING REVIEW REQUIRED';
-      const ceilingMsg = `DRAFT / ENGINEERING REVIEW REQUIRED: Source maximum volume ${maxVolumeLitres.toFixed(
+      status = 'BLOCKED';
+      reviewStatusLabel = 'BLOCKED / ABOVE +15% LIMIT';
+      const ceilingMsg = `UPLOAD BLOCKED: Source maximum volume ${maxVolumeLitres.toFixed(
         2
-      )} L exceeds the nominal-capacity +10% ceiling of ${maxCapacityCeiling.toLocaleString()} L (${maxCapacityCeiling.toFixed(
+      )} L exceeds the maximum permitted +15% reference chart ceiling of ${maxCapacityCeiling.toLocaleString()} L (${maxCapacityCeiling.toFixed(
         2
-      )} L, nominal ${nominalCapacityLitres.toLocaleString()} L). Retained as a DRAFT reference only; cannot be approved, assigned, activated, or used in DSR calculations until verified by an authorised engineer.`;
+      )} L, nominal ${nominalCapacityLitres.toLocaleString()} L). Correct or re-upload this source chart; it cannot be saved as an eligible global chart.`;
       warnings.push(ceilingMsg);
     } else if (requiresDimensionVerification) {
       status = 'DRAFT_DIMENSION_VERIFICATION';
@@ -454,7 +471,7 @@ export class ExcelCalibrationImportService {
    */
   private static parseDipVolumePairs(
     sheet: XLSX.WorkSheet,
-    _chartType: '20KL' | '15KL' | '10KL',
+    _chartType: '50KL' | '20KL' | '15KL' | '10KL',
     expectedMaxDipCm: number
   ): {
     points: Array<{ dipCm: number; volumeLitres: number }>;
