@@ -136,7 +136,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         const resp=await apiFetch<GlobalTankCalibrationTemplate>(
           '/api/v1/calibration-templates/'+encodeURIComponent(id)+'/import',{
             method:'POST',body:JSON.stringify({
-              csvText:csv.normalizedCsv,status:'DRAFT',allowOverCapacity:true,
+              csvText:csv.normalizedCsv,status:'DRAFT',simpleUpload:true,allowOverCapacity:true,
               sourceFileName:file.name,notes:'Uploaded through simplified calibration review. '+csv.warnings.join('; '),
             })
           });
