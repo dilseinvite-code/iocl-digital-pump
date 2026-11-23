@@ -187,6 +187,8 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [editTankSafeFill, setEditTankSafeFill] = useState(19000);
   const [editTankMinOperating, setEditTankMinOperating] = useState(1000);
   const [editTankStatus, setEditTankStatus] = useState<'ACTIVE' | 'INACTIVE' | 'MAINTENANCE' | 'DECOMMISSIONED'>('ACTIVE');
+  const [showRemovedTanks,setShowRemovedTanks]=useState(false);
+  const [changingTankStatusId,setChangingTankStatusId]=useState<string|null>(null);
   const [confirmTankPhysicalCompatibility, setConfirmTankPhysicalCompatibility] = useState(false);
   const [confirmTankOperatingLimits, setConfirmTankOperatingLimits] = useState(false);
 
@@ -651,6 +653,21 @@ export const PumpInfrastructurePage: React.FC = () => {
     } finally {
       setModalSubmitting(false);
     }
+  };
+
+  // Removal is audited decommissioning; live history is preserved.
+  const changeTankStatus=async(tank:Tank,status:'INACTIVE'|'DECOMMISSIONED')=>{
+    if(changingTankStatusId)return;
+    if(status==='DECOMMISSIONED'&&!window.confirm('Remove '+tank.name+' from the normal list? Stock history will be preserved.'))return;
+    setChangingTankStatusId(tank.id);setError(null);
+    try{
+      const res=await apiFetch<Tank>('/api/v1/tanks/'+encodeURIComponent(tank.id)+'/status',{
+        method:'PATCH',body:JSON.stringify({status})});
+      if(!res.success)throw new Error(getPumpInfrastructureErrorMessage(res.error));
+      await loadOutletData();
+      setSuccessMsg(status==='DECOMMISSIONED'?'Tank removed from the normal list. Use Show removed to restore.':tank.name+' is INACTIVE.');
+    }catch(e:any){setError(e.message||'Status update failed.');}
+    finally{setChangingTankStatusId(null);}
   };
 
   const openEditTank = (t: Tank) => {
@@ -1475,7 +1492,7 @@ export const PumpInfrastructurePage: React.FC = () => {
           {id:'storage',label:'1. Fuel & Storage',items:[
             {id:'products',label:'Mapped Products',icon:Fuel},
             {id:'tanks',label:'Underground Tanks',icon:Gauge},
-            ...(canReadTankCalibration?[{id:'globalCalibration' as const,label:'Calibration Charts',icon:Layers,testId:'tab-global-calibration-masters'}]:[])]},
+            ...(canReadTankCalibration?[{id:'globalCalibration' as const,label:'Tank Calibration',icon:Layers,testId:'tab-global-calibration-masters'}]:[])]},
           {id:'dispensing',label:'2. Dispensing & Mapping',items:[
             {id:'dispensers',label:'Dispensers / MPDs',icon:Sliders},
             {id:'nozzles',label:'Nozzles',icon:Flame},
@@ -1564,7 +1581,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F1F5F9] hover:bg-[#E8EEF5] text-orange-800 border border-orange-500/30 rounded-lg text-xs font-mono font-bold transition-colors"
                 >
                   <Layers className="w-3.5 h-3.5 text-[#B8530D]" />
-                  <span>Calibration Charts</span>
+                  <span>Tank Calibration</span>
                 </button>
               )}
               {canWriteTanks && (
@@ -1578,13 +1595,19 @@ export const PumpInfrastructurePage: React.FC = () => {
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-600 text-[#17365D] rounded-lg text-xs font-bold shadow-md shadow-orange-500/20"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add Storage Tank</span>
+                  <span>Add Tank</span>
                 </button>
               )}
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {tanks.some(t=>t.status==='DECOMMISSIONED')&&<div className="md:col-span-2">
+              <button type="button" onClick={()=>setShowRemovedTanks(v=>!v)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-[#17365D]">
+                {showRemovedTanks?'Hide removed tanks':'Show removed tanks ('+tanks.filter(t=>t.status==='DECOMMISSIONED').length+')'}
+              </button>
+            </div>}
             {pendingQuickTanks.map(pending => (
               <div key={pending.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 space-y-3">
                 <div className="flex justify-between items-start gap-3">
@@ -1613,7 +1636,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                 )}
               </div>
             ))}
-            {tanks.map(t => {
+            {tanks.filter(t=>showRemovedTanks||t.status!=='DECOMMISSIONED').map(t => {
               const safeFillPercent = Math.min(100, Math.round((t.safeFillCapacityLitres / t.capacityLitres) * 100));
               const calPoints = tankCalibrationByTankId[t.id] || [];
               const summary = tankChartStatusByTankId[t.id];
@@ -1695,7 +1718,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                           className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-[#F1F5F9]/80 hover:bg-[#E8EEF5]/80 text-[#B8530D] hover:text-orange-800 border border-[#D7E0EA]/80 rounded-xl text-xs font-semibold transition-colors"
                         >
                           <Layers className="w-3.5 h-3.5" />
-                          <span>Calibration Chart</span>
+                          <span>Linked Chart</span>
                         </button>
                       )}
                       {canWriteTanks && (
@@ -1710,6 +1733,21 @@ export const PumpInfrastructurePage: React.FC = () => {
                       )}
                     </div>
                   )}
+                  {canWriteTanks&&<div className="flex flex-wrap gap-2 border-t border-slate-200 pt-3">
+                    {t.status==='ACTIVE'&&<button type="button" disabled={!!changingTankStatusId}
+                      onClick={()=>{void changeTankStatus(t,'INACTIVE');}}
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">Deactivate</button>}
+                    {t.status==='INACTIVE'&&<button type="button" disabled={!!changingTankStatusId}
+                      onClick={()=>{openEditTank(t);setEditTankStatus('ACTIVE');}}
+                      className="rounded-lg bg-[#17365D] px-3 py-1.5 text-xs font-semibold text-white">Activate</button>}
+                    {t.status==='DECOMMISSIONED'&&<button type="button" disabled={!!changingTankStatusId}
+                      onClick={()=>{void changeTankStatus(t,'INACTIVE');}}
+                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-[#17365D]">Restore</button>}
+                    {t.status==='INACTIVE'&&<button type="button" disabled={!!changingTankStatusId}
+                      onClick={()=>{void changeTankStatus(t,'DECOMMISSIONED');}}
+                      title="Remove from normal list, preserving history"
+                      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50">Remove</button>}
+                  </div>}
                 </div>
               );
             })}
@@ -3283,14 +3321,11 @@ export const PumpInfrastructurePage: React.FC = () => {
                     }} className="rounded-lg bg-[#17365D] px-4 py-2 text-xs font-bold text-white">
                       Manage global calibration once
                     </button>
-                    <button type="button" onClick={() => setCalShowAdvanced(true)}
-                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs text-slate-700">
-                      Show advanced technical details
-                    </button>
+                    <p className="text-xs text-slate-600">Manage chart readings in Tank Calibration.</p>
                   </div>
                 </section>
               )}
-              {(!calSelectedChart?.sourceTemplateId || calShowAdvanced) && (<>
+              {!calSelectedChart?.sourceTemplateId && (<>
               {/* Revision Selector & Lifecycle Controls */}
               {calCharts.length > 0 && (
                 <div className="p-3.5 bg-slate-950/60 border border-[#E2E8F0] rounded-xl space-y-3">
