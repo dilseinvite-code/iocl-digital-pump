@@ -36,3 +36,4 @@ jobs:
           bun run build
       - name: Deploy Cloudflare Worker with production D1 safeguards
         run: bun scripts/release/activate-readonly-excel-pdf.mjs
+# Production release trigger (2026-11-23): PR #102 global tank types 10/15/20/50 KL and +15% calibration chart ceiling.
