@@ -419,12 +419,12 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
              They are alternatives, not the same approved document.
            </div>}
            {scannedReview&&!scannedReview.passed&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900" data-testid="scanned-reference-checkpoint-warning">
-             The saved Excel readings differ at sampled points from the scanned PDF. Selecting them as a reference will use the stored values.
+             The stored Excel numbers differ from the supplied PDF at the points listed below. Those differences must be resolved before replacing an operational chart; the software has not changed any readings.
              <details className="mt-1"><summary className="cursor-pointer font-semibold">See differences</summary>
                <p className="mt-2">{scannedReview.issues.slice(0,4).join(' ')}</p></details>
            </div>}
            {scannedReview?.passed&&<span className="text-xs text-green-800">
-             Sample scan checkpoints match. All printed rows still require confirmation for operational use.
+             Sample PDF checkpoints match. This is not a full row-by-row transcription of the scanned document.
            </span>}
            {!canSetAsDefault&&!defaultHasWarning&&<span className="text-xs text-amber-800">
              Save numerical dip-to-volume readings first.

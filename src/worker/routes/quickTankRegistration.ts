@@ -199,7 +199,7 @@ quickTankRegistrationRoutes.post(
       }),
     ]);
     return c.json({ success: true, data: { ...row, templateName: selected.template.name,
-      message: 'Registered with global calibration as a non-operational draft. Map the fuel grade separately to create an operational tank.' }, error: null }, 201);
+      message: 'Tank setup saved with linked numerical calibration. Select a fuel grade to complete setup; the tank remains inactive until activated.' }, error: null }, 201);
   }
 );
 

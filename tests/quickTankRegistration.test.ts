@@ -5,6 +5,7 @@ import { createLocalD1Database } from '../src/db/localD1';
 import { getDb } from '../src/db';
 import * as schema from '../src/db/schema';
 import { seedDatabase } from '../src/db/seed';
+import {ExcelCalibrationImportService} from '../src/worker/services/excelCalibrationImportService';
 import { and, eq } from 'drizzle-orm';
 
 describe('Two-input global-calibration tank registration', () => {
@@ -345,4 +346,56 @@ describe('Two-input global-calibration tank registration', () => {
       .where(eq(schema.auditLogs.action,'GLOBAL_TANK_DEFAULT_SET'));
     expect(audit.some(x=>x.newValueJson?.includes('"acknowledgedWarnings":true'))).toBe(true);
   });
+  it('uses the supplied 20KL numerical chart for Tank #2-style setup without another chart approval',async()=>{
+    const bytes=fs.readFileSync('tests/fixtures/20KL_15KL_10KL_calibration_Dip_chart.xlsx');
+    const workbook=await ExcelCalibrationImportService.extractWorkbook(bytes,'20KL_15KL_10KL_calibration_Dip_chart.xlsx');
+    const source=workbook.charts.find(c=>c.templateCode==='EXCEL_20KL_REFERENCE');
+    expect(source?.actualPointCount).toBe(211);
+    expect(source?.maxVolumeLitres).toBe(21628.93);
+    if(!source)throw new Error('20KL workbook fixture missing');
+    const db=getDb(localD1),now=new Date().toISOString(),templateId='gtct-e2e-supplied-20';
+    await db.insert(schema.globalTankCalibrationTemplates).values({
+      id:templateId,code:source.templateCode,name:'Operator 20 KL reference',
+      nominalCapacityLitres:20000,revisionNumber:1,status:'DRAFT',
+      tankDiameterMmMilliunits:Math.round(source.tankDiameterMm*1000),
+      tankLengthMmMilliunits:Math.round(source.tankLengthMm*1000),
+      maxDipMmMilliunits:Math.round(source.maxDipMm*1000),
+      createdBy:'user-admin',createdAt:now,updatedAt:now,
+    });
+    const original=source.points.map((p,i)=>({
+      id:'operator-20-point-'+i,templateId,
+      dipMillimetresMilliunits:Math.round(p.dipMm*1000),
+      volumeMilliunits:Math.round(p.volumeLitres*1000),
+      createdAt:now,createdBy:'user-admin',
+    }));
+    for(let i=0;i<original.length;i+=12){
+      await db.insert(schema.globalTankCalibrationTemplatePoints).values(original.slice(i,i+12));
+    }
+    const registered=await request('POST','/outlets/ro-1001/tanks/quick-register',{
+      name:'Supplied 20KL Tank',capacityLitres:20000,
+    });
+    expect(registered.status).toBe(201);
+    const pending=(await registered.json() as any).data;
+    expect(pending.templateId).toBe(templateId);
+    const final=await request('POST','/outlets/ro-1001/pending-tanks/'+pending.id+'/finalize',{productId:'prod-ms'});
+    expect(final.status).toBe(201);
+    const result=(await final.json() as any).data;
+    expect(result.calibrationStatus).toBe('ACTIVE');
+    expect(result.status).toBe('INACTIVE');
+    expect(result.pointsCount).toBe(211);
+    const [chart]=await db.select().from(schema.tankCalibrationCharts).where(eq(schema.tankCalibrationCharts.tankId,result.id));
+    const copied=await db.select().from(schema.tankCalibrationPoints).where(eq(schema.tankCalibrationPoints.chartId,chart.id));
+    const asPairs=(rows:ReadonlyArray<{dipMillimetresMilliunits:number;volumeMilliunits:number}>)=>
+      rows.map(p=>[p.dipMillimetresMilliunits,p.volumeMilliunits]).sort((a,b)=>a[0]-b[0]);
+    expect(asPairs(copied)).toEqual(asPairs(original));
+    const activated=await request('PUT','/tanks/'+result.id,{
+      name:'Supplied 20KL Tank',productId:'prod-ms',capacityLitres:20000,
+      safeFillCapacityLitres:18000,minimumOperatingLevelLitres:0,status:'ACTIVE',
+      confirmPhysicalCompatibility:true,confirmOperationalLimits:true,
+    });
+    expect(activated.status).toBe(200);
+    const [tank]=await db.select().from(schema.tanks).where(eq(schema.tanks.id,result.id));
+    expect(tank.status).toBe('ACTIVE');
+  });
+
 });
