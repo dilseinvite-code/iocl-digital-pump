@@ -443,6 +443,34 @@ export const globalTankCalibrationTemplatePoints = sqliteTable('global_tank_cali
   index('idx_gtctp_template_id').on(table.templateId),
 ]);
 
+// Capacity templates are global references; mappings are selected once per capacity.
+export const globalTankCapacityDefaults = sqliteTable('global_tank_capacity_defaults', {
+  capacityLitres: integer('capacity_litres').primaryKey(),
+  templateId: text('template_id').notNull().references(() => globalTankCalibrationTemplates.id),
+  updatedAt: text('updated_at').notNull(),
+  updatedBy: text('updated_by').notNull().references(() => users.id),
+}, t => [
+  index('idx_global_tank_capacity_defaults_template').on(t.templateId),
+]);
+
+// A two-field registration is not an operational tank until a real fuel grade is mapped.
+// This protects the non-null product FK and existing daily-stock calculations.
+export const pendingUndergroundTanks = sqliteTable('pending_underground_tanks', {
+  id: text('id').primaryKey(),
+  outletId: text('outlet_id').notNull().references(() => retailOutlets.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  capacityLitres: integer('capacity_litres').notNull(),
+  templateId: text('template_id').notNull().references(() => globalTankCalibrationTemplates.id),
+  status: text('status', { enum: ['PENDING_FUEL', 'FINALIZED'] }).notNull().default('PENDING_FUEL'),
+  finalizedTankId: text('finalized_tank_id').references(() => tanks.id),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  createdBy: text('created_by').notNull().references(() => users.id),
+}, t => [
+  index('idx_pending_underground_tanks_outlet_status').on(t.outletId, t.status),
+  index('idx_pending_underground_tanks_template').on(t.templateId),
+]);
+
 export const tankCalibrationCharts = sqliteTable('tank_calibration_charts', {
   id: text('id').primaryKey(),
   tankId: text('tank_id').notNull().references(() => tanks.id, { onDelete: 'cascade' }),
