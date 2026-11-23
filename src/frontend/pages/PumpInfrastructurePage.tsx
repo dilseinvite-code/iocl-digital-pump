@@ -70,10 +70,15 @@ import {
 } from '../components/pump/pumpInfrastructureUi';
 import { PERMISSIONS } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
-import { GLOBAL_TANK_CAPACITIES_LITRES, exceedsGlobalCalibrationLimit } from '../../shared/globalTankTypes';
+import { GLOBAL_TANK_CAPACITIES_LITRES } from '../../shared/globalTankTypes';
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
+
+type PendingQuickTank = {
+  id: string; outletId: string; name: string; capacityLitres: number;
+  templateId: string; status: 'PENDING_FUEL'; createdAt: string;
+};
 
 export const PumpInfrastructurePage: React.FC = () => {
   const { userCtx, hasPermission } = useAuth();
@@ -98,6 +103,9 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [outletProducts, setOutletProducts] = useState<OutletProduct[]>([]);
   const [tanks, setTanks] = useState<Tank[]>([]);
+  const [pendingQuickTanks, setPendingQuickTanks] = useState<PendingQuickTank[]>([]);
+  const [pendingFuelSelection, setPendingFuelSelection] = useState<Record<string,string>>({});
+  const [finalizingPendingId, setFinalizingPendingId] = useState<string|null>(null);
   const [dispensers, setDispensers] = useState<Dispenser[]>([]);
   const [nozzles, setNozzles] = useState<Nozzle[]>([]);
   const [nozzleDiagnostics, setNozzleDiagnostics] = useState<OutletNozzleDiagnosticsReport | null>(null);
@@ -164,8 +172,6 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [tankCapacity, setTankCapacity] = useState(20000);
   const [tankSafeFill, setTankSafeFill] = useState(19000);
   const [tankMinOperating, setTankMinOperating] = useState(1000);
-  const [globalTankTemplates,setGlobalTankTemplates] = useState<GlobalTankCalibrationTemplate[]>([]);
-  const [newTankTemplateId,setNewTankTemplateId] = useState('');
 
   // Edit Tank states
   const [editingTank, setEditingTank] = useState<Tank | null>(null);
@@ -228,6 +234,7 @@ export const PumpInfrastructurePage: React.FC = () => {
     if (!selectedOutletId) {
       setOutletProducts([]);
       setTanks([]);
+      setPendingQuickTanks([]);
       setTankCalibrationByTankId({});
       setDispensers([]);
       setNozzles([]);
@@ -241,19 +248,21 @@ export const PumpInfrastructurePage: React.FC = () => {
     // Clear stale data prior to fetching
     setOutletProducts([]);
     setTanks([]);
+    setPendingQuickTanks([]);
     setTankCalibrationByTankId({});
     setDispensers([]);
     setNozzles([]);
     setNozzleDiagnostics(null);
     setShiftTemplates([]);
 
-    const [pRes, tRes, dRes, nRes, diagRes, sRes] = await Promise.all([
+    const [pRes, tRes, dRes, nRes, diagRes, sRes, pendingRes] = await Promise.all([
       apiFetch<OutletProduct[]>(`/api/v1/outlets/${selectedOutletId}/products`),
       apiFetch<Tank[]>(`/api/v1/outlets/${selectedOutletId}/tanks`),
       apiFetch<Dispenser[]>(`/api/v1/outlets/${selectedOutletId}/dispensers`),
       apiFetch<Nozzle[]>(`/api/v1/outlets/${selectedOutletId}/nozzles`),
       apiFetch<OutletNozzleDiagnosticsReport>(`/api/v1/outlets/${selectedOutletId}/nozzles/diagnostics`),
       apiFetch<ShiftTemplate[]>('/api/v1/shift-templates'),
+      apiFetch<PendingQuickTank[]>(`/api/v1/outlets/${selectedOutletId}/pending-tanks`),
     ]);
 
     const failures: string[] = [];
@@ -283,6 +292,7 @@ export const PumpInfrastructurePage: React.FC = () => {
     if (nRes.success && nRes.data) setNozzles(nRes.data); else failures.push('nozzles');
     if (diagRes.success && diagRes.data) setNozzleDiagnostics(diagRes.data);
     if (sRes.success && sRes.data) setShiftTemplates(sRes.data); else failures.push('shift templates');
+    if (pendingRes.success && pendingRes.data) setPendingQuickTanks(pendingRes.data); else failures.push('pending tank registrations');
 
     if (failures.length > 0) {
       setError(`Failed to load ${failures.join(', ')} for the selected outlet.`);
@@ -334,44 +344,47 @@ export const PumpInfrastructurePage: React.FC = () => {
   const handleAddTank = async (e: React.FormEvent) => {
     e.preventDefault();
     if (modalSubmitting) return;
-    setModalSubmitting(true);
     setModalError(null);
-
+    if (!tankName.trim()) { setModalError('Enter a tank name.'); return; }
+    setModalSubmitting(true);
     try {
-      const selectedTemplate=globalTankTemplates.find(t=>t.id===newTankTemplateId);
-      if(selectedTemplate && selectedTemplate.nominalCapacityLitres!==tankCapacity){setModalError('Select a tank chart matching the chosen tank capacity.');setModalSubmitting(false);return;}
-      const res = await apiFetch<{id:string}>(`/api/v1/outlets/${selectedOutletId}/tanks`, {
+      const res = await apiFetch<PendingQuickTank>(`/api/v1/outlets/${selectedOutletId}/tanks/quick-register`, {
         method: 'POST',
-        body: JSON.stringify({
-          tankNumber: Number(tankNumber),
-          name: tankName,
-          productId: selectedProductId,
-          capacityLitres: Number(tankCapacity),
-          safeFillCapacityLitres: Number(tankSafeFill),
-          minimumOperatingLevelLitres: Number(tankMinOperating),
-          status: 'ACTIVE',
-        }),
+        body: JSON.stringify({ name: tankName.trim(), capacityLitres: tankCapacity }),
       });
-
-      if (res.success) {
-        let calibrationMessage='Underground tank created';
-        if(newTankTemplateId && res.data?.id){
-          try {
-            const linked=await apiFetch<{assignments:Array<{status:string}>}>(`/api/v1/calibration-templates/${encodeURIComponent(newTankTemplateId)}/assign`,{
-              method:'POST',body:JSON.stringify({tankIds:[res.data.id],draftOnlyFromAddTank:true})
-            });
-            calibrationMessage=linked.success ? 'Underground tank created with global calibration draft' : `Tank created, but calibration not attached: ${linked.error?.message||'Check the saved chart'}`;
-          } catch (err:any) {calibrationMessage='Tank created. Calibration draft not attached: '+(err.message||'Please retry from calibration charts');}
-        }
-        setModalType(null);
-        setSuccessMsg(calibrationMessage);
-        setTimeout(() => setSuccessMsg(null), 3000);
-        loadOutletData();
-      } else {
+      if (!res.success) {
         setModalError(getPumpInfrastructureErrorMessage(res.error));
+        return;
       }
+      setModalType(null);
+      setSuccessMsg(`${tankName.trim()} registered with its ${tankCapacity/1000} KL global chart. Fuel grade can be mapped separately; no live readings changed.`);
+      setTimeout(() => setSuccessMsg(null), 7000);
+      await loadOutletData();
+    } catch (e: any) {
+      setModalError(e?.message || 'Could not register the tank.');
     } finally {
       setModalSubmitting(false);
+    }
+  };
+
+  const finalizeQuickTank = async (pending: PendingQuickTank) => {
+    const productId = pendingFuelSelection[pending.id];
+    if (!productId) { setError('Select the correct fuel grade before mapping this tank.'); return; }
+    if (finalizingPendingId) return;
+    setError(null);
+    setFinalizingPendingId(pending.id);
+    try {
+      const res = await apiFetch<{id:string; tankNumber:number}>(`/api/v1/outlets/${selectedOutletId}/pending-tanks/${encodeURIComponent(pending.id)}/finalize`, {
+        method: 'POST', body: JSON.stringify({ productId }),
+      });
+      if (!res.success) { setError(getPumpInfrastructureErrorMessage(res.error)); return; }
+      setSuccessMsg(`Tank #${res.data?.tankNumber} created with global calibration as DRAFT. Tank remains INACTIVE until operating limits and physical compatibility are reviewed.`);
+      setTimeout(() => setSuccessMsg(null), 9000);
+      await loadOutletData();
+    } catch (e: any) {
+      setError(e?.message || 'Fuel mapping failed. No live stock data changed.');
+    } finally {
+      setFinalizingPendingId(null);
     }
   };
 
@@ -1456,16 +1469,8 @@ export const PumpInfrastructurePage: React.FC = () => {
               {canWriteTanks && (
                 <button
                   onClick={() => {
-                    setTankNumber(tanks.length + 1);
-                    setTankName(`Tank ${tanks.length + 1}`);
-                    setSelectedProductId(outletProducts[0]?.productId || '');
+                    setTankName(`Tank ${tanks.length + pendingQuickTanks.length + 1}`);
                     setTankCapacity(20000);
-                    setTankSafeFill(19000);
-                    setNewTankTemplateId('');
-                    apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates').then(result=>{
-                      setGlobalTankTemplates(result.success && result.data ? result.data : []);
-                    }).catch(()=>setGlobalTankTemplates([]));
-                    setTankMinOperating(1000);
                     setModalError(null);
                     setModalType('addTank');
                   }}
@@ -1479,6 +1484,34 @@ export const PumpInfrastructurePage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {pendingQuickTanks.map(pending => (
+              <div key={pending.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 space-y-3">
+                <div className="flex justify-between items-start gap-3">
+                  <div>
+                    <h3 className="font-bold text-[#17365D]">{pending.name}</h3>
+                    <p className="text-xs text-slate-600">{pending.capacityLitres/1000} KL · Global chart linked automatically</p>
+                  </div>
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-900">Pending fuel mapping</span>
+                </div>
+                <p className="text-xs text-slate-600">Saved calibration is registered as a reference. This is not an ACTIVE tank and cannot affect stock calculations.</p>
+                {canWriteTanks && canWriteTankCalibration && (
+                  <div className="flex flex-wrap gap-2">
+                    <select aria-label={`Fuel grade for ${pending.name}`} value={pendingFuelSelection[pending.id] || ''}
+                      onChange={e=>setPendingFuelSelection(v=>({...v,[pending.id]:e.target.value}))}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white p-2 text-xs text-[#17365D]">
+                      <option value="">Select fuel grade for later mapping</option>
+                      {outletProducts.filter(op=>op.status==='ACTIVE' && op.product?.unit==='LITRE').map(op=>
+                        <option key={op.productId} value={op.productId}>{op.product?.code || op.productId}</option>)}
+                    </select>
+                    <button type="button" disabled={finalizingPendingId===pending.id || !pendingFuelSelection[pending.id]}
+                      onClick={()=>{void finalizeQuickTank(pending);}}
+                      className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">
+                      {finalizingPendingId===pending.id?'Mapping...':'Map Fuel & Create Tank'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
             {tanks.map(t => {
               const safeFillPercent = Math.min(100, Math.round((t.safeFillCapacityLitres / t.capacityLitres) * 100));
               const calPoints = tankCalibrationByTankId[t.id] || [];
@@ -2093,93 +2126,31 @@ export const PumpInfrastructurePage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => setModalType(null)} />
           <div className="iocl-scroll-panel relative z-10 w-full max-w-md bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-[#17365D] mb-2">Register Underground Storage Tank</h2>
+            <h2 className="text-lg font-bold text-[#17365D] mb-2">Add Underground Tank</h2>
             {modalError && <div className="p-3 mb-3 bg-rose-500/10 text-rose-700 text-xs rounded-xl">{modalError}</div>}
-            <form onSubmit={handleAddTank} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-[#475569] mb-1">Tank Number</label>
-                  <input
-                    type="number"
-                    value={tankNumber}
-                    onChange={(e) => setTankNumber(Number(e.target.value))}
-                    className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-2 text-xs text-[#17365D]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-[#475569] mb-1">Fuel Grade</label>
-                  <select
-                    value={selectedProductId}
-                    onChange={(e) => setSelectedProductId(e.target.value)}
-                    className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-2 text-xs text-[#17365D]"
-                  >
-                    {outletProducts.map(op => (
-                      <option key={op.productId} value={op.productId}>
-                        {op.product?.code}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            <p className="mb-4 text-xs text-slate-600">Upload and choose the default calibration once in Calibration Charts. Here, enter only the tank name and capacity.</p>
+            <form onSubmit={handleAddTank} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#475569] mb-1">Tank Name</label>
+                <input type="text" value={tankName} onChange={e=>setTankName(e.target.value)}
+                  required maxLength={100} placeholder="e.g. Tank 5"
+                  className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-3 text-sm text-[#17365D]"/>
               </div>
               <div>
-                <label className="block text-xs text-[#475569] mb-1">Tank Name</label>
-                <input
-                  type="text"
-                  value={tankName}
-                  onChange={(e) => setTankName(e.target.value)}
-                  className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-2 text-xs text-[#17365D]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-[#475569] mb-1">Global Tank Type</label>
-                <select value={tankCapacity} onChange={e=>{const capacity=Number(e.target.value);setTankCapacity(capacity);setTankSafeFill(Math.round(capacity*.95));setNewTankTemplateId('');}}
-                  className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-2 text-sm text-[#17365D]">
-                  {GLOBAL_TANK_CAPACITIES_LITRES.map(cap=><option key={cap} value={cap}>{cap/1000} KL — {cap.toLocaleString('en-IN')} litres</option>)}
+                <label className="block text-xs font-semibold text-[#475569] mb-1">Tank Capacity</label>
+                <select value={tankCapacity} onChange={e=>setTankCapacity(Number(e.target.value))}
+                  className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-3 text-sm text-[#17365D]">
+                  {GLOBAL_TANK_CAPACITIES_LITRES.map(cap=>
+                    <option key={cap} value={cap}>{cap/1000} KL</option>)}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs text-[#475569] mb-1">Saved Calibration Chart</label>
-                <select value={newTankTemplateId} onChange={e=>setNewTankTemplateId(e.target.value)}
-                  className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-2 text-sm text-[#17365D]">
-                  <option value="">No chart — add later</option>
-                  {globalTankTemplates.filter(t=>t.nominalCapacityLitres===tankCapacity && (t.pointsCount||0)>=2 && !exceedsGlobalCalibrationLimit(t.maxVolumeLitres||0,tankCapacity)).map(t=>
-                    <option key={t.id} value={t.id}>{t.name} · {t.status}</option>)}
-                </select>
-                <p className="mt-1 text-[11px] text-slate-500">Selected chart is attached as DRAFT. Active stock and safe-fill settings are not changed.</p>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-[10px] text-[#64748B] mb-1">Total Cap (L)</label>
-                  <input
-                    type="number"
-                    value={tankCapacity}
-                    readOnly
-                    className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-2 py-1.5 text-xs text-[#17365D]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-[#64748B] mb-1">Safe Fill (L)</label>
-                  <input
-                    type="number"
-                    value={tankSafeFill}
-                    onChange={(e) => setTankSafeFill(Number(e.target.value))}
-                    className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-2 py-1.5 text-xs text-[#17365D]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-[#64748B] mb-1">Min Level (L)</label>
-                  <input
-                    type="number"
-                    value={tankMinOperating}
-                    onChange={(e) => setTankMinOperating(Number(e.target.value))}
-                    className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-2 py-1.5 text-xs text-[#17365D]"
-                  />
-                </div>
-              </div>
+              <p className="rounded-lg bg-[#F1F5F9] p-3 text-xs text-slate-600">
+                The saved default chart will be linked automatically. Fuel grade and operating limits are handled later; no active tank or stock reading will be changed now.
+              </p>
               <div className="flex justify-end gap-2 pt-3">
                 <button type="button" onClick={() => setModalType(null)} className="px-4 py-2 bg-[#F1F5F9] rounded-xl text-xs text-[#475569]">Cancel</button>
                 <button type="submit" disabled={modalSubmitting} className="px-4 py-2 bg-orange-500 text-white rounded-xl text-xs font-bold">
-                  {modalSubmitting ? 'Creating...' : 'Create Tank'}
+                  {modalSubmitting ? 'Saving...' : 'Add Tank'}
                 </button>
               </div>
             </form>

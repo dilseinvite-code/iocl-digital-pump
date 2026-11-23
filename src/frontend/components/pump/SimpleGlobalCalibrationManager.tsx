@@ -27,6 +27,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   selectedOutletName,canWriteTankCalibration,
 })=>{
   const [templates,setTemplates]=useState<GlobalTankCalibrationTemplate[]>([]);
+  const [defaultCharts,setDefaultCharts]=useState<Record<number,string>>({});
+  const [settingDefault,setSettingDefault]=useState(false);
   const [detail,setDetail]=useState<GlobalTankCalibrationTemplate|null>(null);
   const [selectedCode,setSelectedCode]=useState('');
   const [file,setFile]=useState<File|null>(null);
@@ -48,9 +50,28 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     setTemplates(result.data);
     setSelectedCode(current=>current || result.data?.find(t=>t.code==='EXCEL_10KL_REFERENCE')?.code || result.data?.[0]?.code || '');
   };
-  useEffect(()=>{loadTemplates().catch(e=>setError(e.message));},[]);
+  const loadDefaults=async()=>{
+    const r=await apiFetch<Array<{capacityLitres:number;templateId:string}>>('/api/v1/global-tank-defaults');
+    if(r.success&&r.data)setDefaultCharts(Object.fromEntries(r.data.map(d=>[d.capacityLitres,d.templateId])));
+  };
+  useEffect(()=>{loadTemplates().catch(e=>setError(e.message));void loadDefaults();},[]);
 
   const chosen=templates.find(t=>t.code===selectedCode);
+  const canSetAsDefault=Boolean(chosen && (chosen.pointsCount||0)>=2 &&
+    !exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres));
+  const setDefault=async()=>{
+    if(!chosen||!canSetAsDefault||settingDefault)return;
+    setSettingDefault(true);setError('');setNotice('');
+    try{
+      const r=await apiFetch<{capacityLitres:number;templateId:string}>(
+        '/api/v1/global-tank-defaults/'+chosen.nominalCapacityLitres,
+        {method:'PUT',body:JSON.stringify({templateId:chosen.id})});
+      if(!r.success)throw new Error(r.error?.message||'Could not save default calibration');
+      await loadDefaults();
+      setNotice(chosen.nominalCapacityLitres/1000+' KL default saved. New tanks of this capacity will select this calibration automatically.');
+    }catch(e:any){setError(e.message||'Default selection failed');}
+    finally{setSettingDefault(false);}
+  };
   useEffect(()=>{
     if(!chosen?.id){setDetail(null);return;}
     let cancelled=false;
@@ -259,7 +280,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
 
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="simple-saved-calibrations">
       <h3 className="font-bold text-[#17365D]">Saved calibration charts</h3>
-      <p className="mt-1 text-xs text-slate-500">Choose a chart to see its readings. Validated global charts can be selected when registering a tank. An uploaded draft is not an active tank chart.</p>
+      <p className="mt-1 text-xs text-slate-500">Save the chart for each capacity once. If multiple saved charts share a capacity, choose one as its default below. Add Underground Tank will then ask for only name and capacity.</p>
       <div className="mt-3 flex flex-wrap gap-2">{templates.map(t=><button key={t.id} type="button" onClick={()=>{setSelectedCode(t.code);setShowReadings(false);}}
         className={'rounded-lg border px-3 py-2 text-sm '+(t.code===selectedCode?'border-orange-500 bg-orange-50 text-[#17365D] font-bold':'border-slate-200 text-slate-600')}>
         {Math.round(t.nominalCapacityLitres/1000)} KL · {t.name} ({t.pointsCount} pts)
@@ -269,6 +290,15 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
           <p className="text-sm text-slate-600">{chosen.pointsCount} points · {chosen.status} · Max {fmt(chosen.maxVolumeLitres||0)} L</p></div>
           <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-[#17365D]" onClick={()=>setShowReadings(v=>!v)}>
             {showReadings?'Hide readings':'View readings'}</button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {defaultCharts[chosen.nominalCapacityLitres]===chosen.id
+            ? <span className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-800">Default for {chosen.nominalCapacityLitres/1000} KL — automatic selection enabled</span>
+            : canWriteTankCalibration && <button type="button" disabled={!canSetAsDefault||settingDefault}
+                onClick={()=>{void setDefault();}} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">
+                {settingDefault?'Saving...':'Set as default for '+chosen.nominalCapacityLitres/1000+' KL'}
+              </button>}
+          {!canSetAsDefault&&<span className="text-xs text-amber-800">Save valid readings within the +15% limit first.</span>}
         </div>
         {capped10&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
           10 KL operating reference is limited to 11,000 L (cutoff dip {fmt(capped10.operationalMaximumDipMm)} mm). The complete original source is preserved.
