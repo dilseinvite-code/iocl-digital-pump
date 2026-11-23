@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { compareSuppliedTenKlChart } from '../../utils/suppliedTenKlCalibrationChart';
+import {TEN_KL_TEMPLATE_CODE,limitTenKlCalibrationCurve} from '../../../shared/tenKlCalibrationLimit';
 import {
   getGlobalTemplateStatusBadge,
   formatGlobalTemplateDimensions,
@@ -1058,6 +1059,26 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
   };
 
   const templatePoints = activeTemplate?.points || [];
+  const tenKlOperatingCurve = React.useMemo(() => {
+    if(activeTemplate?.code !== TEN_KL_TEMPLATE_CODE || !activeTemplate.points?.length) {
+      return {curve:null as ReturnType<typeof limitTenKlCalibrationCurve>|null,error:''};
+    }
+    try {
+      return {curve:limitTenKlCalibrationCurve(activeTemplate.points),error:''};
+    } catch (e) {
+      return {curve:null,error:e instanceof Error?e.message:'Invalid 10 KL curve'};
+    }
+  }, [activeTemplate?.code,activeTemplate?.points]);
+
+  // Derived display only: the underlying original 195 source points remain
+  // available in the signed chart/source record for audit and comparison.
+  const operationalTablePoints = tenKlOperatingCurve.curve
+    ? tenKlOperatingCurve.curve.points.map((p,i)=>({
+        id:'tenkl-limit-'+i,
+        dipMmStr:(p.dipMillimetresMilliunits/1000).toFixed(3),
+        volumeLitreStr:(p.volumeMilliunits/1000).toFixed(3),
+      }))
+    : activeTemplate?.code===TEN_KL_TEMPLATE_CODE?[]:templatePoints;
   const suppliedTenKlComparison = activeTemplate?.code === 'EXCEL_10KL_REFERENCE'
     ? compareSuppliedTenKlChart(activeTemplate)
     : null;
@@ -3254,29 +3275,38 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
             </form>
           )}
 
-          {/* Stored Template Points Preview Table + Live Linear Interpolation Calculator */}
+          {/* The original approved-scan readings are retained separately. This table
+              presents the restricted operating range and blocks interpolation above 11 KL. */}
           <div className="space-y-3">
+            {activeTemplate.code === TEN_KL_TEMPLATE_CODE && (
+              <div className="rounded-xl border border-cyan-500/40 bg-cyan-950/40 px-4 py-3 text-xs text-cyan-100" data-testid="tenkl-11000l-operational-cap">
+                <strong>10 KL calibration — limit 11,000 L (11 KL).</strong>{' '}
+                {tenKlOperatingCurve.curve
+                  ? `Operational range ends at ${tenKlOperatingCurve.curve.operationalMaximumDipMm.toFixed(3)} mm / 11,000.000 L; ${tenKlOperatingCurve.curve.excludedSourcePoints} higher source readings are excluded from interpolation and this table. Original ${tenKlOperatingCurve.curve.sourcePointsCount} readings, including the ${tenKlOperatingCurve.curve.sourceMaximumLitres.toFixed(2)} L maximum, remain untouched for audit.`
+                  : `Unable to derive safe 11 KL range: ${tenKlOperatingCurve.error || 'source chart not loaded'}`}
+                <div className="mt-1 text-amber-200">
+                  This is an operational range restriction, not engineering verification,
+                  authorization to fill beyond safe-fill, or tank-specific chart activation.
+                </div>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 font-mono">
-                Stored Dip-to-Volume Calibration Table ({templatePoints.length} points)
+                {activeTemplate.code === TEN_KL_TEMPLATE_CODE
+                  ? '10 KL Operational Dip-to-Volume Table (maximum 11,000 L)'
+                  : 'Stored Dip-to-Volume Calibration Table'} ({operationalTablePoints.length} points)
               </h3>
-              {templatePoints.length > 0 && (
+              {operationalTablePoints.length > 0 && (
                 <span className="text-[11px] font-mono text-slate-400">
-                  Range: {formatCalibrationDisplay(templatePoints[0].dipMmStr)} mm (
-                  {formatCalibrationDisplay(templatePoints[0].volumeLitreStr)} L) →{' '}
-                  {formatCalibrationDisplay(
-                    templatePoints[templatePoints.length - 1].dipMmStr
-                  )}{' '}
-                  mm (
-                  {formatCalibrationDisplay(
-                    templatePoints[templatePoints.length - 1].volumeLitreStr
-                  )}{' '}
-                  L)
+                  Range: {formatCalibrationDisplay(operationalTablePoints[0].dipMmStr)} mm (
+                  {formatCalibrationDisplay(operationalTablePoints[0].volumeLitreStr)} L) →{' '}
+                  {formatCalibrationDisplay(operationalTablePoints[operationalTablePoints.length - 1].dipMmStr)} mm (
+                  {formatCalibrationDisplay(operationalTablePoints[operationalTablePoints.length - 1].volumeLitreStr)} L)
                 </span>
               )}
             </div>
 
-            {templatePoints.length >= 2 && (
+            {operationalTablePoints.length >= 2 && (
               <form
                 onSubmit={handleInterpolateTemplate}
                 className="p-3 bg-slate-950/90 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs font-mono"
@@ -3346,7 +3376,7 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
                         Loading calibration points...
                       </td>
                     </tr>
-                  ) : templatePoints.length === 0 ? (
+                  ) : operationalTablePoints.length === 0 ? (
                     <tr>
                       <td colSpan={3} className="py-6 text-center text-slate-500">
                         No dip-to-volume points imported yet for {activeTemplate.code}. Click{' '}
@@ -3355,7 +3385,7 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
                       </td>
                     </tr>
                   ) : (
-                    templatePoints.map((pt, idx) => (
+                    operationalTablePoints.map((pt, idx) => (
                       <tr key={pt.id} className="hover:bg-slate-800/40">
                         <td className="py-1.5 px-4 text-slate-500">{idx + 1}</td>
                         <td className="py-1.5 px-4 font-bold text-orange-400">
