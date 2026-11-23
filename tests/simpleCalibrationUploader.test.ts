@@ -48,6 +48,6 @@ describe('Simple calibration upload – no engineering forms in main flow',()=>{
    expect(simple).toContain('simple-calibration-file-input');
    expect(simple).toContain('simple-save-calibration');
    expect(route).toContain('TEMPLATE_PROTECTED');
-   expect(route).toContain("allowEngineeringReviewReference: targetStatus==='DRAFT'");
+   expect(route).toContain("allowEngineeringReviewReference: body.simpleUpload === true");
  });
 });
