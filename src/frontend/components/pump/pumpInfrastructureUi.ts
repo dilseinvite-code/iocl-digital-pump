@@ -1099,6 +1099,7 @@ export function parseBulkCalibrationText(
   return validateCalibrationChartPoints(rawPoints, {
     tankCapacityLitres: options?.tankCapacityLitres,
     allowOverCapacity: options?.allowOverCapacity,
+    maxOverCapacityRatio: options?.maxOverCapacityRatio,
     requireMinTwoPoints: true,
     maxDipMm: options?.maxDipMm,
     tankDiameterMm: options?.tankDiameterMm,
@@ -1702,11 +1703,11 @@ export function getGlobalTemplateStatusBadge(
           hasValidatedPoints,
         };
       }
-      if (templateMeta.requiresEngineeringReview || codeUpper === 'EXCEL_10KL_REFERENCE') {
+      if (templateMeta.requiresEngineeringReview) {
         return {
           label: 'DRAFT / ENGINEERING REVIEW REQUIRED',
           badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
-          readinessLabel: `10 KL — DRAFT / ENGINEERING REVIEW REQUIRED — ${count} points`,
+          readinessLabel: `${templateMeta.nominalCapacityLitres ? Math.round(templateMeta.nominalCapacityLitres / 1000)+' KL — ' : ''}DRAFT / ENGINEERING REVIEW REQUIRED — ${count} points`,
           isApproved: false,
           hasValidatedPoints,
         };
@@ -1720,11 +1721,11 @@ export function getGlobalTemplateStatusBadge(
           hasValidatedPoints,
         };
       }
-      if (codeUpper === 'EXCEL_20KL_REFERENCE') {
+      if (['EXCEL_10KL_REFERENCE', 'EXCEL_20KL_REFERENCE', 'EXCEL_50KL_REFERENCE'].includes(codeUpper)) {
         return {
           label: 'DRAFT / PENDING VERIFICATION',
           badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-          readinessLabel: `20 KL — DRAFT / PENDING VERIFICATION — ${count} points`,
+          readinessLabel: `${templateMeta.nominalCapacityLitres ? Math.round(templateMeta.nominalCapacityLitres / 1000)+' KL — ' : ''}DRAFT / PENDING VERIFICATION — ${count} points`,
           isApproved: false,
           hasValidatedPoints,
         };
