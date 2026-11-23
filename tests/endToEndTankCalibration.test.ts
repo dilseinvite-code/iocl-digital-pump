@@ -410,7 +410,8 @@ describe('IOCL End-to-End Tank Calibration Management & Governance Suite', () =>
     const maxJson = (await maxRes.json()) as any;
     expect(maxJson.data.interpolatedVolumeLitres).toBe(21628.93);
 
-    // Boundary maxDipMm (1940 mm) on 10 KL -> 11,073.41 L
+    // The 10 KL source remains 11,073.41 L at 1940 mm in immutable
+    // audit storage, but operational interpolation MUST stop at 11,000 L.
     const max10Res = await app.request(
       '/api/v1/calibration-templates/gtct-excel-10kl-ref/interpolate',
       {
@@ -420,9 +421,26 @@ describe('IOCL End-to-End Tank Calibration Management & Governance Suite', () =>
       },
       env
     );
-    expect(max10Res.status).toBe(200);
+    expect(max10Res.status).toBe(400);
     const max10Json = (await max10Res.json()) as any;
-    expect(max10Json.data.interpolatedVolumeLitres).toBe(11073.41);
+    expect(max10Json.error.code).toBe('DIP_OUT_OF_RANGE');
+
+    // Exact derived endpoint is obtained from the source, not hard-coded
+    // 1940 mm; a higher dip must not silently be reported as 11000 L.
+    const tenKlNearLimit = await app.request(
+      '/api/v1/calibration-templates/gtct-excel-10kl-ref/interpolate',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dipMillimetres: 1890 }),
+      },
+      env
+    );
+    expect(tenKlNearLimit.status).toBe(200);
+    const limited10Json = (await tenKlNearLimit.json()) as any;
+    expect(limited10Json.data.operationalMaximumLitres).toBe(11000);
+    expect(limited10Json.data.originalSourceMaximumLitres).toBe(11073.41);
+    expect(limited10Json.data.interpolatedVolumeLitres).toBeLessThanOrEqual(11000);
 
     // Linear interpolation between 10 mm and 20 mm on 20 KL (at 15 mm)
     const pt10Res = await app.request(

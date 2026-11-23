@@ -18,6 +18,7 @@ import {
 } from '../../shared/validators';
 import { PERMISSIONS, ROLES } from '../../shared/constants';
 import { parseMilliunits, formatMilliunits } from '../../shared/precision';
+import {TEN_KL_TEMPLATE_CODE,limitTenKlCalibrationCurve} from '../../shared/tenKlCalibrationLimit';
 
 export const tankCalibration = new Hono<{ Bindings: EnvBindings }>();
 
@@ -2202,8 +2203,16 @@ tankCalibration.post('/calibration-templates/:id/interpolate', requirePermission
     const dipMilliunits = parseMilliunits(dipMmRaw);
     const waterDipMilliunits = parseMilliunits(waterDipMmRaw ?? 0);
 
+    // The complete signed 10 KL source remains unchanged in D1. For this
+    // *reference interpolation endpoint* never calculate over 11,000 L.
+    // Throw DIP_OUT_OF_RANGE for a dip above the derived 11 KL endpoint;
+    // do NOT clamp a physically higher reading down to 11 KL silently.
+    const tenKlLimit = template.code === TEN_KL_TEMPLATE_CODE
+      ? limitTenKlCalibrationCurve(template.points || [])
+      : null;
+    const effectivePoints = tenKlLimit?.points || template.points || [];
     const sim = TankCalibrationService.evaluateRevisionSimulation(
-      template.points || [],
+      effectivePoints,
       {
         chartId: template.id,
         revisionNumber: template.revisionNumber,
@@ -2226,6 +2235,9 @@ tankCalibration.post('/calibration-templates/:id/interpolate', requirePermission
         waterDipMm: waterDipMilliunits / 1000,
         waterDipMmStr: formatMilliunits(waterDipMilliunits),
         interpolatedVolumeLitres: sim.grossVolumeLitres,
+        operationalMaximumLitres: tenKlLimit?.operationalMaximumLitres ?? null,
+        operationalMaximumDipMm: tenKlLimit?.operationalMaximumDipMm ?? null,
+        originalSourceMaximumLitres: tenKlLimit?.sourceMaximumLitres ?? null,
         lowerBound: sim.lowerBracketPoint,
         upperBound: sim.upperBracketPoint,
         ...sim,
