@@ -2642,6 +2642,19 @@ const handleGlobalTemplateImport = async (c: AppContext) => {
   }
 
   const body = await c.req.json().catch(() => ({}));
+  // Only an unassigned DRAFT may be replaced with user-corrected readings.
+  // Do not erase approved reference values, existing assigned revisions or
+  // historical calibration evidence through a simplified re-upload.
+  if (body.simpleUpload === true && (
+      existing.status !== 'DRAFT' ||
+      Number(existing.activeAssignedTanksCount || 0)>0 ||
+      Number(existing.stagedDraftTanksCount || 0)>0)) {
+    return c.json({
+      success:false,data:null,error:{code:'TEMPLATE_PROTECTED',
+        message:'This calibration chart is approved or already assigned to a tank. Create a new draft instead of replacing it.'},
+    },409);
+  }
+
   const { parsedPoints, parseErrors } = parseGlobalTemplateCsvOrPoints(body);
 
   if (parseErrors.length > 0) {
@@ -2689,6 +2702,12 @@ const handleGlobalTemplateImport = async (c: AppContext) => {
       {
         status: targetStatus,
         allowOverCapacity: Boolean(body.allowOverCapacity),
+        // Save physically valid dip-to-volume data as DRAFT even if the
+        // printed chart exceeds nominal/+10% capacity. This is an audit
+        // warning during upload, never permission to approve or activate it.
+        allowEngineeringReviewReference: body.simpleUpload === true &&
+          targetStatus==='DRAFT' &&
+          existing.code!=='STANDARD_20KL' && existing.code!=='STANDARD_50KL',
         sourceFileName: body.sourceFileName,
         referenceDocument: body.referenceDocument,
         notes: body.notes,

@@ -621,10 +621,12 @@ export class ExcelCalibrationImportService {
       const existing = await pumpRepo.findGlobalTankCalibrationTemplateByCode(chart.templateCode);
 
       if (existing) {
-        if (existing.status !== 'DRAFT') {
+        if (existing.status !== 'DRAFT' ||
+            Number(existing.activeAssignedTanksCount || 0) > 0 ||
+            Number(existing.stagedDraftTanksCount || 0) > 0) {
           skippedCharts.push({
             templateCode: chart.templateCode,
-            reason: `Template '${chart.templateCode}' exists with status '${existing.status}' and cannot be overwritten.`,
+            reason: 'Existing template is approved or assigned to a tank. It cannot be overwritten by re-upload; save a separate draft instead.',
           });
           continue;
         }
