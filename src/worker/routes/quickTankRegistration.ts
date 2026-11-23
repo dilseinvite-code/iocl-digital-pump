@@ -153,6 +153,7 @@ quickTankRegistrationRoutes.post(
   async (c: AppContext) => {
     const outletId = c.req.param('outletId');
     const pendingId = c.req.param('id');
+    if (!pendingId) return errResponse(c, 'BAD_REQUEST', 'Pending tank ID is required');
     if (!outletId || !await canAccessOutlet(c, outletId)) return errResponse(c, 'FORBIDDEN', 'Outlet access denied', 403);
     const parsed = finalizeSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return errResponse(c, 'VALIDATION_ERROR', 'Select a mapped fuel grade');
