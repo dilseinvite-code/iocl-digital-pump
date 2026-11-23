@@ -1,5 +1,5 @@
 import type { GlobalTankCalibrationTemplate, TankCalibrationChart, TankCalibrationPoint } from '../../../shared/types';
-import {isOperatorSuppliedReference} from '../../../shared/operatorSuppliedCalibration';
+import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../../shared/operatorSuppliedCalibration';
 
 /**
  * Checks whether an existing quick-registered tank can reuse an authorised
@@ -21,6 +21,9 @@ export function reviewReusableGlobalChart(
     return {ready:false,message:'The linked global chart could not be loaded. Refresh and review its source.'};
   }
   const operatorProvided=isOperatorSuppliedReference(source,source.points||[]);
+  if (!operatorProvided && isOperatorSuppliedSourceMetadata(source)) {
+    return {ready:false,message:'Stored Excel readings differ from the supplied PDF checkpoints. Correct the numerical source in Tank Calibration; a second approval is not needed.'};
+  }
   if (!operatorProvided&&source.status !== 'APPROVED' && source.status !== 'ACTIVE') {
     return {ready:false,message:'The source global chart is still '+source.status+'. Review and approve it once in Calibration Charts; there is no need to upload tank readings again.'};
   }
