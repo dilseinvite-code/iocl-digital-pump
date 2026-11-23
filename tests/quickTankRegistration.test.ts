@@ -128,6 +128,65 @@ describe('Two-input global-calibration tank registration', () => {
   });
 
 
+  it('requires chart activation and independent operator confirmations before making a newly registered tank ACTIVE', async () => {
+    const db = getDb(localD1);
+    await createCalibratedFifteenKlVariants();
+    const chosen = await request('PUT', '/global-tank-defaults/15000', { templateId: 'gtct-test-std-15kl' });
+    expect(chosen.status).toBe(200);
+    const queued = await request('POST', '/outlets/ro-1001/tanks/quick-register', {
+      name: 'Activation Test Tank', capacityLitres: 15000,
+    });
+    expect(queued.status).toBe(201);
+    const pendingId = ((await queued.json()) as any).data.id;
+    const finalized = await request('POST', '/outlets/ro-1001/pending-tanks/' + pendingId + '/finalize', {
+      productId: 'prod-ms',
+    });
+    expect(finalized.status).toBe(201);
+    const tankId = ((await finalized.json()) as any).data.id;
+    const payload = {
+      name: 'Activation Test Tank', productId: 'prod-ms', capacityLitres: 15000,
+      safeFillCapacityLitres: 13500, minimumOperatingLevelLitres: 0, status: 'ACTIVE',
+    };
+    const unconfirmed = await request('PUT', '/tanks/' + tankId, payload);
+    expect(unconfirmed.status).toBe(409);
+    expect(((await unconfirmed.json()) as any).error.code).toBe('TANK_ACTIVATION_CONFIRMATION_REQUIRED');
+
+    const confirmedPayload = { ...payload, confirmPhysicalCompatibility: true, confirmOperationalLimits: true };
+    const draftBlocked = await request('PUT', '/tanks/' + tankId, confirmedPayload);
+    expect(draftBlocked.status).toBe(409);
+    expect(((await draftBlocked.json()) as any).error.code).toBe('TANK_ACTIVE_CALIBRATION_REQUIRED');
+
+    const patchBlocked = await request('PATCH', '/tanks/' + tankId + '/status', { status: 'ACTIVE' });
+    expect(patchBlocked.status).toBe(409);
+    expect(((await patchBlocked.json()) as any).error.code).toBe('TANK_ACTIVATION_CONFIRMATION_REQUIRED');
+    expect((await db.select().from(schema.tanks).where(eq(schema.tanks.id, tankId)))[0].status).toBe('INACTIVE');
+
+    const chart = (await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId, tankId)))[0];
+    expect(chart.status).toBe('DRAFT');
+    // This isolated fixture simulates an independently approved/activated chart.
+    // Live production chart approval is performed ONLY by the governed chart API.
+    await db.update(schema.tankCalibrationCharts).set({
+      status: 'ACTIVE', approvedBy: 'user-admin', approvedAt: new Date().toISOString(),
+    }).where(eq(schema.tankCalibrationCharts.id, chart.id));
+
+    const badLimits = await request('PUT', '/tanks/' + tankId, {
+      ...confirmedPayload, minimumOperatingLevelLitres: 13500,
+    });
+    expect(badLimits.status).toBe(409);
+    expect(((await badLimits.json()) as any).error.code).toBe('TANK_OPERATING_LIMITS_INVALID');
+
+    const good = await request('PUT', '/tanks/' + tankId, confirmedPayload);
+    expect(good.status).toBe(200);
+    expect(((await good.json()) as any).data.status).toBe('ACTIVE');
+    const audit = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.entityId, tankId));
+    expect(audit.some(a => a.action === 'QUICK_TANK_OPERATIONAL_ACTIVATION')).toBe(true);
+
+    // After the tank is activated, later ordinary edits do not require re-confirming it.
+    const rename = await request('PUT', '/tanks/' + tankId, { name: 'Approved Activation Test Tank' });
+    expect(rename.status).toBe(200);
+  });
+
   it.each([
     { capacity: 20000, templateId: 'gtct-std-20kl', count: 211, maxLitres: 21628.93 },
     { capacity: 50000, templateId: 'gtct-std-50kl', count: 301, maxLitres: 53015 },

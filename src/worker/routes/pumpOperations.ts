@@ -33,6 +33,66 @@ async function verifyOutletAuthority(c: AppContext, outletId: string, outletRepo
   return ScopeService.canAccessOutlet(userCtx, outletId, outletRepo);
 }
 
+/**
+ * Only applies to tanks created by the two-field, global-calibration workflow.
+ * Legacy operational tank records keep their existing lifecycle behavior.
+ * Source-chart approval/activation is governed independently in tankCalibration.
+ */
+async function validateQuickTankOperationalActivation(
+  repo: PumpRepository,
+  tank: { id: string; outletId: string; status: string; productId: string; capacityLitres: number; safeFillCapacityLitres: number; minimumOperatingLevelLitres: number },
+  target: { productId: string; capacityLitres: number; safeFillCapacityLitres: number; minimumOperatingLevelLitres: number },
+  confirmations: any
+): Promise<{ code: string; message: string } | null> {
+  if (!tank.id.startsWith('tank-pgt-') || tank.status === 'ACTIVE') return null;
+  if (confirmations?.confirmPhysicalCompatibility !== true ||
+      confirmations?.confirmOperationalLimits !== true) {
+    return {
+      code: 'TANK_ACTIVATION_CONFIRMATION_REQUIRED',
+      message: 'Before activating this newly registered tank, confirm that its fuel grade and physical dimensions match the approved calibration, and that the safe-fill and minimum operating limits were independently checked. A 90% registration default is provisional.',
+    };
+  }
+  const { capacityLitres: cap, safeFillCapacityLitres: safe, minimumOperatingLevelLitres: min, productId } = target;
+  if (![cap, safe, min].every(Number.isFinite) || cap <= 0 || safe <= 0 || safe > cap || min < 0 || min >= safe) {
+    return {
+      code: 'TANK_OPERATING_LIMITS_INVALID',
+      message: 'Confirm a positive, physically verified safe-fill limit no higher than nominal capacity, and a nonnegative minimum operating level below safe-fill.',
+    };
+  }
+  const [product, mapping, charts] = await Promise.all([
+    repo.findProductById(productId),
+    repo.findOutletProduct(tank.outletId, productId),
+    repo.listCalibrationCharts(tank.id),
+  ]);
+  if (!product || product.status !== 'ACTIVE' || product.unit !== 'LITRE' ||
+      !mapping || mapping.status !== 'ACTIVE') {
+    return {
+      code: 'TANK_FUEL_MAPPING_NOT_ACTIVE',
+      message: 'The selected fuel must be an active liquid product mapped to this outlet before the tank can be activated.',
+    };
+  }
+  const activeChart = charts.find(ch => ch.status === 'ACTIVE');
+  if (!activeChart) {
+    return {
+      code: 'TANK_ACTIVE_CALIBRATION_REQUIRED',
+      message: 'The attached calibration is not ACTIVE. Approve and activate the applicable tank calibration revision first; saving the draft is not enough.',
+    };
+  }
+  if (!activeChart.tankDiameterMmMilliunits || !activeChart.tankLengthMmMilliunits ||
+      !activeChart.maxDipMmMilliunits || activeChart.tankDiameterMmMilliunits <= 0 ||
+      activeChart.tankLengthMmMilliunits <= 0 || activeChart.maxDipMmMilliunits <= 0) {
+    return {
+      code: 'TANK_CALIBRATION_DIMENSIONS_MISSING',
+      message: 'The active chart is missing tank dimensions or maximum dip. Check the physical tank specification before activation.',
+    };
+  }
+  const points = await repo.listCalibrationPoints(tank.id, { chartId: activeChart.id });
+  if (points.length < 2) {
+    return { code: 'TANK_CALIBRATION_POINTS_MISSING', message: 'The active chart must contain at least two calibration points.' };
+  }
+  return null;
+}
+
 // ==========================================
 // 1. OUTLET PRODUCT MAPPINGS
 // ==========================================
@@ -391,6 +451,18 @@ pumpOperations.put('/tanks/:id', requirePermission(PERMISSIONS.TANKS_WRITE) as a
     }
   }
 
+  if (payload.status === 'ACTIVE' && tank.status !== 'ACTIVE') {
+    const activationError = await validateQuickTankOperationalActivation(pumpRepo, tank, {
+      productId: payload.productId ?? tank.productId,
+      capacityLitres: payload.capacityLitres ?? tank.capacityLitres,
+      safeFillCapacityLitres: payload.safeFillCapacityLitres ?? tank.safeFillCapacityLitres,
+      minimumOperatingLevelLitres: payload.minimumOperatingLevelLitres ?? tank.minimumOperatingLevelLitres,
+    }, body);
+    if (activationError) {
+      return c.json({ success: false, data: null, error: activationError }, 409);
+    }
+  }
+
   const nowIso = new Date().toISOString();
   const updated = await pumpRepo.updateTank(id, {
     ...payload,
@@ -400,11 +472,17 @@ pumpOperations.put('/tanks/:id', requirePermission(PERMISSIONS.TANKS_WRITE) as a
   await auditRepo.logAction({
     id: `aud-${crypto.randomUUID()}`,
     userId: c.var.user!.user.id,
-    action: 'TANK_UPDATE',
+    action: payload.status === 'ACTIVE' && tank.status !== 'ACTIVE' && tank.id.startsWith('tank-pgt-')
+      ? 'QUICK_TANK_OPERATIONAL_ACTIVATION' : 'TANK_UPDATE',
     entityType: 'TANK',
     entityId: id,
     oldValue: tank as unknown as Record<string, unknown>,
-    newValue: updated as unknown as Record<string, unknown>,
+    newValue: {
+      ...updated as unknown as Record<string, unknown>,
+      ...(payload.status === 'ACTIVE' && tank.status !== 'ACTIVE' && tank.id.startsWith('tank-pgt-')
+        ? { physicalCompatibilityConfirmed: true, operatingLimitsConfirmed: true }
+        : {}),
+    },
     ipAddress: c.req.header('cf-connecting-ip') || null,
     userAgent: c.req.header('user-agent') || null,
     createdAt: nowIso,
@@ -453,17 +531,31 @@ pumpOperations.patch('/tanks/:id/status', requirePermission(PERMISSIONS.TANKS_WR
     }
   }
 
+  if (status === 'ACTIVE' && tank.status !== 'ACTIVE') {
+    const activationError = await validateQuickTankOperationalActivation(pumpRepo, tank, {
+      productId: tank.productId,
+      capacityLitres: tank.capacityLitres,
+      safeFillCapacityLitres: tank.safeFillCapacityLitres,
+      minimumOperatingLevelLitres: tank.minimumOperatingLevelLitres,
+    }, body);
+    if (activationError) {
+      return c.json({ success: false, data: null, error: activationError }, 409);
+    }
+  }
+
   const nowIso = new Date().toISOString();
   const updated = await pumpRepo.updateTank(id, { status, updatedAt: nowIso });
 
   await auditRepo.logAction({
     id: `aud-${crypto.randomUUID()}`,
     userId: c.var.user!.user.id,
-    action: 'TANK_STATUS_UPDATE',
+    action: status === 'ACTIVE' && tank.status !== 'ACTIVE' && tank.id.startsWith('tank-pgt-')
+      ? 'QUICK_TANK_OPERATIONAL_ACTIVATION' : 'TANK_STATUS_UPDATE',
     entityType: 'TANK',
     entityId: id,
     oldValue: { status: tank.status },
-    newValue: { status },
+    newValue: { status, ...(status === 'ACTIVE' && tank.status !== 'ACTIVE' && tank.id.startsWith('tank-pgt-')
+      ? { physicalCompatibilityConfirmed: true, operatingLimitsConfirmed: true } : {}) },
     ipAddress: c.req.header('cf-connecting-ip') || null,
     userAgent: c.req.header('user-agent') || null,
     createdAt: nowIso,
