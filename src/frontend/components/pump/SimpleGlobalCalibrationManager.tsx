@@ -57,7 +57,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     const result=await apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates');
     if(!result.success || !result.data)throw new Error(result.error?.message || 'Could not load calibration charts');
     setTemplates(result.data);
-    setSelectedCode(current=>current || result.data?.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code || result.data?.find(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status))?.code || '');
+    setSelectedCode(current=>current || result.data?.find(t=>isOperatorSuppliedReference(t))?.code || result.data?.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code || result.data?.find(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status))?.code || '');
   };
   const loadDefaults=async()=>{
     const r=await apiFetch<Array<{capacityLitres:number;templateId:string}>>('/api/v1/global-tank-defaults');
@@ -90,7 +90,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   useEffect(()=>{setAcknowledgedDefaultWarning(false);setAcknowledgedApproval(false);},[chosen?.id]);
   const capacityCards=GLOBAL_TANK_CAPACITIES_LITRES.map(capacity=>{
     const active=templates.filter(t=>t.nominalCapacityLitres===capacity&&!['ARCHIVED','SUPERSEDED'].includes(t.status));
-    return {capacity,template:active.find(t=>t.id===defaultCharts[capacity])||
+    return {capacity,template:active.find(t=>isOperatorSuppliedReference(t))||
+      active.find(t=>t.id===defaultCharts[capacity])||
       active.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')||active[0]||null};
   });
   const aboveNominal=Boolean(chosen&&(chosen.maxVolumeLitres||0)>chosen.nominalCapacityLitres);
@@ -362,7 +363,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       {showAllCharts&&<div className="mt-2 flex flex-wrap gap-2" data-testid="previous-calibration-charts">
         {templates.map(t=><button key={t.id} type="button" onClick={()=>{setSelectedCode(t.code);setShowReadings(false);}}
           className={'rounded-lg border px-3 py-2 text-xs '+(t.code===selectedCode?'border-orange-500 bg-orange-50':'border-slate-200 text-slate-600')}>
-          {t.nominalCapacityLitres/1000} KL · {t.name} · {t.status}
+          {t.nominalCapacityLitres/1000} KL · {t.name} · {isOperatorSuppliedReference(t)?'READY':t.status}
         </button>)}
       </div>}
       {chosen&&<div className="mt-4 rounded-xl bg-[#F4F7FB] p-4">
