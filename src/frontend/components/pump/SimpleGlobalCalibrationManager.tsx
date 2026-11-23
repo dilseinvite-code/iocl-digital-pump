@@ -3,6 +3,7 @@ import {AlertTriangle, CheckCircle2, FileSpreadsheet, RefreshCw, UploadCloud} fr
 import {apiFetch, clearApiCache} from '../../services/api';
 import type {GlobalTankCalibrationTemplate} from '../../../shared/types';
 import {limitTenKlCalibrationCurve} from '../../../shared/tenKlCalibrationLimit';
+import {scannedReferenceSpec, reviewScannedCalibrationCandidate} from '../../../shared/scannedCalibrationReference';
 import {parseSimpleCalibrationCsv, type ParsedSimpleCalibrationCsv} from './simpleCalibrationCsv';
 import {GLOBAL_TANK_CAPACITIES_LITRES, exceedsGlobalCalibrationLimit, globalCalibrationMaxLitres} from '../../../shared/globalTankTypes';
 
@@ -57,8 +58,20 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   useEffect(()=>{loadTemplates().catch(e=>setError(e.message));void loadDefaults();},[]);
 
   const chosen=templates.find(t=>t.code===selectedCode);
+  const scannedSpec=chosen ? scannedReferenceSpec(chosen.nominalCapacityLitres) : null;
+  const scannedReview=chosen && scannedSpec
+    ? reviewScannedCalibrationCandidate({
+        code:chosen.code,
+        nominalCapacityLitres:chosen.nominalCapacityLitres,
+        tankDiameterMm:detail?.id===chosen.id?detail.tankDiameterMm:chosen.tankDiameterMm,
+        tankLengthMm:detail?.id===chosen.id?detail.tankLengthMm:chosen.tankLengthMm,
+        maxDipMm:detail?.id===chosen.id?detail.maxDipMm:chosen.maxDipMm,
+        points:(detail?.id===chosen.id?detail.points||[]:[]).map(p=>({dipMm:p.dipMillimetres,volumeLitres:p.volumeLitres})),
+      })
+    : null;
   const canSetAsDefault=Boolean(chosen && (chosen.pointsCount||0)>=2 &&
-    !exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres));
+    !exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres) &&
+    (!scannedReview || scannedReview.passed));
   const setDefault=async()=>{
     if(!chosen||!canSetAsDefault||settingDefault)return;
     setSettingDefault(true);setError('');setNotice('');
@@ -298,10 +311,12 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
                 onClick={()=>{void setDefault();}} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">
                 {settingDefault?'Saving...':'Set as default for '+chosen.nominalCapacityLitres/1000+' KL'}
               </button>}
-          {!canSetAsDefault&&<span className="text-xs text-amber-800">Save valid readings within the +15% limit first.</span>}
+          {scannedReview&&!scannedReview.passed&&<div className="w-full rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900" data-testid="scanned-reference-checkpoint-warning">This saved chart does not match the verified-person scan at its sampled checkpoints or complete dip sequence. Upload a corrected digital transcription; do not use the older Excel curve as the automatic default. {scannedReview.issues.slice(0,4).join(' ')}</div>}
+          {scannedReview?.passed&&<span className="text-xs text-green-800">Full dip range and sampled scan checkpoints match. Full row-by-row transcription still requires review before live activation.</span>}
+          {!canSetAsDefault&&!scannedReview&&<span className="text-xs text-amber-800">Save valid readings within the +15% limit first.</span>}
         </div>
         {capped10&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
-          10 KL operating reference is limited to 11,000 L (cutoff dip {fmt(capped10.operationalMaximumDipMm)} mm). The complete original source is preserved.
+          Full 10 KL reference range: 0–{fmt(capped10.operationalMaximumDipMm)} mm / 0–{fmt(capped10.operationalMaximumLitres)} L. No 11,000 L truncation. Physical safe-fill remains separate.
         </p>}
         {exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres)&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
           Warning: Source maximum {fmt(chosen.maxVolumeLitres||0)} L exceeds the permitted +15% limit of {fmt(globalCalibrationMaxLitres(chosen.nominalCapacityLitres))} L. Check and correct/re-upload rather than silently changing volume readings.

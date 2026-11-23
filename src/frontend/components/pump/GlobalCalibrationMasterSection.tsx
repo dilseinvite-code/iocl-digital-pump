@@ -1070,8 +1070,8 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
     }
   }, [activeTemplate?.code,activeTemplate?.points]);
 
-  // Derived display only: the underlying original 195 source points remain
-  // available in the signed chart/source record for audit and comparison.
+  // Full-range read-only source display; no truncated 11,000 L projection.
+  // Existing active tank charts and historical stock records are untouched.
   const operationalTablePoints = tenKlOperatingCurve.curve
     ? tenKlOperatingCurve.curve.points.map((p,i)=>({
         id:'tenkl-limit-'+i,
@@ -2242,13 +2242,12 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
               )}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-3">
                 <p className="max-w-3xl text-xs text-amber-200">
-                  You have reported that an engineer already approved the scanned chart. Record the
-                  actual certificate/document, issuer, signatory and verification date through the
-                  existing Engineering Verification form. This comparison is not a substitute for
-                  that approval record. The original scanned source includes 73.41 L above the
-                  11,000 L limit. The restricted operational curve now stops at exactly 11,000 L;
-                  its original source values remain available for audit. Approval still requires
-                  certified evidence and resolution of differing scanned/stored readings.
+                  The scanned 10 KL source reaches 1,940 mm / 11,073.41 L and lies
+                  within the +15% data-validation ceiling of 11,500 L. The full
+                  source curve is retained without an artificial 11,000 L cutoff.
+                  This sampled comparison does not verify all 195 printed rows or
+                  certify the curve for a particular physical tank; existing
+                  active charts and approved safe-fill limits are unchanged.
                 </p>
                 {canApproveCalibrationChart && suppliedTenKlComparison.status==='MATCH' && (
                   <button type="button"
@@ -2691,57 +2690,14 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
                   </div>
                 </div>
 
-                {/* Specific Outstanding Issue 1: 10 KL Scoped Policy Exception */}
+                {/* The +15% chart data limit replaces the obsolete +10% exception.
+                    Physical tank suitability is still reviewed during activation. */}
                 {activeTemplate.code === 'EXCEL_10KL_REFERENCE' && (
-                  <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl space-y-2.5">
-                    <div className="font-bold text-rose-300">
-                      10 KL Capacity Discrepancy Governance (Nominal: 10,000 L • Chart Max: 11,073.41 L • +10% Ceiling: 11,000 L)
-                    </div>
-                    <p className="text-[11px] text-slate-300">
-                      The global +10% ceiling is never disabled globally, nor is nominal capacity altered. To approve <code>EXCEL_10KL_REFERENCE</code>, an authorised engineer must either keep it restricted or record a narrowly scoped policy exception backed by governing IOCL/Legal Metrology policy and a Document Vault certificate.
-                    </p>
-                    <label className="inline-flex items-center gap-2 text-rose-200 font-semibold cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={engAllowScopedException}
-                        onChange={e => setEngAllowScopedException(e.target.checked)}
-                        className="rounded border-rose-500 bg-slate-900 text-rose-500"
-                        data-testid="eng-10kl-scoped-exception-checkbox"
-                      />
-                      <span>
-                        Grant Narrowly Scoped Policy Exception for EXCEL_10KL_REFERENCE (+73.41 L dish-end crown volume above +10% ceiling)
-                      </span>
-                    </label>
-                    {engAllowScopedException && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                        <div>
-                          <label className="block text-[10px] text-rose-300 uppercase mb-1">
-                            Governing Calibration Policy Reference
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={engGoverningPolicyRef}
-                            onChange={e => setEngGoverningPolicyRef(e.target.value)}
-                            placeholder="e.g. IOCL-ENG-POL-UGT-DISH-END-2026"
-                            className="w-full bg-slate-900 border border-rose-500/40 rounded-lg px-3 py-1.5 text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-rose-300 uppercase mb-1">
-                            Engineering Discrepancy Resolution Note
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={engDiscrepancyNote}
-                            onChange={e => setEngDiscrepancyNote(e.target.value)}
-                            placeholder="e.g. Physical hydro-strapping verified 11,073.41 L total dished-end volume"
-                            className="w-full bg-slate-900 border border-rose-500/40 rounded-lg px-3 py-1.5 text-white"
-                          />
-                        </div>
-                      </div>
-                    )}
+                  <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/30 p-3 text-xs text-cyan-100">
+                    The scanned 10 KL source maximum is 11,073.41 L at 1,940 mm,
+                    below the +15% chart-validation ceiling (11,500 L).
+                    No separate +10% exception is needed for draft reference storage.
+                    This is not the physical safe-fill limit or live activation.
                   </div>
                 )}
 
@@ -2959,14 +2915,14 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
                       </span>{' '}
                       Printed maximum chart volume{' '}
                       <strong>{formatCalibrationDisplay(templateMaxVolumeLitres ?? 0)} L</strong>{' '}
-                      exceeds the normal +10% operational capacity ceiling (
+                      exceeds the maximum +15% calibration-data ceiling (
                       <strong>
                         {(templateOverCapacityCeilingLitres ?? 0).toLocaleString()} L
                       </strong>{' '}
                       for nominal{' '}
                       <strong>{activeTemplate.nominalCapacityLitres.toLocaleString()} L</strong>).
                       {activeTemplate.code===TEN_KL_TEMPLATE_CODE
-                        ? 'The 11,000 L operational projection excludes those higher original readings; the complete source is retained for audit. Template approval and physical tank activation remain blocked until certified evidence and source-point reconciliation are complete.'
+                        ? 'The full scanned source is preserved. Any chart beyond +15% requires correction; activation of a physical tank remains a separate controlled operation.'
                         : 'Operational approval, tank assignment, chart activation, and DSR calculation use are strictly blocked until verified by an authorised engineer.'}
                     </div>
                   </div>
@@ -3278,25 +3234,23 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
             </form>
           )}
 
-          {/* The original approved-scan readings are retained separately. This table
-              presents the restricted operating range and blocks interpolation above 11 KL. */}
+          {/* Full original printed range, without synthetic volume cap or extrapolation. */}
           <div className="space-y-3">
             {activeTemplate.code === TEN_KL_TEMPLATE_CODE && (
-              <div className="rounded-xl border border-cyan-500/40 bg-cyan-950/40 px-4 py-3 text-xs text-cyan-100" data-testid="tenkl-11000l-operational-cap">
-                <strong>10 KL calibration — limit 11,000 L (11 KL).</strong>{' '}
+              <div className="rounded-xl border border-cyan-500/40 bg-cyan-950/40 px-4 py-3 text-xs text-cyan-100" data-testid="tenkl-full-scanned-range">
+                <strong>10 KL calibration — complete printed range.</strong>{' '}
                 {tenKlOperatingCurve.curve
-                  ? `Operational range ends at ${tenKlOperatingCurve.curve.operationalMaximumDipMm.toFixed(3)} mm / 11,000.000 L; ${tenKlOperatingCurve.curve.excludedSourcePoints} higher source readings are excluded from interpolation and this table. Original ${tenKlOperatingCurve.curve.sourcePointsCount} readings, including the ${tenKlOperatingCurve.curve.sourceMaximumLitres.toFixed(2)} L maximum, remain untouched for audit.`
-                  : `Unable to derive safe 11 KL range: ${tenKlOperatingCurve.error || 'source chart not loaded'}`}
+                  ? `Reference ends at ${tenKlOperatingCurve.curve.operationalMaximumDipMm.toFixed(3)} mm / ${tenKlOperatingCurve.curve.operationalMaximumLitres.toFixed(2)} L; all ${tenKlOperatingCurve.curve.sourcePointsCount} recorded points are retained.`
+                  : `Unable to validate the 10 KL curve: ${tenKlOperatingCurve.error || 'source chart not loaded'}`}
                 <div className="mt-1 text-amber-200">
-                  This is an operational range restriction, not engineering verification,
-                  authorization to fill beyond safe-fill, or tank-specific chart activation.
+                  The chart endpoint is not permission to fill beyond approved safe-fill or to activate an operational tank.
                 </div>
               </div>
             )}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 font-mono">
                 {activeTemplate.code === TEN_KL_TEMPLATE_CODE
-                  ? '10 KL Operational Dip-to-Volume Table (maximum 11,000 L)'
+                  ? '10 KL Full Scanned Dip-to-Volume Table'
                   : 'Stored Dip-to-Volume Calibration Table'} ({operationalTablePoints.length} points)
               </h3>
               {operationalTablePoints.length > 0 && (

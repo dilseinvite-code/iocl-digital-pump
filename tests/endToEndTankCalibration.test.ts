@@ -410,8 +410,8 @@ describe('IOCL End-to-End Tank Calibration Management & Governance Suite', () =>
     const maxJson = (await maxRes.json()) as any;
     expect(maxJson.data.interpolatedVolumeLitres).toBe(21628.93);
 
-    // The 10 KL source remains 11,073.41 L at 1940 mm in immutable
-    // audit storage, but operational interpolation MUST stop at 11,000 L.
+    // The complete scanned source is now available for reference interpolation:
+    // 1,940 mm / 11,073.41 L, without an 11,000 L truncation.
     const max10Res = await app.request(
       '/api/v1/calibration-templates/gtct-excel-10kl-ref/interpolate',
       {
@@ -421,12 +421,13 @@ describe('IOCL End-to-End Tank Calibration Management & Governance Suite', () =>
       },
       env
     );
-    expect(max10Res.status).toBe(400);
+    expect(max10Res.status).toBe(200);
     const max10Json = (await max10Res.json()) as any;
-    expect(max10Json.error.code).toBe('DIP_OUT_OF_RANGE');
+    expect(max10Json.data.interpolatedVolumeLitres).toBe(11073.41);
+    expect(max10Json.data.referenceMaximumLitres).toBe(11073.41);
+    expect(max10Json.data.referenceMaximumDipMm).toBe(1940);
 
-    // Exact derived endpoint is obtained from the source, not hard-coded
-    // 1940 mm; a higher dip must not silently be reported as 11000 L.
+    // A lower reading still converts correctly; a dip above 1,940 mm is rejected.
     const tenKlNearLimit = await app.request(
       '/api/v1/calibration-templates/gtct-excel-10kl-ref/interpolate',
       {
@@ -438,9 +439,9 @@ describe('IOCL End-to-End Tank Calibration Management & Governance Suite', () =>
     );
     expect(tenKlNearLimit.status).toBe(200);
     const limited10Json = (await tenKlNearLimit.json()) as any;
-    expect(limited10Json.data.operationalMaximumLitres).toBe(11000);
+    expect(limited10Json.data.operationalMaximumLitres).toBe(11073.41);
     expect(limited10Json.data.originalSourceMaximumLitres).toBe(11073.41);
-    expect(limited10Json.data.interpolatedVolumeLitres).toBeLessThanOrEqual(11000);
+    expect(limited10Json.data.interpolatedVolumeLitres).toBeLessThanOrEqual(11073.41);
 
     // Linear interpolation between 10 mm and 20 mm on 20 KL (at 15 mm)
     const pt10Res = await app.request(

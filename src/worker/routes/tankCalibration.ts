@@ -2203,10 +2203,11 @@ tankCalibration.post('/calibration-templates/:id/interpolate', requirePermission
     const dipMilliunits = parseMilliunits(dipMmRaw);
     const waterDipMilliunits = parseMilliunits(waterDipMmRaw ?? 0);
 
-    // The complete signed 10 KL source remains unchanged in D1. For this
-    // *reference interpolation endpoint* never calculate over 11,000 L.
-    // Throw DIP_OUT_OF_RANGE for a dip above the derived 11 KL endpoint;
-    // do NOT clamp a physically higher reading down to 11 KL silently.
+    // Use every recorded point, including the full 10 KL scanned endpoint:
+    // 1,940 mm / 11,073.41 L. The legacy helper now validates and retains
+    // the entire curve. A reading ABOVE the last point throws DIP_OUT_OF_RANGE;
+    // it is never extrapolated or silently clamped to 11,000 L.
+    // This endpoint is independent of physical safe-fill and activation.
     const tenKlLimit = template.code === TEN_KL_TEMPLATE_CODE
       ? limitTenKlCalibrationCurve(template.points || [])
       : null;
@@ -2238,6 +2239,8 @@ tankCalibration.post('/calibration-templates/:id/interpolate', requirePermission
         operationalMaximumLitres: tenKlLimit?.operationalMaximumLitres ?? null,
         operationalMaximumDipMm: tenKlLimit?.operationalMaximumDipMm ?? null,
         originalSourceMaximumLitres: tenKlLimit?.sourceMaximumLitres ?? null,
+        referenceMaximumDipMm: effectivePoints.length ? effectivePoints[effectivePoints.length-1].dipMillimetresMilliunits/1000 : null,
+        referenceMaximumLitres: effectivePoints.length ? effectivePoints[effectivePoints.length-1].volumeMilliunits/1000 : null,
         lowerBound: sim.lowerBracketPoint,
         upperBound: sim.upperBracketPoint,
         ...sim,
