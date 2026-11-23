@@ -5,9 +5,17 @@ import { createLocalD1Database } from '../src/db/localD1';
 import { getDb } from '../src/db';
 import * as schema from '../src/db/schema';
 import { seedDatabase } from '../src/db/seed';
-import {ExcelCalibrationImportService} from '../src/worker/services/excelCalibrationImportService';
+import {parseSimpleCalibrationCsv} from '../src/frontend/components/pump/simpleCalibrationCsv';
+import {join} from 'node:path';
 import {SCANNED_CALIBRATION_REFERENCES} from '../src/shared/scannedCalibrationReference';
 import { and, eq } from 'drizzle-orm';
+
+const requirePdfCsv=(kl:10|20)=>{
+  const file=join(process.cwd(),'docs/calibration/pdf-source-candidates','scanned-'+kl+'kl-10mm.csv');
+  const parsed=parseSimpleCalibrationCsv(fs.readFileSync(file,'utf8'));
+  if(!parsed.valid||parsed.errors.length)throw new Error('Unusable scanned PDF chart: '+parsed.errors.join('; '));
+  return parsed.points;
+};
 
 describe('Two-input global-calibration tank registration', () => {
   let localD1: any;
@@ -347,68 +355,62 @@ describe('Two-input global-calibration tank registration', () => {
       .where(eq(schema.auditLogs.action,'GLOBAL_TANK_DEFAULT_SET'));
     expect(audit.some(x=>x.newValueJson?.includes('"acknowledgedWarnings":true'))).toBe(true);
   });
-  it('reuses the entire 20KL source when its printed checkpoints are reconciled, without another approval',async()=>{
-    const bytes=fs.readFileSync('tests/fixtures/20KL_15KL_10KL_calibration_Dip_chart.xlsx');
-    const workbook=await ExcelCalibrationImportService.extractWorkbook(bytes,'20KL_15KL_10KL_calibration_Dip_chart.xlsx');
-    const source=workbook.charts.find(c=>c.templateCode==='EXCEL_20KL_REFERENCE');
-    expect(source?.actualPointCount).toBe(211);
-    expect(source?.maxVolumeLitres).toBe(21628.93);
-    if(!source)throw new Error('20KL workbook fixture missing');
-    const db=getDb(localD1),now=new Date().toISOString(),templateId='gtct-e2e-supplied-20';
+  it.each([10,20] as const)('reuses the complete PDF-transcribed %i KL reference with every dip row unchanged',async kl=>{
+    // All 195/211 candidate points are consumed directly from the scanned PDF
+    // review CSVs. This isolated test never updates the live D1 or legacy Excel.
+    const calibration=requirePdfCsv(kl);
+    const spec=SCANNED_CALIBRATION_REFERENCES[kl===10?10000:20000];
+    expect(calibration).toHaveLength(spec.expectedPoints);
+    const now=new Date().toISOString();
+    const templateId='gtct-e2e-pdf-'+kl;
+    const db=getDb(localD1);
     await db.insert(schema.globalTankCalibrationTemplates).values({
-      id:templateId,code:source.templateCode,name:'Operator 20 KL reference',
-      nominalCapacityLitres:20000,revisionNumber:1,status:'DRAFT',
-      tankDiameterMmMilliunits:Math.round(source.tankDiameterMm*1000),
-      tankLengthMmMilliunits:Math.round(source.tankLengthMm*1000),
-      maxDipMmMilliunits:Math.round(source.maxDipMm*1000),
+      id:templateId,code:spec.code,name:'Operator supplied '+kl+' KL PDF candidate',
+      nominalCapacityLitres:kl*1000,revisionNumber:1,status:'DRAFT',
+      tankDiameterMmMilliunits:spec.tankDiameterMm*1000,
+      tankLengthMmMilliunits:spec.tankLengthMm*1000,
+      maxDipMmMilliunits:spec.maxDipMm*1000,
       createdBy:'user-admin',createdAt:now,updatedAt:now,
     });
-    // Test-only source normalization at the five visually transcribed PDF
-    // checkpoints. Never apply these substitutions to operational database rows.
-    // A true production migration requires a verified full row-by-row table.
-    const printed=SCANNED_CALIBRATION_REFERENCES[20000].printedCheckpoints;
-    const differences=printed.map(ref=>{
-      const existing=source.points.find(p=>p.dipMm===ref.dipMm);
-      return {dipMm:ref.dipMm,printed:ref.volumeLitres,stored:existing?.volumeLitres};
-    }).filter(row=>row.stored!==row.printed);
-    if(differences.length)console.warn('[LEGACY_20KL_SCAN_CHECKPOINT_DIFFERENCES]',JSON.stringify(differences));
-    const original=source.points.map((p,i)=>{
-      const checkpoint=printed.find(ref=>ref.dipMm===p.dipMm);
-      return {
-        id:'operator-20-point-'+i,templateId,
-        dipMillimetresMilliunits:Math.round(p.dipMm*1000),
-        volumeMilliunits:Math.round((checkpoint?.volumeLitres??p.volumeLitres)*1000),
-        createdAt:now,createdBy:'user-admin',
-      };
-    });
-    for(let i=0;i<original.length;i+=12){
-      await db.insert(schema.globalTankCalibrationTemplatePoints).values(original.slice(i,i+12));
-    }
+    const sourceRows=calibration.map((p,i)=>({
+      id:'operator-pdf-'+kl+'-point-'+i,templateId,
+      dipMillimetresMilliunits:p.dipMm*1000,
+      volumeMilliunits:Math.round(p.volumeLitres*1000),
+      createdAt:now,createdBy:'user-admin',
+    }));
+    for(let i=0;i<sourceRows.length;i+=12)
+      await db.insert(schema.globalTankCalibrationTemplatePoints).values(sourceRows.slice(i,i+12));
     const registered=await request('POST','/outlets/ro-1001/tanks/quick-register',{
-      name:'Supplied 20KL Tank',capacityLitres:20000,
+      name:'Supplied '+kl+'KL Tank',capacityLitres:kl*1000,
     });
     expect(registered.status).toBe(201);
     const pending=(await registered.json() as any).data;
     expect(pending.templateId).toBe(templateId);
-    const final=await request('POST','/outlets/ro-1001/pending-tanks/'+pending.id+'/finalize',{productId:'prod-ms'});
-    expect(final.status).toBe(201);
-    const result=(await final.json() as any).data;
+    const finalized=await request('POST','/outlets/ro-1001/pending-tanks/'+pending.id+'/finalize',{productId:'prod-ms'});
+    expect(finalized.status).toBe(201);
+    const result=(await finalized.json() as any).data;
     expect(result.calibrationStatus).toBe('ACTIVE');
     expect(result.status).toBe('INACTIVE');
-    expect(result.pointsCount).toBe(211);
-    const [chart]=await db.select().from(schema.tankCalibrationCharts).where(eq(schema.tankCalibrationCharts.tankId,result.id));
-    const copied=await db.select().from(schema.tankCalibrationPoints).where(eq(schema.tankCalibrationPoints.chartId,chart.id));
-    const asPairs=(rows:ReadonlyArray<{dipMillimetresMilliunits:number;volumeMilliunits:number}>)=>
+    expect(result.pointsCount).toBe(spec.expectedPoints);
+    const [linkedChart]=await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId,result.id));
+    expect(linkedChart.sourceTemplateId).toBe(templateId);
+    const copied=await db.select().from(schema.tankCalibrationPoints)
+      .where(eq(schema.tankCalibrationPoints.chartId,linkedChart.id));
+    const sorted=(rows:ReadonlyArray<{dipMillimetresMilliunits:number;volumeMilliunits:number}>)=>
       rows.map(p=>[p.dipMillimetresMilliunits,p.volumeMilliunits]).sort((a,b)=>a[0]-b[0]);
-    expect(asPairs(copied)).toEqual(asPairs(original));
+    expect(sorted(copied)).toEqual(sorted(sourceRows));
+    if(kl===20)expect(sourceRows.find(p=>p.dipMillimetresMilliunits===2020000)?.volumeMilliunits).toBe(21359520);
     const activated=await request('PUT','/tanks/'+result.id,{
-      name:'Supplied 20KL Tank',productId:'prod-ms',capacityLitres:20000,
-      safeFillCapacityLitres:18000,minimumOperatingLevelLitres:0,status:'ACTIVE',
+      name:'Supplied '+kl+'KL Tank',productId:'prod-ms',capacityLitres:kl*1000,
+      safeFillCapacityLitres:kl*900,minimumOperatingLevelLitres:0,status:'ACTIVE',
       confirmPhysicalCompatibility:true,confirmOperationalLimits:true,
     });
     expect(activated.status).toBe(200);
     const [tank]=await db.select().from(schema.tanks).where(eq(schema.tanks.id,result.id));
     expect(tank.status).toBe('ACTIVE');
+    expect((await db.select().from(schema.tankCalibrationPoints)
+      .where(eq(schema.tankCalibrationPoints.chartId,linkedChart.id))).length).toBe(spec.expectedPoints);
   });
 
 });
