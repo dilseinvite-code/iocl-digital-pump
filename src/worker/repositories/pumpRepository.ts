@@ -4807,7 +4807,7 @@ export class PumpRepository {
     assignmentStats?: { stagedDraftCount: number; activeCount: number; compatibleTanksCount?: number }
   ): any {
     const nomMilli = Math.round(row.nominalCapacityLitres * 1000);
-    const maxCeilingMilli = Math.round(nomMilli * 1.1);
+    const maxCeilingMilli = Math.round(nomMilli * 1.15);
     const isOverCeiling = maxVolMilli != null ? maxVolMilli > maxCeilingMilli : false;
     const isExcel10kl = row.code === 'EXCEL_10KL_REFERENCE';
     const isExcel15kl =
@@ -4929,7 +4929,7 @@ export class PumpRepository {
     if (ptsCount < 2) {
       blockingReason = 'Calibration dip-to-volume points have not been imported yet.';
     } else if (requiresEngineeringReview) {
-      blockingReason = `Nominal capacity is ${row.nominalCapacityLitres.toLocaleString()} L (permitted +10% ceiling: ${(row.nominalCapacityLitres * 1.1).toLocaleString()} L), but source chart maximum volume is ${maxVolMilli != null ? formatMilliunits(maxVolMilli) : '11073.410'} L. Approval, tank assignment, and activation are blocked until formal Engineering Verification with a Document Vault calibration certificate and governing policy exception is recorded.`;
+      blockingReason = `Nominal capacity is ${row.nominalCapacityLitres.toLocaleString()} L (permitted +15% ceiling: ${(row.nominalCapacityLitres * 1.15).toLocaleString()} L), but source chart maximum volume is ${maxVolMilli != null ? formatMilliunits(maxVolMilli) : '11073.410'} L. Approval, tank assignment, and activation are blocked until formal Engineering Verification with a Document Vault calibration certificate and governing policy exception is recorded.`;
     } else if (requiresDimensionVerification) {
       blockingReason =
         'Dimensional conflict between 5,500 mm main sheet length and 3,750 mm worksheet annotation is unresolved. Approval and assignment are blocked until confirmed against the physical tank calibration certificate in the Document Vault.';
@@ -5234,7 +5234,7 @@ export class PumpRepository {
     }
 
     const nominalCapacityMilliunits = Math.round(options.nominalCapacityLitres * 1000);
-    const maxOverCapacityMilliunits = Math.round(nominalCapacityMilliunits * 1.1);
+    const maxOverCapacityMilliunits = Math.round(nominalCapacityMilliunits * 1.15);
     if (!options.allowOverCapacity && !options.allowEngineeringReviewReference && maxPointVol > nominalCapacityMilliunits) {
       const err = new Error(
         `Chart maximum volume ${formatMilliunits(maxPointVol)} L exceeds nominal template capacity ${options.nominalCapacityLitres.toLocaleString()} L`
@@ -5243,9 +5243,9 @@ export class PumpRepository {
       throw err;
     }
 
-    if (!options.allowEngineeringReviewReference && options.allowOverCapacity && maxPointVol > maxOverCapacityMilliunits) {
+    if (maxPointVol > maxOverCapacityMilliunits) {
       const err = new Error(
-        `Chart maximum volume ${formatMilliunits(maxPointVol)} L exceeds the maximum permitted +10% over-capacity ceiling of ${formatMilliunits(maxOverCapacityMilliunits)} L (nominal ${options.nominalCapacityLitres.toLocaleString()} L)`
+        `Chart maximum volume ${formatMilliunits(maxPointVol)} L exceeds the maximum permitted +15% over-capacity ceiling of ${formatMilliunits(maxOverCapacityMilliunits)} L (nominal ${options.nominalCapacityLitres.toLocaleString()} L)`
       );
       (err as any).code = 'OVER_CAPACITY_CEILING_EXCEEDED';
       throw err;
@@ -5500,7 +5500,7 @@ export class PumpRepository {
       const codeUpper = String(existing.code || '').toUpperCase();
       const isExcelReference = codeUpper.startsWith('EXCEL_');
       const nominalCapacityMilliunits = Math.round(existing.nominalCapacityLitres * 1000);
-      const maxOverCapacityMilliunits = Math.round(nominalCapacityMilliunits * 1.1);
+      const maxOverCapacityMilliunits = Math.round(nominalCapacityMilliunits * 1.15);
       const maxStoredVol = rawPoints.reduce(
         (m: number, p: { volumeMilliunits: number }) => Math.max(m, p.volumeMilliunits),
         0
@@ -5518,9 +5518,9 @@ export class PumpRepository {
           existing.engineeringVerification?.supportingDocumentId
       );
 
-      if (maxStoredVol > maxOverCapacityMilliunits && !hasScopedPolicyException) {
+      if (maxStoredVol > maxOverCapacityMilliunits) {
         const err = new Error(
-          `Cannot approve global template ${existing.code}: chart maximum volume ${formatMilliunits(maxStoredVol)} L exceeds the maximum permitted +10% over-capacity ceiling of ${formatMilliunits(maxOverCapacityMilliunits)} L (nominal ${existing.nominalCapacityLitres.toLocaleString()} L). Engineering review is required before this reference chart can be approved, assigned, or used in DSR calculations.`
+          `Cannot approve global template ${existing.code}: chart maximum volume ${formatMilliunits(maxStoredVol)} L exceeds the maximum permitted +15% over-capacity ceiling of ${formatMilliunits(maxOverCapacityMilliunits)} L (nominal ${existing.nominalCapacityLitres.toLocaleString()} L). Engineering review is required before this reference chart can be approved, assigned, or used in DSR calculations.`
         );
         (err as any).code = 'OVER_CAPACITY_CEILING_EXCEEDED';
         throw err;
@@ -5544,7 +5544,7 @@ export class PumpRepository {
 
       if (maxStoredVol > nominalCapacityMilliunits && !overCapacityConfirmed) {
         const err = new Error(
-          `Chart maximum volume ${formatMilliunits(maxStoredVol)} L exceeds nominal template capacity ${existing.nominalCapacityLitres.toLocaleString()} L. Explicit confirmation of above-nominal chart volume (up to the +10% ceiling of ${formatMilliunits(maxOverCapacityMilliunits)} L) is required to approve this template.`
+          `Chart maximum volume ${formatMilliunits(maxStoredVol)} L exceeds nominal template capacity ${existing.nominalCapacityLitres.toLocaleString()} L. Explicit confirmation of above-nominal chart volume (up to the +15% ceiling of ${formatMilliunits(maxOverCapacityMilliunits)} L) is required to approve this template.`
         );
         (err as any).code = 'OVER_CAPACITY_CONFIRMATION_REQUIRED';
         throw err;
@@ -6264,7 +6264,7 @@ export class PumpRepository {
     if (!isCompatible) {
       if (isReviewBlocked) {
         eligibilityStatus = 'INELIGIBLE';
-        ineligibilityReason = `ENGINEERING REVIEW REQUIRED: Reference template ${template.code} exceeds the +10% operational capacity ceiling (${template.maxVolumeLitresStr || 'above limit'} L vs ${(template.nominalCapacityLitres * 1.1).toLocaleString()} L ceiling) and cannot be assigned, activated, or used in DSR calculations until verified by an authorised engineer.`;
+        ineligibilityReason = `ENGINEERING REVIEW REQUIRED: Reference template ${template.code} exceeds the +15% operational capacity ceiling (${template.maxVolumeLitresStr || 'above limit'} L vs ${(template.nominalCapacityLitres * 1.15).toLocaleString()} L ceiling) and cannot be assigned, activated, or used in DSR calculations until verified by an authorised engineer.`;
       } else if (isDimensionConflictBlocked) {
         eligibilityStatus = 'INELIGIBLE';
         ineligibilityReason = `DIMENSION VERIFICATION REQUIRED: Reference template ${template.code} has an unresolved length conflict (5,500 mm vs 3,750 mm note) and cannot be assigned until engineering verification confirms the physical tank certificate.`;
@@ -6452,7 +6452,7 @@ export class PumpRepository {
 
     if (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException)) {
       const err = new Error(
-        `Global reference template ${template.code} requires engineering review (chart maximum volume ${template.maxVolumeLitresStr} L exceeds the +10% operational capacity ceiling) and cannot be assigned, activated, or used in DSR calculations.`
+        `Global reference template ${template.code} requires engineering review (chart maximum volume ${template.maxVolumeLitresStr} L exceeds the +15% operational capacity ceiling) and cannot be assigned, activated, or used in DSR calculations.`
       );
       (err as any).code = 'ENGINEERING_REVIEW_REQUIRED';
       throw err;
@@ -6610,7 +6610,7 @@ export class PumpRepository {
 
     if (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException)) {
       const err = new Error(
-        `Global reference template ${template.code} requires engineering review (chart maximum volume ${template.maxVolumeLitresStr} L exceeds the +10% operational capacity ceiling) and cannot be assigned, activated, or used in DSR calculations.`
+        `Global reference template ${template.code} requires engineering review (chart maximum volume ${template.maxVolumeLitresStr} L exceeds the +15% operational capacity ceiling) and cannot be assigned, activated, or used in DSR calculations.`
       );
       (err as any).code = 'ENGINEERING_REVIEW_REQUIRED';
       throw err;
