@@ -187,6 +187,44 @@ describe('Two-input global-calibration tank registration', () => {
     expect(rename.status).toBe(200);
   });
 
+  it('reuses a fully approved, warning-free global chart without second approval while leaving the tank INACTIVE', async () => {
+    const db = getDb(localD1);
+    const now = new Date().toISOString();
+    const templateId = 'gtct-std-50kl';
+    // Fixture only: emulate a global template that already completed its
+    // one-time approval. Production approval is governed by its own API.
+    await db.insert(schema.globalTankCalibrationTemplatePoints).values([
+      { id:'fixture-50kl-zero', templateId, dipMillimetresMilliunits:0, volumeMilliunits:0, createdAt:now, createdBy:'user-admin' },
+      { id:'fixture-50kl-full', templateId, dipMillimetresMilliunits:3000000, volumeMilliunits:53015000, createdAt:now, createdBy:'user-admin' },
+    ]);
+    await db.update(schema.globalTankCalibrationTemplates).set({
+      status:'APPROVED', approvedBy:'user-admin', approvedAt:now,
+    }).where(eq(schema.globalTankCalibrationTemplates.id,templateId));
+    const chosen = await request('PUT', '/global-tank-defaults/50000', {templateId});
+    expect(chosen.status).toBe(200);
+    const queued = await request('POST', '/outlets/ro-1001/tanks/quick-register', {
+      name:'Reusable verified global tank', capacityLitres:50000,
+    });
+    expect(queued.status).toBe(201);
+    const pendingId = ((await queued.json()) as any).data.id;
+    const finalized = await request('POST','/outlets/ro-1001/pending-tanks/'+pendingId+'/finalize',{
+      productId:'prod-hsd',
+    });
+    expect(finalized.status).toBe(201);
+    const data = ((await finalized.json()) as any).data;
+    expect(data.calibrationStatus).toBe('ACTIVE');
+    expect(data.status).toBe('INACTIVE');
+    expect(data.pointsCount).toBe(2);
+    const [chart] = await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId,data.id));
+    expect(chart.status).toBe('ACTIVE');
+    expect(chart.sourceTemplateId).toBe(templateId);
+    expect(chart.approvedBy).toBe('user-admin');
+    const [tank] = await db.select().from(schema.tanks).where(eq(schema.tanks.id,data.id));
+    expect(tank.status).toBe('INACTIVE');
+    expect(tank.safeFillCapacityLitres).toBe(45000); // still a provisional value
+  });
+
   it.each([
     { capacity: 20000, templateId: 'gtct-std-20kl', count: 211, maxLitres: 21628.93 },
     { capacity: 50000, templateId: 'gtct-std-50kl', count: 301, maxLitres: 53015 },

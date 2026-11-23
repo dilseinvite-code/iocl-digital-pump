@@ -228,6 +228,16 @@ quickTankRegistrationRoutes.post(
     const id = 'tank-' + pendingId;
     const chartId = 'tcc-' + pendingId;
     const safeFillProvisional = Math.round(pending.capacityLitres * 0.9);
+    // One-time global approval is authoritative for the reused numerical chart.
+    // A source that is DRAFT or has scan/+15% warnings stays DRAFT.
+    // Only an already APPROVED/ACTIVE, warning-free source automatically
+    // provides an ACTIVE tank-specific chart. The physical tank stays INACTIVE.
+    const inheritsApprovedGlobalChart =
+      (source.template.status === 'APPROVED' || source.template.status === 'ACTIVE') &&
+      source.warnings.length === 0 &&
+      !source.template.requiresEngineeringReview &&
+      !source.template.requiresDimensionVerification;
+    const chartStatus = inheritsApprovedGlobalChart ? 'ACTIVE' : 'DRAFT';
     const stmts: any[] = [
       db.insert(schema.tanks).values({
         id, outletId, tankNumber: nextNumber, name: pending.name,
@@ -239,15 +249,19 @@ quickTankRegistrationRoutes.post(
       }),
       db.insert(schema.tankCalibrationCharts).values({
         id: chartId, tankId: id, sourceTemplateId: source.template.id,
-        revisionNumber: 1, status: 'DRAFT', chartUnitDip: 'MM', chartUnitVolume: 'LITRES',
+        revisionNumber: 1, status: chartStatus, chartUnitDip: 'MM', chartUnitVolume: 'LITRES',
         tankDiameterMmMilliunits: source.template.tankDiameterMmMilliunits,
         tankLengthMmMilliunits: source.template.tankLengthMmMilliunits,
         maxDipMmMilliunits: source.template.maxDipMmMilliunits,
         chartCapacityMilliunits: pending.capacityLitres * 1000,
         sourceFileName: source.template.sourceFileName || 'global-chart',
         referenceDocument: source.template.referenceDocument || null,
-        notes: 'Auto-linked as non-operational draft from saved global tank capacity chart; physical dimensions and safe-fill require review.',
-        effectiveFrom: now.slice(0, 10), approvedBy: null, approvedAt: null,
+        notes: inheritsApprovedGlobalChart
+          ? 'Automatically linked to an already approved global chart; tank remains INACTIVE pending physical and operating-limit review.'
+          : 'Auto-linked as a DRAFT reference from the selected global chart; source warnings and physical limits remain separate.',
+        effectiveFrom: now.slice(0, 10),
+        approvedBy: inheritsApprovedGlobalChart ? (source.template.approvedBy || c.var.user!.user.id) : null,
+        approvedAt: inheritsApprovedGlobalChart ? (source.template.approvedAt || now) : null,
         createdAt: now, createdBy: c.var.user!.user.id,
         updatedAt: now, updatedBy: c.var.user!.user.id,
       }),
@@ -276,7 +290,8 @@ quickTankRegistrationRoutes.post(
       action: 'TANK_REGISTER_FINALIZE', entityType: 'TANK', entityId: id,
       newValueJson: JSON.stringify({ pendingId, name: pending.name, tankNumber: nextNumber,
         capacityLitres: pending.capacityLitres, productId: parsed.data.productId,
-        templateId: source.template.id, calibrationStatus: 'DRAFT', tankStatus: 'INACTIVE' }),
+        templateId: source.template.id, calibrationStatus: chartStatus,
+        inheritedGlobalApproval: inheritsApprovedGlobalChart, tankStatus: 'INACTIVE' }),
       ipAddress: c.req.header('cf-connecting-ip') || null,
       userAgent: c.req.header('user-agent') || null, createdAt: now,
     }));
@@ -301,8 +316,10 @@ quickTankRegistrationRoutes.post(
     }
     return c.json({ success: true, data: {
       id, tankNumber: nextNumber, name: pending.name, status: 'INACTIVE',
-      calibrationStatus: 'DRAFT', chartId, pointsCount: source.points.length,
-      message: 'Tank created with a draft global chart. Review physical compatibility and safe-fill before activating.',
+      calibrationStatus: chartStatus, chartId, pointsCount: source.points.length,
+      message: inheritsApprovedGlobalChart
+        ? 'Approved global calibration automatically linked. Tank remains INACTIVE until physical and operating limits are confirmed.'
+        : 'Global chart linked as a draft reference. Review the source status and physical operating limits before activation.',
     }, error: null }, 201);
   }
 );
