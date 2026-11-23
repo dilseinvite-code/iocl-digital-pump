@@ -3231,7 +3231,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   {calSelectedChart?.status === 'ACTIVE' && (
                     <p className="text-xs text-emerald-100">Calibration ACTIVE. Tank operational status is managed separately under Edit Tank.</p>
                   )}
-                  {/* Selected Revision Metadata */
+                  {/* Selected Revision Metadata */}
                   {calSelectedChart && (
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2 border-t border-[#E2E8F0]/80 text-[11px] font-mono">
                       <div>
@@ -3251,7 +3251,288 @@ export const PumpInfrastructurePage: React.FC = () => {
                         <span className="text-[#334155]">{lastRecordedPoint
                           ? `${formatCalibrationDisplay(lastRecordedPoint.dipMillimetresMilliunits / 1000)} mm / ${formatCalibrationDisplay(lastRecordedPoint.volumeMilliunits / 1000)} L`
                           : 'No recorded readings'}</span>
-                       </div>
+</div>
+                      <div>
+                        <span className="text-[#64748B] block text-[10px]">CHART NOMINAL CAPACITY</span>
+                        <span className="text-[#334155]">{calSelectedChart.chartCapacityLitreStr
+                          ? `${formatCalibrationDisplay(calSelectedChart.chartCapacityLitreStr)} L`
+                          : `${calibratingTank.capacityLitres.toLocaleString()} L`}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#64748B] block text-[10px]">CURVE / STEP</span>
+                        <span className="text-[#334155]">
+                          {currentChartDiagnostics.isNonLinear ? 'Non-Linear' : 'Linear'}
+                          {currentChartDiagnostics.dominantStepMm
+                            ? ` (${formatCalibrationDisplay(currentChartDiagnostics.dominantStepMm)} mm)`
+                            : ''}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[#64748B] block text-[10px]">SOURCE / CERT</span>
+                        <span className="text-[#334155] truncate block" title={calSelectedChart.sourceFileName || calSelectedChart.referenceDocument || ''}>
+                          {calSelectedChart.sourceFileName || calSelectedChart.referenceDocument || 'Manual / Seed'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[#64748B] block text-[10px]">EFFECTIVE FROM</span>
+                        <span className="text-[#334155]">
+                          {calSelectedChart.effectiveFrom
+                            ? calSelectedChart.effectiveFrom.slice(0, 10)
+                            : 'Immediate'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {isChartLocked && (
+                    <div className="p-2.5 bg-amber-500/10 border border-amber-500/25 rounded-lg text-[11px] text-amber-200 font-mono flex items-center justify-between gap-2">
+                      <span>
+                        🔒 Revision #{calSelectedChart?.revisionNumber} is referenced by historical tank stock readings and is immutable. To modify calibration points, fork a new draft revision or use Bulk Import (which automatically creates a new revision).
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!calStatus.isConfigured && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-800 text-xs rounded-xl font-mono flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>
+                    {calStatus.warningText ||
+                      'At least 2 calibration points are required before Daily Operations allows tank dip entry.'}
+                  </span>
+                </div>
+              )}
+
+              {currentChartDiagnostics.missingStepWarnings.length > 0 && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-800 text-xs rounded-xl font-mono space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                    <span>
+                      Step Interval Diagnostics ({currentChartDiagnostics.missingStepWarnings.length} gap notice{currentChartDiagnostics.missingStepWarnings.length > 1 ? 's' : ''})
+                    </span>
+                  </div>
+                  <ul className="list-disc list-inside text-[11px] text-amber-200/90 space-y-0.5">
+                    {currentChartDiagnostics.missingStepWarnings.slice(0, 3).map((w, idx) => (
+                      <li key={idx}>{w.message}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {modalError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{modalError}</span>
+                </div>
+              )}
+
+              {/* Calibration Points Table & Action Toolbar */}
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#475569] font-mono">
+                    Calibration Points ({calPoints.length})
+                    {calSelectedChart ? ` — Rev #${calSelectedChart.revisionNumber}` : ''}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCalShowDryRun(prev => !prev);
+                        setModalError(null);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F1F5F9] hover:bg-[#E8EEF5] text-cyan-400 border border-[#D7E0EA] text-[11px] font-mono font-semibold transition-colors"
+                    >
+                      <FlaskConical className="w-3 h-3" />
+                      <span>{calShowDryRun ? 'Hide Dry-Run Verifier' : 'Dry-Run vs Printed Chart'}</span>
+                    </button>
+                    {canWriteTankCalibration && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleLoadDummyCalibrationPreset}
+                          className="px-2.5 py-1 rounded-lg bg-[#F1F5F9] hover:bg-[#E8EEF5] text-amber-700 border border-[#D7E0EA] text-[11px] font-mono font-semibold transition-colors"
+                        >
+                          Load 5-Point UAT Preset (0–2000 mm)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCalShowBulkImport(prev => !prev);
+                            setModalError(null);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F1F5F9] hover:bg-[#E8EEF5] text-[#B8530D] border border-[#D7E0EA] text-[11px] font-mono font-semibold transition-colors"
+                        >
+                          <Upload className="w-3 h-3" />
+                          <span>{calShowBulkImport ? 'Hide CSV / Bulk Import' : 'CSV / Bulk Import Chart'}</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto bg-slate-950/60 border border-[#E2E8F0] rounded-xl max-h-60">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="bg-[#F1F5F9]/80 text-[#64748B] uppercase text-[10px] border-b border-[#E2E8F0] sticky top-0">
+                      <tr>
+                        <th className="py-2.5 px-4">Dip (mm)</th>
+                        <th className="py-2.5 px-4">Volume (L)</th>
+                        {canWriteTankCalibration && !isChartLocked && (
+                          <th className="py-2.5 px-4 text-right">Actions</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {isLoadingPoints ? (
+                        <tr>
+                          <td
+                            colSpan={canWriteTankCalibration && !isChartLocked ? 3 : 2}
+                            className="py-6 text-center text-[#64748B]"
+                          >
+                            Loading calibration chart...
+                          </td>
+                        </tr>
+                      ) : calPoints.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={canWriteTankCalibration && !isChartLocked ? 3 : 2}
+                            className="py-6 text-center text-[#64748B]"
+                          >
+                            No calibration points configured for this tank yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        calPoints.map(pt => (
+                          <tr key={pt.id} className="hover:bg-[#F1F5F9]/40">
+                            <td className="py-2 px-4 font-bold text-[#B8530D]">
+                              {formatCalibrationDisplay(pt.dipMmStr ?? pt.dipMillimetresMilliunits / 1000)}
+                            </td>
+                            <td className="py-2 px-4 text-[#17365D]">
+                              {formatCalibrationDisplay(pt.volumeLitreStr ?? pt.volumeMilliunits / 1000)}
+                            </td>
+                            {canWriteTankCalibration && !isChartLocked && (
+                              <td className="py-2 px-4 text-right space-x-2">
+                                <button
+                                  type="button"
+                                  disabled={modalSubmitting}
+                                  onClick={() => startEditCalibrationPoint(pt)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[#F1F5F9] hover:bg-[#E8EEF5] text-[#334155] border border-[#D7E0EA] text-[11px]"
+                                >
+                                  <Edit2 className="w-3 h-3 text-[#B8530D]" />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={modalSubmitting}
+                                  onClick={() => handleDeleteCalibrationPoint(pt)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 border border-rose-500/20 text-[11px]"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Delete</span>
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Dry-Run Comparison Against Original Printed IOCL Chart */}
+              {calShowDryRun && (
+                <div className="bg-slate-950/60 border border-cyan-500/30 rounded-xl p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-bold text-cyan-300 font-mono uppercase flex items-center gap-1.5">
+                        <FlaskConical className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Dry-Run Comparison vs Printed IOCL Chart</span>
+                      </h4>
+                      <p className="text-[11px] text-[#64748B] mt-0.5">
+                        Paste or upload reference checkpoints (<code className="text-cyan-300">dip_mm, printed_volume_litres</code>) from the scanned IOCL chart to verify exact and interpolated volume conversions before or after activation.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleLoadSampleDryRunCheckpoints}
+                        className="px-2.5 py-1 rounded-lg bg-[#F1F5F9] hover:bg-[#E8EEF5] text-cyan-300 border border-[#D7E0EA] text-[11px] font-mono font-semibold"
+                      >
+                        Load Sample Checkpoints
+                      </button>
+                      <label className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#F1F5F9] hover:bg-[#E8EEF5] text-[#334155] border border-[#D7E0EA] text-[11px] font-mono font-semibold">
+                        <Upload className="w-3 h-3 text-cyan-400" />
+                        <span>Upload Checkpoints CSV</span>
+                        <input
+                          type="file"
+                          accept=".csv,.txt,.tsv"
+                          onChange={handleDryRunCsvUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleRunDryRunComparison} className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[10px] text-[#64748B] font-mono uppercase mb-1">
+                          Compare Against
+                        </label>
+                        <select
+                          value={calDryRunSource}
+                          onChange={e => setCalDryRunSource(e.target.value as 'SAVED_CHART' | 'CSV_PREVIEW')}
+                          className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-lg px-2.5 py-1.5 text-xs text-[#17365D] font-mono"
+                        >
+                          <option value="SAVED_CHART">
+                            Selected Saved Revision ({calSelectedChart ? `Rev #${calSelectedChart.revisionNumber}` : 'Active Chart'})
+                          </option>
+                          <option value="CSV_PREVIEW">
+                            Unsaved CSV Import Preview ({csvPreview?.normalizedPoints.length || 0} pts)
+                          </option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#64748B] font-mono uppercase mb-1">
+                          Acceptable Tolerance (L)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          value={calDryRunTolerance}
+                          onChange={e => setCalDryRunTolerance(e.target.value)}
+                          className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-lg px-2.5 py-1.5 text-xs text-[#17365D] font-mono"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          type="submit"
+                          disabled={modalSubmitting}
+                          className="w-full py-1.5 px-3 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-[#17365D] rounded-lg text-xs font-bold font-mono"
+                        >
+                          {modalSubmitting ? 'Evaluating...' : 'Run Dry-Run Verification'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <textarea
+                      rows={4}
+                      value={calDryRunText}
+                      onChange={e => setCalDryRunText(e.target.value)}
+                      placeholder={`dip_mm,printed_volume_litres\n0,0\n250,2500\n500,5000\n1250,12500\n2000,20000`}
+                      className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl p-2.5 text-xs text-[#17365D] font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                  </form>
+
+                  {calDryRunReport && (
+                    <div className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px] font-mono">
+                        <div className="p-2 bg-white rounded-lg border border-[#E2E8F0]">
+                          <span className="text-[#64748B] block text-[10px]">CHECKPOINTS</span>
+                          <span className="text-[#17365D] font-bold">{calDryRunReport.checkpointsCount}</span>
+                        </div>
                         <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
                           <span className="text-emerald-700/80 block text-[10px]">PASSED (≤ {formatCalibrationDisplay(calDryRunReport.toleranceLitres)} L)</span>
                           <span className="text-emerald-800 font-bold">{calDryRunReport.passedCount}</span>
