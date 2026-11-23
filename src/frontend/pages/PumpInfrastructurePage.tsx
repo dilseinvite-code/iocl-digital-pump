@@ -72,7 +72,7 @@ import { PERMISSIONS } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
 import { reviewReusableGlobalChart } from '../components/pump/reusableGlobalChart';
 import { GLOBAL_TANK_CAPACITIES_LITRES } from '../../shared/globalTankTypes';
-import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
+import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../shared/operatorSuppliedCalibration';
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
@@ -3308,17 +3308,17 @@ export const PumpInfrastructurePage: React.FC = () => {
                       <p className="font-semibold text-[#17365D]">{calGlobalSource?.name ?? calSelectedChart.sourceFileName ?? 'Saved global chart'}</p></div>
                     <div><p className="text-slate-500">Linked chart source</p>
                       <p className={'font-semibold ' + (calGlobalSource?.status === 'APPROVED' || calGlobalSource?.status === 'ACTIVE' ? 'text-green-800':'text-amber-800')}>
-                        {calGlobalSource?(isOperatorSuppliedReference(calGlobalSource)?'Operator-provided · Ready':calGlobalSource.status):'Checking source…'}</p></div>
+                        {calGlobalSource?(isOperatorSuppliedReference(calGlobalSource,calGlobalSource.points||[])?'Operator-provided · Ready':isOperatorSuppliedSourceMetadata(calGlobalSource)?'Supplied source · Reconcile readings':calGlobalSource.status):'Checking source…'}</p></div>
                     <div><p className="text-slate-500">Highest stored dip / volume</p>
                       <p className="font-semibold text-[#17365D]">{lastRecordedPoint
                         ? `${formatCalibrationDisplay(lastRecordedPoint.dipMillimetresMilliunits / 1000)} mm / ${formatCalibrationDisplay(lastRecordedPoint.volumeMilliunits / 1000)} L`
                         : 'Not available'}</p></div>
                   </div>
-                  {calGlobalSource?.status === 'DRAFT'&&!isOperatorSuppliedReference(calGlobalSource) && (
+                  {calGlobalSource?.status === 'DRAFT'&&!isOperatorSuppliedReference(calGlobalSource,calGlobalSource.points||[]) && (
                     <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                      The chart was selected as your default reference, but the source global chart is still DRAFT in this software.
-                      This is why operational activation was blocked. The tank's APPROVED revision status does not override the global source status.
-                      You only need to resolve the source once in Calibration Charts, not reapprove each copied chart.
+                      {isOperatorSuppliedSourceMetadata(calGlobalSource)
+                        ? 'The digital chart does not match the supplied PDF checkpoints. Correct its numerical readings in Tank Calibration; no additional approval is needed.'
+                        : 'The linked chart is not ready for operational use. Review its numerical source in Tank Calibration.'}
                     </p>
                   )}
                   <p className="text-xs text-slate-600">
