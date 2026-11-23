@@ -19,3 +19,5 @@ The test reads the existing legacy 10/15/20 KL Excel fixture, compares every dip
 The +15% nominal-volume thresholds (11500 L / 23000 L) are separate from physical tank safe-fill capacities.
 Existing tanks, tank stock history, audit logs, chart revision histories, D1 data and production deployments are unaffected.
 No manual Vercel production deployment, Cloudflare migration, live Tank #2 activation, or GitHub main merge is authorized by this commit.
+
+Manual second-look correction: 20 KL, 100 mm reread from the magnified PDF is 375.61 L (not the earlier initial 376.61 L). This change was applied to the candidate file before any operational import.

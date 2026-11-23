@@ -54,6 +54,7 @@ describe('Scanned PDF candidate transcriptions compared with legacy Excel',()=>{
  it('retains the flagged 20KL printed anomaly instead of inventing a smooth replacement',()=>{
    const rows=candidate(20);
    const get=(dip:number)=>rows.find(p=>p.dipMm===dip)!.volumeLitres;
+   expect(get(100)).toBe(375.61);
    expect(get(2010)).toBe(21307.88);
    expect(get(2020)).toBe(21369.52);
    expect(get(2030)).toBe(21408.13);
