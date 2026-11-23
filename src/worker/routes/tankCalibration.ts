@@ -1363,6 +1363,7 @@ tankCalibration.post('/calibration-templates/excel-import', async (c: AppContext
   }
 
   let confirmImport = false;
+  let acknowledgeOver15Warning = false;
   let targetCodes: string[] | undefined;
   let buffer: Uint8Array | null = null;
   let fileName = '20KL_15KL_10KL_calibration_Dip_chart.xlsx';
@@ -1371,6 +1372,7 @@ tankCalibration.post('/calibration-templates/excel-import', async (c: AppContext
   if (contentType.includes('multipart/form-data')) {
     const formData = await c.req.parseBody();
     confirmImport = formData['confirmImport'] === 'true';
+    acknowledgeOver15Warning = formData['acknowledgeOver15Warning'] === 'true';
     if (formData['targetCodes']) {
       try {
         targetCodes = JSON.parse(String(formData['targetCodes']));
@@ -1390,6 +1392,7 @@ tankCalibration.post('/calibration-templates/excel-import', async (c: AppContext
   } else {
     const body = await c.req.json().catch(() => ({}));
     confirmImport = Boolean(body.confirmImport);
+    acknowledgeOver15Warning = body.acknowledgeOver15Warning === true;
     targetCodes = Array.isArray(body.targetCodes) ? body.targetCodes : undefined;
     if (body.fileBase64) {
       const binaryString = atob(body.fileBase64);
@@ -1442,7 +1445,7 @@ tankCalibration.post('/calibration-templates/excel-import', async (c: AppContext
       db,
       extracted,
       { userId: user.user.id },
-      { confirmImport: true, targetCodes, ipAddress, userAgent }
+      { confirmImport: true, targetCodes, acknowledgeOver15Warning, ipAddress, userAgent }
     );
 
     return c.json({
@@ -2705,6 +2708,7 @@ const handleGlobalTemplateImport = async (c: AppContext) => {
       {
         status: targetStatus,
         allowOverCapacity: Boolean(body.allowOverCapacity),
+        allowOverLimitDraft: body.simpleUpload === true && targetStatus === 'DRAFT' && body.acknowledgeOver15Warning === true,
         // Save physically valid dip-to-volume data as DRAFT even if the
         // printed chart exceeds nominal/+10% capacity. This is an audit
         // warning during upload, never permission to approve or activate it.
@@ -2733,6 +2737,7 @@ const handleGlobalTemplateImport = async (c: AppContext) => {
         pointsCount: updated.pointsCount ?? parsedPoints.length,
         maxVolumeLitres: updated.maxVolumeLitres ?? null,
         allowOverCapacity: Boolean(body.allowOverCapacity),
+        acknowledgedOver15DraftWarning: body.simpleUpload === true && body.acknowledgeOver15Warning === true && targetStatus === 'DRAFT',
         sourceFileName: updated.sourceFileName,
         referenceDocument: updated.referenceDocument,
       },

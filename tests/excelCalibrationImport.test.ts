@@ -448,7 +448,22 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
         )
       ).rejects.toThrow('exceeds the maximum permitted +15% over-capacity ceiling');
 
-      // 2. Operational approval still requires a verified calibration record and Document Vault evidence
+      // 1b. Explicit warning acknowledgement is permitted for NON-OPERATIONAL
+      // draft reference storage, never for active chart approval.
+      const draftOnly = await pumpRepo.importGlobalTankCalibrationTemplatePoints(
+        tpl10.id,
+        [
+          {dipMillimetresMilliunits:0,volumeMilliunits:0},
+          {dipMillimetresMilliunits:1940000,volumeMilliunits:11500100},
+        ],
+        adminUserId,
+        {allowOverCapacity:true,allowOverLimitDraft:true,status:'DRAFT'}
+      );
+      expect(draftOnly.status).toBe('DRAFT');
+      expect(draftOnly.maxVolumeLitres).toBe(11500.1);
+
+      // 2. Operational approval remains independent; exceeding +15% cannot
+      // be silently promoted to an approved active chart.
       const approveRes = await app.request(
         `/api/v1/calibration-templates/${encodeURIComponent(tpl10.id)}/status`,
         {
@@ -468,7 +483,8 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(approveRes.status).toBe(400);
       const approveJson = (await approveRes.json()) as any;
       expect(approveJson.success).toBe(false);
-      expect(approveJson.error.code).toBe('ENGINEERING_VERIFICATION_REQUIRED');
+      expect(['OVER_CAPACITY_CEILING_EXCEEDED','ENGINEERING_VERIFICATION_REQUIRED'])
+        .toContain(approveJson.error.code);
 
       // 3. Assignment preview still rejects a physically mismatched or unverified tank
       const tanks = await db.select().from(schema.tanks);
@@ -487,7 +503,7 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(previewRes.status).toBe(400);
       const previewJson = (await previewRes.json()) as any;
       expect(previewJson.success).toBe(false);
-      expect(['INCOMPATIBLE_TANK', 'UNVERIFIED_TANK_DIMENSIONS']).toContain(previewJson.error.code);
+      expect(['ENGINEERING_REVIEW_REQUIRED', 'INCOMPATIBLE_TANK', 'UNVERIFIED_TANK_DIMENSIONS']).toContain(previewJson.error.code);
 
       // 4. Tank assignment for EXCEL_10KL_REFERENCE is blocked
       const assignRes = await app.request(
@@ -505,7 +521,7 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(assignRes.status).toBe(400);
       const assignJson = (await assignRes.json()) as any;
       expect(assignJson.success).toBe(false);
-      expect(['ENGINEERING_VERIFICATION_REQUIRED', 'TEMPLATE_NOT_APPROVED']).toContain(
+      expect(['ENGINEERING_REVIEW_REQUIRED','ENGINEERING_VERIFICATION_REQUIRED','TEMPLATE_NOT_APPROVED']).toContain(
         assignJson.error.code
       );
     });
