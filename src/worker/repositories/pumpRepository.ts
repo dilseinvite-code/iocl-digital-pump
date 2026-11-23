@@ -6449,14 +6449,7 @@ export class PumpRepository {
         template.engineeringVerification?.decision === 'VERIFIED' &&
         template.engineeringVerification?.allowScopedPolicyException === true
     );
-    const draftOnlyFromAddTank = options?.draftOnlyFromAddTank === true;
-    if (draftOnlyFromAddTank && (!Number.isFinite(template.maxVolumeLitres) || (template.maxVolumeLitres ?? 0) > template.nominalCapacityLitres * 1.15)) {
-      const err = new Error('Global chart is missing data or exceeds the strict +15% calibration reference limit. Re-upload corrected chart.');
-      (err as any).code='OVER_CAPACITY_CEILING_EXCEEDED';
-      throw err;
-    }
-
-    if (!draftOnlyFromAddTank && (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException))) {
+    if (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException)) {
       const err = new Error(
         `Global reference template ${template.code} requires engineering review (chart maximum volume ${template.maxVolumeLitresStr} L exceeds the +15% operational capacity ceiling) and cannot be assigned, activated, or used in DSR calculations.`
       );
@@ -6464,7 +6457,7 @@ export class PumpRepository {
       throw err;
     }
 
-    if (!draftOnlyFromAddTank && template.requiresDimensionVerification) {
+    if (template.requiresDimensionVerification) {
       const err = new Error(
         `Global reference template ${template.code} has an unresolved dimensional conflict (5,500 mm vs 3,750 mm length note) and cannot be assigned until engineering verification confirms the physical tank certificate.`
       );
@@ -6514,7 +6507,7 @@ export class PumpRepository {
       );
 
       // Requirement 6: Reject incompatible or unverified tank IDs even if submitted directly through the API
-      if (!draftOnlyFromAddTank && !evalResult.isCompatible) {
+      if (!evalResult.isCompatible) {
         const err = new Error(
           `Tank #${tank.tankNumber} (${tank.name}, ${tank.capacityLitres.toLocaleString()} L) is not eligible for ${template.code}: ${evalResult.ineligibilityReason}`
         );
@@ -6614,8 +6607,14 @@ export class PumpRepository {
         template.engineeringVerification?.decision === 'VERIFIED' &&
         template.engineeringVerification?.allowScopedPolicyException === true
     );
+    const draftOnlyFromAddTank = options?.draftOnlyFromAddTank === true;
+    if (draftOnlyFromAddTank && (!Number.isFinite(template.maxVolumeLitres) || (template.maxVolumeLitres ?? 0) > template.nominalCapacityLitres * 1.15)) {
+      const err = new Error('Global chart is missing data or exceeds the +15% maximum calibration volume limit.');
+      (err as any).code = 'OVER_CAPACITY_CEILING_EXCEEDED';
+      throw err;
+    }
 
-    if (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException)) {
+    if (!draftOnlyFromAddTank && (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException))) {
       const err = new Error(
         `Global reference template ${template.code} requires engineering review (chart maximum volume ${template.maxVolumeLitresStr} L exceeds the +15% operational capacity ceiling) and cannot be assigned, activated, or used in DSR calculations.`
       );
@@ -6623,7 +6622,7 @@ export class PumpRepository {
       throw err;
     }
 
-    if (template.requiresDimensionVerification) {
+    if (!draftOnlyFromAddTank && template.requiresDimensionVerification) {
       const err = new Error(
         `Global reference template ${template.code} has an unresolved dimensional conflict (5,500 mm vs 3,750 mm length note) and cannot be assigned until engineering verification confirms the physical tank certificate.`
       );
@@ -6697,7 +6696,7 @@ export class PumpRepository {
       );
 
       // Requirement 6: Reject incompatible or unverified tank IDs even if submitted directly through the API
-      if (!evalResult.isCompatible) {
+      if (!draftOnlyFromAddTank && !evalResult.isCompatible) {
         const err = new Error(
           `Tank #${tank.tankNumber} (${tank.name}, ${tank.capacityLitres.toLocaleString()} L) is not eligible for ${template.code}: ${evalResult.ineligibilityReason}`
         );
