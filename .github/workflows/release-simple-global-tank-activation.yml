@@ -1,0 +1,37 @@
+name: Release Simplified Tank Activation
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-simple-global-tank-activation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iocl-worker-production-releases
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Guarded release; preserve operational D1 records
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Validate the one-step activation flow
+        run: |
+          node --check scripts/release/activate-readonly-excel-pdf.mjs
+          bun run typecheck
+          bun test tests/reusableGlobalChart.test.ts tests/quickTankRegistration.test.ts tests/pumpInfrastructureFrontendPhase3.test.ts
+          bun run build
+      - name: Deploy Worker without database migrations
+        run: bun scripts/release/activate-readonly-excel-pdf.mjs

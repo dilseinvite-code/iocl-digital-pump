@@ -70,6 +70,7 @@ import {
 } from '../components/pump/pumpInfrastructureUi';
 import { PERMISSIONS } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
+import { reviewReusableGlobalChart } from '../components/pump/reusableGlobalChart';
 import { GLOBAL_TANK_CAPACITIES_LITRES } from '../../shared/globalTankTypes';
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
@@ -676,7 +677,52 @@ export const PumpInfrastructurePage: React.FC = () => {
     setModalSubmitting(true);
     setModalError(null);
 
+    let activatedCalibration = false;
     try {
+      if (needsReview) {
+        const chartResponse = (await apiFetch<TankCalibrationPoint[]>(
+          `/api/v1/tanks/${editingTank.id}/calibration`, { cache: 'no-store' }
+        )) as any;
+        if (!chartResponse.success) throw new Error(chartResponse.error?.message || 'Could not read the tank calibration.');
+        if (!chartResponse.activeChart) {
+          const sourceChart = (chartResponse.selectedChart ?? chartResponse.charts?.[0]) as TankCalibrationChart | undefined;
+          if (!sourceChart?.sourceTemplateId) {
+            setModalError('No global chart is linked. Choose a global calibration under Calibration Charts first.');
+            return;
+          }
+          const globalResponse = await apiFetch<GlobalTankCalibrationTemplate>(
+            '/api/v1/calibration-templates/' + encodeURIComponent(sourceChart.sourceTemplateId),
+            { cache: 'no-store' }
+          );
+          const review = reviewReusableGlobalChart(
+            sourceChart,
+            Array.isArray(chartResponse.data) ? chartResponse.data : [],
+            globalResponse.success ? (globalResponse.data ?? null) : null,
+            Number(editTankCapacity)
+          );
+          if (!review.ready) {
+            setModalError(review.message);
+            return;
+          }
+          // Source was approved ONCE. Activate its exactly matching copied
+          // tank revision through the existing authorised and audited endpoint.
+          // No upload, recreated rows, or automatic approval of a draft source.
+          const activate = await apiFetch<TankCalibrationChart>(
+            `/api/v1/tanks/${editingTank.id}/calibration/charts/${sourceChart.id}/status`, {
+              method: 'POST',
+              body: JSON.stringify({
+                status: 'ACTIVE', confirmActivation: true,
+                notes: 'Linked to an already approved, identical global calibration during tank activation.',
+              }),
+            }
+          );
+          if (!activate.success) {
+            throw new Error(activate.error?.message || 'Could not activate the linked chart.');
+          }
+          activatedCalibration = true;
+          await refreshTankCalibration(editingTank.id, sourceChart.id);
+        }
+      }
       const res = await apiFetch<Tank>(`/api/v1/tanks/${editingTank.id}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -718,8 +764,14 @@ export const PumpInfrastructurePage: React.FC = () => {
         setTimeout(() => setSuccessMsg(null), 3000);
         loadOutletData();
       } else {
-        setModalError(getPumpInfrastructureErrorMessage(res.error));
+        setModalError((activatedCalibration
+          ? 'The global chart is now active, but this tank remains INACTIVE. Correct the following and retry: '
+          : '') + getPumpInfrastructureErrorMessage(res.error));
       }
+    } catch (e: any) {
+      setModalError((activatedCalibration
+        ? 'The linked calibration activated, but the tank is still INACTIVE. Retry after checking: '
+        : '') + (e?.message || 'Tank update failed. No tank status change was confirmed.'));
     } finally {
       setModalSubmitting(false);
     }
@@ -2871,18 +2923,33 @@ export const PumpInfrastructurePage: React.FC = () => {
               </div>
 
               {editingTank.id.startsWith('tank-pgt-') && editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE' && (
-                <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-                  <strong>Activate Tank — separate from calibration activation</strong>
-                  <p>This tank was registered with a provisional 90% safe-fill value. Use the approved physical tank records to check the fuel grade, dimensions and actual operating limits. An ACTIVE calibration revision is required first.</p>
-                  <label className="flex items-start gap-2">
-                    <input type="checkbox" className="mt-0.5" checked={confirmTankPhysicalCompatibility} onChange={e => setConfirmTankPhysicalCompatibility(e.target.checked)} />
-                    I verified the physical tank dimensions, fuel grade and applicable active calibration.
+                <section className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-[#17365D]" data-testid="simple-activate-tank">
+                  <div className="font-bold">Activate tank in one step</div>
+                  <p>
+                    If this tank uses an already APPROVED global chart with identical readings, the software will
+                    activate that attached calibration for you. No duplicate chart approval or re-upload is needed.
+                  </p>
+                  <p className="text-amber-900">
+                    The initial 90% safe-fill value is provisional. Confirm the physical tank,
+                    fuel grade and actual safe-fill/minimum operating levels before activation.
+                  </p>
+                  <label className="flex items-start gap-2 rounded-lg bg-white p-3 border border-blue-200">
+                    <input type="checkbox" className="mt-0.5"
+                      data-testid="confirm-tank-readiness"
+                      checked={confirmTankPhysicalCompatibility && confirmTankOperatingLimits}
+                      onChange={e => {
+                        setConfirmTankPhysicalCompatibility(e.target.checked);
+                        setConfirmTankOperatingLimits(e.target.checked);
+                      }}/>
+                    I checked the physical tank, assigned fuel, applicable approved global chart and operating limits.
                   </label>
-                  <label className="flex items-start gap-2">
-                    <input type="checkbox" className="mt-0.5" checked={confirmTankOperatingLimits} onChange={e => setConfirmTankOperatingLimits(e.target.checked)} />
-                    I independently checked the safe-fill and minimum operating levels (not just the provisional default).
-                  </label>
-                </div>
+                  <button type="button" onClick={() => {
+                    setModalType(null);
+                    setActiveTab('globalCalibration');
+                  }} className="text-blue-800 underline font-semibold">
+                    Review global chart if it is still DRAFT
+                  </button>
+                </section>
               )}
               <div className="flex justify-end gap-2 pt-3">
                 <button
@@ -2897,7 +2964,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   disabled={modalSubmitting}
                   className="px-4 py-2 bg-orange-500 text-white rounded-xl text-xs font-bold"
                 >
-                  {modalSubmitting ? 'Saving...' : 'Update Tank'}
+                  {modalSubmitting ? 'Saving...' : editingTank.id.startsWith('tank-pgt-') && editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE' ? 'Activate Tank' : 'Save Changes'}
                 </button>
               </div>
             </form>
@@ -3189,7 +3256,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   <p className="text-sm text-slate-700">
                     Tank #{calibratingTank.tankNumber} automatically uses your selected
                     {calibratingTank.capacityLitres / 1000} KL global reference.
-                    Its dip-to-litre values are already saved. You do not need to approve the same chart separately for each tank.
+                    Its dip-to-litre values are already saved. You do not need to re-upload its readings. An approved, identical global source can be reused at tank activation.
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                     <div><p className="text-slate-500">Source global chart</p>

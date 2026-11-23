@@ -66,7 +66,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
 
   const chosen=templates.find(t=>t.code===selectedCode);
   const scannedSpec=chosen ? scannedReferenceSpec(chosen.nominalCapacityLitres) : null;
-  const scannedReview=chosen && scannedSpec
+  const alternateToScannedReference=Boolean(chosen && scannedSpec && chosen.code !== scannedSpec.code);
+  const scannedReview=chosen && scannedSpec && !alternateToScannedReference
     ? reviewScannedCalibrationCandidate({
         code:chosen.code,
         nominalCapacityLitres:chosen.nominalCapacityLitres,
@@ -77,7 +78,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       })
     : null;
   const defaultOver15=Boolean(chosen&&exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres));
-  const defaultHasWarning=Boolean(defaultOver15||(scannedReview&&!scannedReview.passed));
+  const defaultHasWarning=Boolean(defaultOver15||alternateToScannedReference||(scannedReview&&!scannedReview.passed));
   const canSetAsDefault=Boolean(chosen && (chosen.pointsCount||0)>=2 &&
     (!defaultHasWarning || acknowledgedDefaultWarning));
   useEffect(()=>setAcknowledgedDefaultWarning(false),[chosen?.id]);
@@ -90,7 +91,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         {method:'PUT',body:JSON.stringify({templateId:chosen.id,acknowledgedWarnings:defaultHasWarning&&acknowledgedDefaultWarning})});
       if(!r.success)throw new Error(r.error?.message||'Could not save default calibration');
       await loadDefaults();
-      setNotice(chosen.nominalCapacityLitres/1000+' KL default saved. New tanks of this capacity will select this calibration automatically.');
+      setNotice(chosen.nominalCapacityLitres/1000+' KL chart selected for NEW tanks. Existing tanks retain their currently attached source and readings.');
     }catch(e:any){setError(e.message||'Default selection failed');}
     finally{setSettingDefault(false);}
   };
@@ -318,26 +319,55 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       </button>)}</div>
       {chosen&&<div className="mt-4 rounded-xl bg-[#F4F7FB] p-4">
         <div className="flex flex-wrap items-center justify-between gap-2"><div><h4 className="font-bold text-[#17365D]">{chosen.name}</h4>
-          <p className="text-sm text-slate-600">{chosen.pointsCount} points · {chosen.status} · Max {fmt(chosen.maxVolumeLitres||0)} L</p></div>
+          <p className="text-sm text-slate-600">
+            {chosen.pointsCount} readings · Max {fmt(chosen.maxVolumeLitres||0)} L
+            <span className={'ml-2 rounded px-2 py-0.5 text-xs font-semibold '+(chosen.status==='APPROVED'||chosen.status==='ACTIVE'?'bg-green-100 text-green-800':'bg-amber-100 text-amber-900')}>
+              {chosen.status==='APPROVED'||chosen.status==='ACTIVE'?'Approved source':'Draft reference'}
+            </span>
+          </p></div>
           <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-[#17365D]" onClick={()=>setShowReadings(v=>!v)}>
             {showReadings?'Hide readings':'View readings'}</button>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {defaultCharts[chosen.nominalCapacityLitres]===chosen.id
-            ? <span className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-800">Default for {chosen.nominalCapacityLitres/1000} KL — automatic selection enabled</span>
-            : canWriteTankCalibration && <button type="button" disabled={!canSetAsDefault||settingDefault}
-                onClick={()=>{void setDefault();}} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">
-                {settingDefault?'Saving...':'Set as default for '+chosen.nominalCapacityLitres/1000+' KL'}
-              </button>}
-          {scannedReview&&!scannedReview.passed&&<div className="w-full rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900" data-testid="scanned-reference-checkpoint-warning">Warning: The stored digital readings differ from the source PDF at one or more sampled checkpoints, or the full scan is not loaded. Selecting this chart will use its **stored digital values**, not exact transcribed PDF values. {scannedReview.issues.slice(0,3).join(' ')}</div>}
-          {scannedReview?.passed&&<span className="text-xs text-green-800">Full dip range and sampled scan checkpoints match. Full row-by-row transcription still requires review before live activation.</span>}
-          {defaultHasWarning&&defaultCharts[chosen.nominalCapacityLitres]!==chosen.id&&<label className="flex w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-            <input type="checkbox" data-testid="acknowledge-default-chart-warning" checked={acknowledgedDefaultWarning} onChange={e=>setAcknowledgedDefaultWarning(e.target.checked)} className="mt-0.5"/>
-            I acknowledge the source/volume warning. Use this saved digital chart as a DRAFT reference for newly registered inactive tanks; do not mark it operationally approved.
-          </label>}
-          {!canSetAsDefault&&!defaultHasWarning&&<span className="text-xs text-amber-800">At least two numerical dip-to-volume readings must be saved before choosing a default.</span>}
-        </div>
-        {capped10&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+        <div className="mt-3 space-y-3">
+           {defaultCharts[chosen.nominalCapacityLitres]===chosen.id
+             ? <span className="inline-block rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-800">
+                 Selected automatically for NEW {chosen.nominalCapacityLitres/1000} KL tanks
+               </span>
+             : <>
+                 {defaultHasWarning&&<label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                   <input type="checkbox" data-testid="acknowledge-default-chart-warning"
+                     checked={acknowledgedDefaultWarning}
+                     onChange={e=>setAcknowledgedDefaultWarning(e.target.checked)} className="mt-0.5"/>
+                   I understand this selects the stored digital chart as a reference for new tanks.
+                   Source differences and +15% warnings remain recorded; it does not replace existing tank charts or approve a DRAFT source.
+                 </label>}
+                 {canWriteTankCalibration&&<button type="button" disabled={!canSetAsDefault||settingDefault}
+                   onClick={()=>{void setDefault();}}
+                   className="rounded-lg bg-[#17365D] px-4 py-2 text-xs font-bold text-white disabled:opacity-40">
+                   {settingDefault?'Saving...':'Use this chart for new '+chosen.nominalCapacityLitres/1000+' KL tanks'}
+                 </button>}
+               </>}
+           {alternateToScannedReference&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+             This <strong>{chosen.nominalCapacityLitres/1000} KL Standard</strong> chart is different from your uploaded scanned Excel reference
+             (scanned maximum {fmt(scannedSpec!.maxVolumeLitres)} L; this chart maximum {fmt(chosen.maxVolumeLitres||0)} L).
+             They are alternatives, not the same approved document.
+           </div>}
+           {scannedReview&&!scannedReview.passed&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900" data-testid="scanned-reference-checkpoint-warning">
+             The saved Excel readings differ at sampled points from the scanned PDF. Selecting them as a reference will use the stored values.
+             <details className="mt-1"><summary className="cursor-pointer font-semibold">See differences</summary>
+               <p className="mt-2">{scannedReview.issues.slice(0,4).join(' ')}</p></details>
+           </div>}
+           {scannedReview?.passed&&<span className="text-xs text-green-800">
+             Sample scan checkpoints match. All printed rows still require confirmation for operational use.
+           </span>}
+           {!canSetAsDefault&&!defaultHasWarning&&<span className="text-xs text-amber-800">
+             Save numerical dip-to-volume readings first.
+           </span>}
+           <p className="text-xs text-slate-500">
+             Default selection affects only future registrations, not Tank #1, Tank #2 or other existing tanks.
+           </p>
+         </div>
+         {capped10&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
           Full 10 KL reference range: 0–{fmt(capped10.operationalMaximumDipMm)} mm / 0–{fmt(capped10.operationalMaximumLitres)} L. No 11,000 L truncation. Physical safe-fill remains separate.
         </p>}
         {exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres)&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
