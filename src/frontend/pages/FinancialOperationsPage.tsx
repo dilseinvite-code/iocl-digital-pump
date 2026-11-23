@@ -47,6 +47,7 @@ import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { useShiftWorkbench } from '../context/ShiftWorkbenchContext';
 import { resolveWorkbenchShift, toWorkbenchSelection } from '../utils/shiftWorkbench';
 import { getLocalDateInputValue } from '../../shared/utils/dateUtils';
+import {consumeWorkspaceSection} from '../components/layout/workspaceTaskCatalog';
 import './financialReportsModern.css';
 import { financeStages, financeStageDetails, financeSalesProvisional, type FinanceStage } from '../utils/financeWorkflow';
 
@@ -68,6 +69,25 @@ export const FinancialOperationsPage: React.FC = () => {
   const [selectedShift, setSelectedShift] = useState<OperationalShift | null>(null);
 
   const [activeTab, setActiveTab] = useState<FinanceStage | 'credit-parties' | 'prices'>('sales');
+  useEffect(()=>{
+    const allowed=['sales','collections','handovers','deposits','reconciliation','credit-parties','prices'] as const;
+    const pick=(section:string|null)=>{
+      if(!section||!allowed.includes(section as typeof allowed[number]))return;
+      if(section==='collections'&&!hasPermission(PERMISSIONS.COLLECTIONS_READ))return;
+      if(section==='handovers'&&!hasPermission(PERMISSIONS.CASH_HANDOVER_READ))return;
+      if(section==='deposits'&&!hasPermission(PERMISSIONS.BANK_DEPOSITS_READ))return;
+      if(section==='credit-parties'&&!hasPermission(PERMISSIONS.CREDIT_PARTIES_READ))return;
+      if(section==='prices'&&!hasPermission(PERMISSIONS.PRODUCT_PRICES_READ))return;
+      setActiveTab(section as typeof activeTab);
+    };
+    pick(consumeWorkspaceSection('financials',allowed));
+    const handle=(event:Event)=>{
+      const detail=(event as CustomEvent<{tab:string;section:string}>).detail;
+      if(detail?.tab==='financials')pick(detail.section);
+    };
+    window.addEventListener('iocl:workspace-task',handle);
+    return ()=>window.removeEventListener('iocl:workspace-task',handle);
+  },[hasPermission]);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [outletProducts, setOutletProducts] = useState<OutletProduct[]>([]);

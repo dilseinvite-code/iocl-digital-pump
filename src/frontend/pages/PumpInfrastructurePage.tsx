@@ -76,6 +76,7 @@ import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibrat
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
+import {consumeWorkspaceSection} from '../components/layout/workspaceTaskCatalog';
 
 type PendingQuickTank = {
   id: string; outletId: string; name: string; capacityLitres: number;
@@ -100,6 +101,21 @@ export const PumpInfrastructurePage: React.FC = () => {
 
   // Active Sub-tab
   const [activeTab, setActiveTab] = useState<'products' | 'tanks' | 'globalCalibration' | 'dispensers' | 'nozzles' | 'shifts' | 'fuelMapping'>('products');
+  useEffect(()=>{
+    const allowed=['products','tanks','globalCalibration','dispensers','nozzles','shifts','fuelMapping'] as const;
+    const pick=(section:string|null)=>{
+      if(!section||!allowed.includes(section as typeof allowed[number]))return;
+      if(section==='globalCalibration'&&!canReadTankCalibration)return;
+      setActiveTab(section as typeof activeTab);
+    };
+    pick(consumeWorkspaceSection('pump-infra',allowed));
+    const handle=(event:Event)=>{
+      const detail=(event as CustomEvent<{tab:string;section:string}>).detail;
+      if(detail?.tab==='pump-infra')pick(detail.section);
+    };
+    window.addEventListener('iocl:workspace-task',handle);
+    return ()=>window.removeEventListener('iocl:workspace-task',handle);
+  },[canReadTankCalibration]);
 
   // Outlet-specific data
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
