@@ -20,7 +20,8 @@ describe('Scanned 10/20 KL checkpoint validation (not full row-by-row certificat
     const c=sample(capacity);
     const v=reviewScannedCalibrationCandidate(c);
     expect(v.passed).toBe(true);
-    expect(v.checkedSamplePoints).toBe(5);
+    expect(v.checkedSamplePoints).toBe(SCANNED_CALIBRATION_REFERENCES[capacity].printedCheckpoints.length);
+    if(capacity===20000)expect(c.points.find(p=>p.dipMm===2020)?.volumeLitres).toBe(21359.52);
     expect(c.points.at(-1)).toEqual({dipMm:c.maxDipMm,volumeLitres:SCANNED_CALIBRATION_REFERENCES[capacity].maxVolumeLitres});
   });
   it.each([10000,20000] as const)('rejects missing rows and altered scanned checkpoints for %iL',capacity=>{
