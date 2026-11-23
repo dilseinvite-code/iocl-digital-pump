@@ -523,6 +523,8 @@ export type TankCalibrationChartStatus = 'DRAFT' | 'APPROVED' | 'ACTIVE' | 'SUPE
 export interface TankCalibrationChart {
   id: string;
   tankId: string;
+  /** Global chart from which this revision was copied; source controls one-time approval. */
+  sourceTemplateId?: string | null;
   revisionNumber: number;
   status: TankCalibrationChartStatus;
   chartUnitDip: 'MM';

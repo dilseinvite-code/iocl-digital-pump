@@ -142,6 +142,9 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [calCharts, setCalCharts] = useState<TankCalibrationChart[]>([]);
   const [calActiveChart, setCalActiveChart] = useState<TankCalibrationChart | null>(null);
   const [calSelectedChart, setCalSelectedChart] = useState<TankCalibrationChart | null>(null);
+  const [calGlobalSource, setCalGlobalSource] = useState<GlobalTankCalibrationTemplate | null>(null);
+  const [calShowAdvanced, setCalShowAdvanced] = useState(false);
+  const [initialGlobalChartCode, setInitialGlobalChartCode] = useState('');
   const [calModalPoints, setCalModalPoints] = useState<TankCalibrationPoint[]>([]);
   const [calEditingPoint, setCalEditingPoint] = useState<TankCalibrationPoint | null>(null);
   const [calDipInput, setCalDipInput] = useState('');
@@ -754,6 +757,15 @@ export const PumpInfrastructurePage: React.FC = () => {
       setCalActiveChart(activeChart);
       setCalSelectedChart(selectedChart);
       setCalModalPoints(pts);
+      if (selectedChart?.sourceTemplateId) {
+        const globalResult = await apiFetch<GlobalTankCalibrationTemplate>(
+          '/api/v1/calibration-templates/' + encodeURIComponent(selectedChart.sourceTemplateId),
+          { cache: 'no-store' }
+        );
+        setCalGlobalSource(globalResult.success ? globalResult.data ?? null : null);
+      } else {
+        setCalGlobalSource(null);
+      }
       const badgeChart = activeChart ?? selectedChart;
       setTankChartStatusByTankId(prev => ({
         ...prev, [tankId]: {
@@ -801,6 +813,8 @@ export const PumpInfrastructurePage: React.FC = () => {
     setCalCharts([]);
     setCalActiveChart(null);
     setCalSelectedChart(null);
+    setCalGlobalSource(null);
+    setCalShowAdvanced(false);
     setCalModalPoints([]);
     setCalEditingPoint(null);
     setCalDipInput('');
@@ -1474,6 +1488,7 @@ export const PumpInfrastructurePage: React.FC = () => {
           }
           canWriteTankCalibration={canWriteTankCalibration}
           canApproveCalibrationChart={canApproveCalibrationChart}
+          initialSelectedCode={initialGlobalChartCode}
           onCalibrationAssigned={() => {
             loadOutletData();
           }}
@@ -3078,7 +3093,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-lg font-bold text-[#17365D]">
-                      Tank Calibration Chart
+                      {calSelectedChart?.sourceTemplateId ? 'Linked Global Calibration' : 'Tank Calibration Chart'}
                     </h2>
                     <span
                       className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 font-mono ${calStatus.badgeClass}`}
@@ -3160,6 +3175,59 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </button>
               </div>
 
+              {calSelectedChart?.sourceTemplateId && !calShowAdvanced && (
+                <section className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 space-y-4" data-testid="global-calibration-linked-summary">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2 text-[#17365D] font-semibold">
+                      <CheckCircle className="h-5 w-5 text-green-700"/>
+                      Global chart already attached — no repeat upload needed
+                    </div>
+                    <span className="rounded-full bg-white border border-blue-200 px-3 py-1 text-xs text-slate-700">
+                      {calPoints.length} stored readings
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    Tank #{calibratingTank.tankNumber} automatically uses your selected
+                    {calibratingTank.capacityLitres / 1000} KL global reference.
+                    Its dip-to-litre values are already saved. You do not need to approve the same chart separately for each tank.
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                    <div><p className="text-slate-500">Source global chart</p>
+                      <p className="font-semibold text-[#17365D]">{calGlobalSource?.name ?? calSelectedChart.sourceFileName ?? 'Saved global chart'}</p></div>
+                    <div><p className="text-slate-500">Global approval in software</p>
+                      <p className={'font-semibold ' + (calGlobalSource?.status === 'APPROVED' || calGlobalSource?.status === 'ACTIVE' ? 'text-green-800':'text-amber-800')}>
+                        {calGlobalSource?.status ?? 'Checking source status…'}</p></div>
+                    <div><p className="text-slate-500">Highest stored dip / volume</p>
+                      <p className="font-semibold text-[#17365D]">{lastRecordedPoint
+                        ? `${formatCalibrationDisplay(lastRecordedPoint.dipMillimetresMilliunits / 1000)} mm / ${formatCalibrationDisplay(lastRecordedPoint.volumeMilliunits / 1000)} L`
+                        : 'Not available'}</p></div>
+                  </div>
+                  {calGlobalSource?.status === 'DRAFT' && (
+                    <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                      The chart was selected as your default reference, but the source global chart is still DRAFT in this software.
+                      This is why operational activation was blocked. The tank's APPROVED revision status does not override the global source status.
+                      You only need to resolve the source once in Calibration Charts, not reapprove each copied chart.
+                    </p>
+                  )}
+                  <p className="text-xs text-slate-600">
+                    Tank status: <strong>{calibratingTank.status}</strong>. Physical safe-fill/operating limits are separate from the calibration reference.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => {
+                      setInitialGlobalChartCode(calGlobalSource?.code || '');
+                      setModalType(null);
+                      setActiveTab('globalCalibration');
+                    }} className="rounded-lg bg-[#17365D] px-4 py-2 text-xs font-bold text-white">
+                      Manage global calibration once
+                    </button>
+                    <button type="button" onClick={() => setCalShowAdvanced(true)}
+                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs text-slate-700">
+                      Show advanced technical details
+                    </button>
+                  </div>
+                </section>
+              )}
+              {(!calSelectedChart?.sourceTemplateId || calShowAdvanced) && (<>
               {/* Revision Selector & Lifecycle Controls */}
               {calCharts.length > 0 && (
                 <div className="p-3.5 bg-slate-950/60 border border-[#E2E8F0] rounded-xl space-y-3">
@@ -3991,6 +4059,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </div>
               )}
 
+              </>)}
               <div className="flex justify-end pt-2 border-t border-[#E2E8F0]">
                 <button
                   type="button"

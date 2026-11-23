@@ -12,6 +12,7 @@ interface Props {
   selectedOutletName?: string;
   canWriteTankCalibration: boolean;
   canApproveCalibrationChart: boolean;
+  initialSelectedCode?: string;
   onCalibrationAssigned?: () => void;
 }
 type UploadPreview = {charts: Array<{
@@ -25,7 +26,7 @@ const fmt=(value:number)=>value.toLocaleString('en-IN',{maximumFractionDigits:3}
 const MAX_FILE_BYTES=8*1024*1024;
 
 export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
-  selectedOutletName,canWriteTankCalibration,
+  selectedOutletName,canWriteTankCalibration,initialSelectedCode,
 })=>{
   const [templates,setTemplates]=useState<GlobalTankCalibrationTemplate[]>([]);
   const [defaultCharts,setDefaultCharts]=useState<Record<number,string>>({});
@@ -58,6 +59,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     if(r.success&&r.data)setDefaultCharts(Object.fromEntries(r.data.map(d=>[d.capacityLitres,d.templateId])));
   };
   useEffect(()=>{loadTemplates().catch(e=>setError(e.message));void loadDefaults();},[]);
+  // A copied tank chart can open its exact global source, not an unrelated 10 KL default.
+  useEffect(()=>{
+    if(initialSelectedCode)setSelectedCode(initialSelectedCode);
+  },[initialSelectedCode]);
 
   const chosen=templates.find(t=>t.code===selectedCode);
   const scannedSpec=chosen ? scannedReferenceSpec(chosen.nominalCapacityLitres) : null;
