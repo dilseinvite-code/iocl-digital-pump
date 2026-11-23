@@ -4,7 +4,7 @@ import {apiFetch, clearApiCache} from '../../services/api';
 import type {GlobalTankCalibrationTemplate} from '../../../shared/types';
 import {limitTenKlCalibrationCurve} from '../../../shared/tenKlCalibrationLimit';
 import {scannedReferenceSpec, reviewScannedCalibrationCandidate} from '../../../shared/scannedCalibrationReference';
-import {isOperatorSuppliedReference} from '../../../shared/operatorSuppliedCalibration';
+import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../../shared/operatorSuppliedCalibration';
 import {parseSimpleCalibrationCsv, type ParsedSimpleCalibrationCsv} from './simpleCalibrationCsv';
 import {GLOBAL_TANK_CAPACITIES_LITRES, exceedsGlobalCalibrationLimit, globalCalibrationMaxLitres} from '../../../shared/globalTankTypes';
 
@@ -57,7 +57,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     const result=await apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates');
     if(!result.success || !result.data)throw new Error(result.error?.message || 'Could not load calibration charts');
     setTemplates(result.data);
-    setSelectedCode(current=>current || result.data?.find(t=>isOperatorSuppliedReference(t))?.code || result.data?.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code || result.data?.find(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status))?.code || '');
+    setSelectedCode(current=>current || result.data?.find(t=>isOperatorSuppliedSourceMetadata(t))?.code || result.data?.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code || result.data?.find(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status))?.code || '');
   };
   const loadDefaults=async()=>{
     const r=await apiFetch<Array<{capacityLitres:number;templateId:string}>>('/api/v1/global-tank-defaults');
@@ -70,7 +70,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   },[initialSelectedCode]);
 
   const chosen=templates.find(t=>t.code===selectedCode);
-  const suppliedReady=Boolean(chosen&&isOperatorSuppliedReference(chosen));
+  const suppliedSource=Boolean(chosen&&isOperatorSuppliedSourceMetadata(chosen));
+  const suppliedReady=Boolean(chosen&&detail?.id===chosen.id&&isOperatorSuppliedReference(chosen,(detail.points||[]).map(point=>({
+    dipMillimetresMilliunits:point.dipMillimetresMilliunits,volumeMilliunits:point.volumeMilliunits
+  }))));
   const scannedSpec=chosen ? scannedReferenceSpec(chosen.nominalCapacityLitres) : null;
   const alternateToScannedReference=Boolean(chosen && scannedSpec && chosen.code !== scannedSpec.code);
   const scannedReview=chosen && scannedSpec && !alternateToScannedReference
@@ -90,7 +93,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   useEffect(()=>{setAcknowledgedDefaultWarning(false);setAcknowledgedApproval(false);},[chosen?.id]);
   const capacityCards=GLOBAL_TANK_CAPACITIES_LITRES.map(capacity=>{
     const active=templates.filter(t=>t.nominalCapacityLitres===capacity&&!['ARCHIVED','SUPERSEDED'].includes(t.status));
-    return {capacity,template:active.find(t=>isOperatorSuppliedReference(t))||
+    return {capacity,template:active.find(t=>isOperatorSuppliedSourceMetadata(t))||
       active.find(t=>t.id===defaultCharts[capacity])||
       active.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')||active[0]||null};
   });
@@ -354,7 +357,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
             else {setShowImport(true);setCreatingCustom(true);setNewCapacity(String(capacity));}}}
           className={'rounded-xl border p-3 text-left '+(chosen?.nominalCapacityLitres===capacity?'border-orange-500 bg-orange-50':'border-slate-200 bg-white')}>
           <span className="block text-lg font-bold text-[#17365D]">{capacity/1000} KL</span>
-          <span className="mt-1 block text-xs text-slate-600">{template?(isOperatorSuppliedReference(template)?'Ready':(['APPROVED','ACTIVE'].includes(template.status)?'Approved':'Draft'))+' · '+template.pointsCount+' readings':'No chart saved'}</span>
+          <span className="mt-1 block text-xs text-slate-600">{template?(isOperatorSuppliedSourceMetadata(template)?'Supplied source':(['APPROVED','ACTIVE'].includes(template.status)?'Approved':'Draft'))+' · '+template.pointsCount+' readings':'No chart saved'}</span>
           {template&&defaultCharts[capacity]===template.id&&<span className="block text-xs font-semibold text-green-700">Default for new tanks</span>}
         </button>)}
       </div>
@@ -363,7 +366,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       {showAllCharts&&<div className="mt-2 flex flex-wrap gap-2" data-testid="previous-calibration-charts">
         {templates.map(t=><button key={t.id} type="button" onClick={()=>{setSelectedCode(t.code);setShowReadings(false);}}
           className={'rounded-lg border px-3 py-2 text-xs '+(t.code===selectedCode?'border-orange-500 bg-orange-50':'border-slate-200 text-slate-600')}>
-          {t.nominalCapacityLitres/1000} KL · {t.name} · {isOperatorSuppliedReference(t)?'READY':t.status}
+          {t.nominalCapacityLitres/1000} KL · {t.name} · {isOperatorSuppliedSourceMetadata(t)?'SUPPLIED SOURCE':t.status}
         </button>)}
       </div>}
       {chosen&&<div className="mt-4 rounded-xl bg-[#F4F7FB] p-4">
@@ -371,14 +374,14 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
           <p className="text-sm text-slate-600">
             {chosen.pointsCount} readings · Max {fmt(chosen.maxVolumeLitres||0)} L
             <span className={'ml-2 rounded px-2 py-0.5 text-xs font-semibold '+(chosen.status==='APPROVED'||chosen.status==='ACTIVE'?'bg-green-100 text-green-800':'bg-amber-100 text-amber-900')}>
-              {suppliedReady?'Operator-provided · Ready':chosen.status==='APPROVED'||chosen.status==='ACTIVE'?'Approved source':'Draft reference'}
+              {suppliedReady?'Operator-provided · Ready':suppliedSource?'Supplied source · Reconcile readings':chosen.status==='APPROVED'||chosen.status==='ACTIVE'?'Approved source':'Draft reference'}
             </span>
           </p></div>
           <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-[#17365D]" onClick={()=>setShowReadings(v=>!v)}>
             {showReadings?'Hide readings':'View readings'}</button>
         </div>
         <div className="mt-3 space-y-3">
-          {chosen.status==='DRAFT'&&!suppliedReady&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
+          {chosen.status==='DRAFT'&&!suppliedSource&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
             <p className="font-semibold text-amber-900">Draft chart — not yet approved for operational use.</p>
             {canApproveCalibrationChart&&(chosen.pointsCount||0)>=2&&
               !chosen.isOverCapacityCeiling&&!chosen.requiresEngineeringReview&&!chosen.requiresDimensionVerification&&<>
@@ -395,7 +398,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
             {(chosen.isOverCapacityCeiling||chosen.requiresEngineeringReview||chosen.requiresDimensionVerification)&&
               <p className="mt-2 text-amber-900">Check the chart source and tank dimensions before approval.</p>}
           </div>}
-           {(defaultCharts[chosen.nominalCapacityLitres]===chosen.id||suppliedReady)
+           {(suppliedReady||(defaultCharts[chosen.nominalCapacityLitres]===chosen.id&&!suppliedSource))
              ? <span className="inline-block rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-800">
                  {suppliedReady?'Provided reference used for new ':'Selected automatically for NEW '}{chosen.nominalCapacityLitres/1000} KL tanks
                </span>
@@ -413,6 +416,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
                    {settingDefault?'Saving...':'Use this chart for new '+chosen.nominalCapacityLitres/1000+' KL tanks'}
                  </button>}
                </>}
+           {suppliedSource&&detail?.id===chosen.id&&!suppliedReady&&scannedReview&&!scannedReview.passed&&
+             <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+               The supplied PDF and stored Excel values differ at some printed checkpoints. Correct the numerical readings before using this chart for operational remapping.
+             </p>}
            {alternateToScannedReference&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
              This <strong>{chosen.nominalCapacityLitres/1000} KL Standard</strong> chart is different from your uploaded scanned Excel reference
              (scanned maximum {fmt(scannedSpec!.maxVolumeLitres)} L; this chart maximum {fmt(chosen.maxVolumeLitres||0)} L).
