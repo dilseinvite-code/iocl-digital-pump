@@ -386,11 +386,13 @@ export const PumpInfrastructurePage: React.FC = () => {
     setError(null);
     setFinalizingPendingId(pending.id);
     try {
-      const res = await apiFetch<{id:string; tankNumber:number}>(`/api/v1/outlets/${selectedOutletId}/pending-tanks/${encodeURIComponent(pending.id)}/finalize`, {
+      const res = await apiFetch<{id:string; tankNumber:number; calibrationStatus?: 'ACTIVE' | 'DRAFT'}>(`/api/v1/outlets/${selectedOutletId}/pending-tanks/${encodeURIComponent(pending.id)}/finalize`, {
         method: 'POST', body: JSON.stringify({ productId }),
       });
       if (!res.success) { setError(getPumpInfrastructureErrorMessage(res.error)); return; }
-      setSuccessMsg(`Tank #${res.data?.tankNumber} created with global calibration as DRAFT. Tank remains INACTIVE until operating limits and physical compatibility are reviewed.`);
+      setSuccessMsg(res.data?.calibrationStatus === 'ACTIVE'
+        ? `Tank #${res.data.tankNumber} saved with its approved global calibration. Set the tank's operational status when ready.`
+        : `Tank #${res.data?.tankNumber} saved with a linked DRAFT chart. The source must be approved before operational use.`);
       setTimeout(() => setSuccessMsg(null), 9000);
       await loadOutletData();
     } catch (e: any) {
@@ -2905,7 +2907,8 @@ export const PumpInfrastructurePage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs text-[#475569] mb-1">Tank Operational Status</label>
+                <label className="block text-xs text-[#475569] mb-1">Set Tank Status</label>
+                <p className="text-[11px] text-slate-600 mb-2">Current: <strong>{editingTank.status}</strong>. ACTIVE in the selector is a requested change, not the current tank status.</p>
                 <select
                   value={editTankStatus}
                   onChange={(e) => setEditTankStatus(e.target.value as any)}
@@ -2918,21 +2921,17 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </select>
               </div>
 
-              <div className="p-2.5 bg-[#F8FAFC]/60 border border-[#E2E8F0] rounded-xl text-[11px] text-[#64748B]">
-                ℹ️ Notice: Changing fuel grade product on an operational tank will be safely rejected if connected nozzles, historical meter readings, or fuel receipts are recorded.
-              </div>
+              {editTankProductId !== editingTank.productId && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900">
+                  Changing fuel grade can be rejected when nozzles or historical fuel records are linked.
+                </div>
+              )}
 
               {editingTank.id.startsWith('tank-pgt-') && editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE' && (
                 <section className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-[#17365D]" data-testid="simple-activate-tank">
-                  <div className="font-bold">Activate tank in one step</div>
-                  <p>
-                    If this tank uses an already APPROVED global chart with identical readings, the software will
-                    activate that attached calibration for you. No duplicate chart approval or re-upload is needed.
-                  </p>
-                  <p className="text-amber-900">
-                    The initial 90% safe-fill value is provisional. Confirm the physical tank,
-                    fuel grade and actual safe-fill/minimum operating levels before activation.
-                  </p>
+                  <div className="font-bold">Ready to use Tank #{editingTank.tankNumber}?</div>
+                  <p>If the tank's linked chart is already approved and matches its stored readings, it is used automatically. No re-upload is needed.</p>
+                  <p className="text-amber-900">Confirm the fuel grade and actual operating limits once. The initial safe-fill value may be provisional.</p>
                   <label className="flex items-start gap-2 rounded-lg bg-white p-3 border border-blue-200">
                     <input type="checkbox" className="mt-0.5"
                       data-testid="confirm-tank-readiness"
@@ -2941,13 +2940,10 @@ export const PumpInfrastructurePage: React.FC = () => {
                         setConfirmTankPhysicalCompatibility(e.target.checked);
                         setConfirmTankOperatingLimits(e.target.checked);
                       }}/>
-                    I checked the physical tank, assigned fuel, applicable approved global chart and operating limits.
+                    I confirm this tank's fuel mapping and operating limits.
                   </label>
-                  <button type="button" onClick={() => {
-                    setModalType(null);
-                    setActiveTab('globalCalibration');
-                  }} className="text-blue-800 underline font-semibold">
-                    Review global chart if it is still DRAFT
+                  <button type="button" onClick={() => { void openCalibrationModal(editingTank); }} className="text-blue-800 underline font-semibold">
+                    View this tank's linked calibration chart
                   </button>
                 </section>
               )}
@@ -2964,7 +2960,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   disabled={modalSubmitting}
                   className="px-4 py-2 bg-orange-500 text-white rounded-xl text-xs font-bold"
                 >
-                  {modalSubmitting ? 'Saving...' : editingTank.id.startsWith('tank-pgt-') && editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE' ? 'Activate Tank' : 'Save Changes'}
+                  {modalSubmitting ? 'Saving...' : editingTank.id.startsWith('tank-pgt-') && editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE' ? 'Use Tank' : 'Save Changes'}
                 </button>
               </div>
             </form>
