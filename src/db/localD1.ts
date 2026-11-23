@@ -150,7 +150,7 @@ function getMigrationFiles(migrationsDir: string): string[] {
       .sort();
     const additiveDir = path.join(migrationsDir, 'additive');
     const additive = fs.existsSync(additiveDir)
-      ? fs.readdirSync(additiveDir).filter(f => /^\\d{4}_.+\\.sql$/.test(f))
+      ? fs.readdirSync(additiveDir).filter(f => f.endsWith('.sql') && /^\d{4}_/.test(f))
           .sort().map(f => path.posix.join('additive', f))
       : [];
     cachedMigrationFiles = [...frozen, ...additive];
