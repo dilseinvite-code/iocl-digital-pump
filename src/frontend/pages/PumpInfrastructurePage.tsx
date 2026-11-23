@@ -72,6 +72,7 @@ import { PERMISSIONS } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
 import { reviewReusableGlobalChart } from '../components/pump/reusableGlobalChart';
 import { GLOBAL_TANK_CAPACITIES_LITRES } from '../../shared/globalTankTypes';
+import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
@@ -689,10 +690,6 @@ export const PumpInfrastructurePage: React.FC = () => {
     if (modalSubmitting || !editingTank) return;
     const needsReview = editingTank.id.startsWith('tank-pgt-') &&
       editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE';
-    if (needsReview && (!confirmTankPhysicalCompatibility || !confirmTankOperatingLimits)) {
-      setModalError('Confirm physical tank/fuel mapping and approved safe-fill and minimum operating limits before activation.');
-      return;
-    }
     setModalSubmitting(true);
     setModalError(null);
 
@@ -2968,18 +2965,9 @@ export const PumpInfrastructurePage: React.FC = () => {
               {editingTank.id.startsWith('tank-pgt-') && editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE' && (
                 <section className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-[#17365D]" data-testid="simple-activate-tank">
                   <div className="font-bold">Ready to use Tank #{editingTank.tankNumber}?</div>
-                  <p>If the tank's linked chart is already approved and matches its stored readings, it is used automatically. No re-upload is needed.</p>
-                  <p className="text-amber-900">Confirm the fuel grade and actual operating limits once. The initial safe-fill value may be provisional.</p>
-                  <label className="flex items-start gap-2 rounded-lg bg-white p-3 border border-blue-200">
-                    <input type="checkbox" className="mt-0.5"
-                      data-testid="confirm-tank-readiness"
-                      checked={confirmTankPhysicalCompatibility && confirmTankOperatingLimits}
-                      onChange={e => {
-                        setConfirmTankPhysicalCompatibility(e.target.checked);
-                        setConfirmTankOperatingLimits(e.target.checked);
-                      }}/>
-                    I confirm this tank's fuel mapping and operating limits.
-                  </label>
+                  <p>The complete supplied 10/20 KL chart is reused without another approval or upload.</p>
+                  <p className="text-amber-900">Check the fuel grade, Safe Fill and Min Level above. Clicking Use Tank applies these values.</p>
+                  
                   <button type="button" onClick={() => { void openCalibrationModal(editingTank); }} className="text-blue-800 underline font-semibold">
                     View this tank's linked calibration chart
                   </button>
@@ -3290,20 +3278,20 @@ export const PumpInfrastructurePage: React.FC = () => {
                   <p className="text-sm text-slate-700">
                     Tank #{calibratingTank.tankNumber} automatically uses your selected
                     {calibratingTank.capacityLitres / 1000} KL global reference.
-                    Its dip-to-litre values are already saved. You do not need to re-upload its readings. An approved, identical global source can be reused at tank activation.
+                    Its dip-to-litre values are already saved. You do not need to re-upload its readings. The saved supplied chart can be reused without a second approval when copied readings match.
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                     <div><p className="text-slate-500">Source global chart</p>
                       <p className="font-semibold text-[#17365D]">{calGlobalSource?.name ?? calSelectedChart.sourceFileName ?? 'Saved global chart'}</p></div>
-                    <div><p className="text-slate-500">Global approval in software</p>
+                    <div><p className="text-slate-500">Linked chart source</p>
                       <p className={'font-semibold ' + (calGlobalSource?.status === 'APPROVED' || calGlobalSource?.status === 'ACTIVE' ? 'text-green-800':'text-amber-800')}>
-                        {calGlobalSource?.status ?? 'Checking source status…'}</p></div>
+                        {calGlobalSource?(isOperatorSuppliedReference(calGlobalSource)?'Operator-provided · Ready':calGlobalSource.status):'Checking source…'}</p></div>
                     <div><p className="text-slate-500">Highest stored dip / volume</p>
                       <p className="font-semibold text-[#17365D]">{lastRecordedPoint
                         ? `${formatCalibrationDisplay(lastRecordedPoint.dipMillimetresMilliunits / 1000)} mm / ${formatCalibrationDisplay(lastRecordedPoint.volumeMilliunits / 1000)} L`
                         : 'Not available'}</p></div>
                   </div>
-                  {calGlobalSource?.status === 'DRAFT' && (
+                  {calGlobalSource?.status === 'DRAFT'&&!isOperatorSuppliedReference(calGlobalSource) && (
                     <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
                       The chart was selected as your default reference, but the source global chart is still DRAFT in this software.
                       This is why operational activation was blocked. The tank's APPROVED revision status does not override the global source status.

@@ -11,6 +11,7 @@ import { requirePermission } from '../middleware/permission';
 import { PERMISSIONS } from '../../shared/constants';
 import { globalCalibrationMaxLitres, isGlobalTankCapacity } from '../../shared/globalTankTypes';
 import { scannedReferenceSpec, reviewScannedCalibrationCandidate } from '../../shared/scannedCalibrationReference';
+import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
 
 export const quickTankRegistrationRoutes = new Hono<{ Bindings: EnvBindings }>();
 quickTankRegistrationRoutes.use('*', requireAuth as any);
@@ -149,7 +150,17 @@ quickTankRegistrationRoutes.post(
       .where(eq(schema.globalTankCapacityDefaults.capacityLitres, capacityLitres)).limit(1);
     const allTemplates = await repo.listGlobalTankCalibrationTemplates({ nominalCapacityLitres: capacityLitres });
     let selected;
-    if (defaults.length) {
+    const suppliedCode=capacityLitres===10000?'EXCEL_10KL_REFERENCE':
+      capacityLitres===20000?'EXCEL_20KL_REFERENCE':null;
+    const suppliedTemplate=suppliedCode?allTemplates.find(t=>t.code===suppliedCode):null;
+    // Prefer the operator's actual 10/20 KL reference when present, not a different standard.
+    if(suppliedTemplate){
+      selected=await validatedReference(db,suppliedTemplate.id);
+      if(!selected||!isOperatorSuppliedReference(selected.template,selected.points)){
+        return errResponse(c,'SUPPLIED_CHART_INCOMPLETE',
+          'The operator-provided chart needs complete numerical readings. A different standard chart will not be substituted.',409);
+      }
+    }else if (defaults.length) {
       selected = await validatedReference(db, defaults[0].templateId);
       if (!selected || selected.template.nominalCapacityLitres !== capacityLitres) {
         return errResponse(c, 'DEFAULT_CHART_INVALID', 'The saved default chart has invalid or missing numerical dip readings. Correct its draft before using it.', 409);
@@ -228,16 +239,15 @@ quickTankRegistrationRoutes.post(
     const id = 'tank-' + pendingId;
     const chartId = 'tcc-' + pendingId;
     const safeFillProvisional = Math.round(pending.capacityLitres * 0.9);
-    // One-time global approval is authoritative for the reused numerical chart.
-    // A source that is DRAFT or has scan/+15% warnings stays DRAFT.
-    // Only an already APPROVED/ACTIVE, warning-free source automatically
-    // provides an ACTIVE tank-specific chart. The physical tank stays INACTIVE.
+    // Reuse complete operator-supplied numeric data without a redundant
+    // template approval step. Physical tank status remains INACTIVE.
+    const operatorSupplied=isOperatorSuppliedReference(source.template,source.points);
     const inheritsApprovedGlobalChart =
       (source.template.status === 'APPROVED' || source.template.status === 'ACTIVE') &&
       source.warnings.length === 0 &&
       !source.template.requiresEngineeringReview &&
       !source.template.requiresDimensionVerification;
-    const chartStatus = inheritsApprovedGlobalChart ? 'ACTIVE' : 'DRAFT';
+    const chartStatus=operatorSupplied||inheritsApprovedGlobalChart?'ACTIVE':'DRAFT';
     const stmts: any[] = [
       db.insert(schema.tanks).values({
         id, outletId, tankNumber: nextNumber, name: pending.name,
@@ -256,9 +266,11 @@ quickTankRegistrationRoutes.post(
         chartCapacityMilliunits: pending.capacityLitres * 1000,
         sourceFileName: source.template.sourceFileName || 'global-chart',
         referenceDocument: source.template.referenceDocument || null,
-        notes: inheritsApprovedGlobalChart
-          ? 'Automatically linked to an already approved global chart; tank remains INACTIVE pending physical and operating-limit review.'
-          : 'Auto-linked as a DRAFT reference from the selected global chart; source warnings and physical limits remain separate.',
+        notes: operatorSupplied
+          ? 'Operator-supplied complete numerical chart reused without repeated approval. Scanned/digital differences remain on the source record.'
+          : inheritsApprovedGlobalChart
+            ? 'Automatically linked to an approved chart; tank remains INACTIVE.'
+            : 'Reference chart linked; tank remains INACTIVE.',
         effectiveFrom: now.slice(0, 10),
         approvedBy: inheritsApprovedGlobalChart ? (source.template.approvedBy || c.var.user!.user.id) : null,
         approvedAt: inheritsApprovedGlobalChart ? (source.template.approvedAt || now) : null,
@@ -291,7 +303,7 @@ quickTankRegistrationRoutes.post(
       newValueJson: JSON.stringify({ pendingId, name: pending.name, tankNumber: nextNumber,
         capacityLitres: pending.capacityLitres, productId: parsed.data.productId,
         templateId: source.template.id, calibrationStatus: chartStatus,
-        inheritedGlobalApproval: inheritsApprovedGlobalChart, tankStatus: 'INACTIVE' }),
+        inheritedGlobalApproval: inheritsApprovedGlobalChart, operatorSuppliedReference:operatorSupplied, tankStatus: 'INACTIVE' }),
       ipAddress: c.req.header('cf-connecting-ip') || null,
       userAgent: c.req.header('user-agent') || null, createdAt: now,
     }));
@@ -317,9 +329,11 @@ quickTankRegistrationRoutes.post(
     return c.json({ success: true, data: {
       id, tankNumber: nextNumber, name: pending.name, status: 'INACTIVE',
       calibrationStatus: chartStatus, chartId, pointsCount: source.points.length,
-      message: inheritsApprovedGlobalChart
-        ? 'Approved global calibration automatically linked. Tank remains INACTIVE until physical and operating limits are confirmed.'
-        : 'Global chart linked as a draft reference. Review the source status and physical operating limits before activation.',
+      message: operatorSupplied
+        ? 'Your supplied 10/20 KL chart is linked and ready. Set tank status when needed.'
+        : inheritsApprovedGlobalChart
+          ? 'Approved calibration linked; tank is INACTIVE until used.'
+          : 'Reference chart linked. Complete numerical data is required for operation.',
     }, error: null }, 201);
   }
 );

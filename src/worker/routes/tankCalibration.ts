@@ -19,6 +19,7 @@ import {
 import { PERMISSIONS, ROLES } from '../../shared/constants';
 import { parseMilliunits, formatMilliunits } from '../../shared/precision';
 import {TEN_KL_TEMPLATE_CODE,limitTenKlCalibrationCurve} from '../../shared/tenKlCalibrationLimit';
+import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
 
 export const tankCalibration = new Hono<{ Bindings: EnvBindings }>();
 
@@ -30,6 +31,19 @@ async function verifyOutletAuthority(c: AppContext, outletId: string, outletRepo
   return ScopeService.canAccessOutlet(userCtx, outletId, outletRepo);
 }
 
+async function matchingOperatorSuppliedChart(repo:PumpRepository,source:any,tankId:string,chartId:string):Promise<boolean>{
+ if(!source)return false;
+ const [tank,original,copied]=await Promise.all([
+   repo.findTankById(tankId),repo.listGlobalTankCalibrationTemplatePoints(source.id),
+   repo.listCalibrationPoints(tankId,{chartId}),
+ ]);
+ if(!tank||tank.capacityLitres!==source.nominalCapacityLitres||
+   !isOperatorSuppliedReference(source,original)||original.length!==copied.length)return false;
+ const a=[...original].sort((x,y)=>x.dipMillimetresMilliunits-y.dipMillimetresMilliunits);
+ const b=[...copied].sort((x,y)=>x.dipMillimetresMilliunits-y.dipMillimetresMilliunits);
+ return a.every((p,i)=>p.dipMillimetresMilliunits===b[i].dipMillimetresMilliunits&&
+   p.volumeMilliunits===b[i].volumeMilliunits);
+}
 function canAuthorizeCalibrationActivation(c: AppContext): boolean {
   const userCtx = c.var.user;
   if (!userCtx) return false;
@@ -721,7 +735,8 @@ tankCalibration.post('/tanks/:tankId/calibration/charts/:chartId/status', requir
         String((existingChart as any).sourceTemplateId)
       );
       if (srcTemplate) {
-        if (srcTemplate.requiresEngineeringReview || srcTemplate.requiresDimensionVerification) {
+        if ((srcTemplate.requiresEngineeringReview || srcTemplate.requiresDimensionVerification) &&
+           !(await matchingOperatorSuppliedChart(pumpRepo,srcTemplate,tankId,chartId))) {
           return c.json(
             {
               success: false,
@@ -734,7 +749,8 @@ tankCalibration.post('/tanks/:tankId/calibration/charts/:chartId/status', requir
             400
           );
         }
-        if (srcTemplate.status !== 'APPROVED' && srcTemplate.status !== 'ACTIVE') {
+        if (srcTemplate.status !== 'APPROVED' && srcTemplate.status !== 'ACTIVE' &&
+           !(await matchingOperatorSuppliedChart(pumpRepo,srcTemplate,tankId,chartId))) {
           return c.json(
             {
               success: false,
@@ -880,7 +896,8 @@ tankCalibration.post('/tanks/:tankId/calibration/charts/:chartId/activate', requ
       String((existingChart as any).sourceTemplateId)
     );
     if (srcTemplate) {
-      if (srcTemplate.requiresEngineeringReview || srcTemplate.requiresDimensionVerification) {
+      if ((srcTemplate.requiresEngineeringReview || srcTemplate.requiresDimensionVerification) &&
+           !(await matchingOperatorSuppliedChart(pumpRepo,srcTemplate,tankId,chartId))) {
         return c.json(
           {
             success: false,
@@ -893,7 +910,8 @@ tankCalibration.post('/tanks/:tankId/calibration/charts/:chartId/activate', requ
           400
         );
       }
-      if (srcTemplate.status !== 'APPROVED' && srcTemplate.status !== 'ACTIVE') {
+      if (srcTemplate.status !== 'APPROVED' && srcTemplate.status !== 'ACTIVE' &&
+           !(await matchingOperatorSuppliedChart(pumpRepo,srcTemplate,tankId,chartId))) {
         return c.json(
           {
             success: false,
