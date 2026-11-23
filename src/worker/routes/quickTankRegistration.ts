@@ -19,7 +19,7 @@ const registerSchema = z.object({
   name: z.string().trim().min(1).max(100),
   capacityLitres: z.number().int().refine(isGlobalTankCapacity, 'Select 10, 15, 20 or 50 KL'),
 }).strict();
-const defaultSchema = z.object({ templateId: z.string().min(1) }).strict();
+const defaultSchema = z.object({ templateId: z.string().min(1), acknowledgedWarnings: z.boolean().optional() }).strict();
 const finalizeSchema = z.object({ productId: z.string().min(1) }).strict();
 
 const errResponse = (c: AppContext, code: string, message: string, status: 400 | 403 | 404 | 409 | 500 = 400) =>
@@ -48,10 +48,15 @@ async function validatedReference(db: ReturnType<typeof getDb>, id: string) {
     prevVolume = pt.volumeMilliunits;
   }
   const maxVolume = prevVolume / 1000;
-  if (maxVolume > globalCalibrationMaxLitres(template.nominalCapacityLitres) + 0.000001) return null;
-  // Only for the two supplied scanned references: require complete 10 mm
-  // coverage, exact printed endpoints and sampled printed values before
-  // allowing selection as an automatic DRAFT default.
+  const warnings: string[] = [];
+  // +15% is a recorded warning for reference/DRAFT use only.
+  // This function does not authorize ACTIVE/APPROVED tank charts or fuel stock operations.
+  if (maxVolume > globalCalibrationMaxLitres(template.nominalCapacityLitres) + 0.000001) {
+    warnings.push('Source chart exceeds the nominal capacity +15% threshold. Draft/reference use only.');
+  }
+  // The supplied PDF and older digital workbook have differing sample readings.
+  // Report this difference honestly; the admin may acknowledge using the existing
+  // digital draft values, which are NOT claimed to be an exact PDF transcription.
   if (scannedReferenceSpec(template.nominalCapacityLitres)) {
     const review = reviewScannedCalibrationCandidate({
       code: template.code,
@@ -64,9 +69,11 @@ async function validatedReference(db: ReturnType<typeof getDb>, id: string) {
         volumeLitres:p.volumeMilliunits / 1000,
       })),
     });
-    if (!review.passed) return null;
+    if (!review.passed) {
+      warnings.push('Saved digital readings do not match all sampled readings or dimensions on the supplied scanned chart. This selection uses the stored digital draft values, not an exact transcription of the PDF.');
+    }
   }
-  return { template, points, maxVolume };
+  return { template, points, maxVolume, warnings };
 }
 
 quickTankRegistrationRoutes.get(
@@ -90,7 +97,10 @@ quickTankRegistrationRoutes.put(
     const db = getDb(c.env.DB);
     const selected = await validatedReference(db, parsed.data.templateId);
     if (!selected || selected.template.nominalCapacityLitres !== capacity) {
-      return errResponse(c, 'INVALID_GLOBAL_CHART', 'The chosen chart must match the supplied scan checkpoints, contain the full dip range, and remain within the +15% validation ceiling');
+      return errResponse(c, 'INVALID_GLOBAL_CHART', 'Choose a saved chart with valid numerical dip and volume readings for this capacity.'); 
+    }
+    if (selected.warnings.length && parsed.data.acknowledgedWarnings !== true) {
+      return errResponse(c, 'WARNING_ACKNOWLEDGEMENT_REQUIRED', selected.warnings.join(' '), 409);
     }
     const now = new Date().toISOString();
     await (db as any).batch([
@@ -101,12 +111,12 @@ quickTankRegistrationRoutes.put(
       db.insert(schema.auditLogs).values({
         id: 'aud-' + crypto.randomUUID(), userId: c.var.user!.user.id,
         action: 'GLOBAL_TANK_DEFAULT_SET', entityType: 'GLOBAL_TANK_CAPACITY_DEFAULT',
-        entityId: String(capacity), newValueJson: JSON.stringify({ capacityLitres: capacity, templateId: selected.template.id }),
+        entityId: String(capacity), newValueJson: JSON.stringify({ capacityLitres: capacity, templateId: selected.template.id, acknowledgedWarnings: parsed.data.acknowledgedWarnings === true, warnings: selected.warnings }),
         ipAddress: c.req.header('cf-connecting-ip') || null,
         userAgent: c.req.header('user-agent') || null, createdAt: now,
       }),
     ]);
-    return c.json({ success: true, data: { capacityLitres: capacity, templateId: selected.template.id }, error: null });
+    return c.json({ success: true, data: { capacityLitres: capacity, templateId: selected.template.id, warnings: selected.warnings }, error: null });
   }
 );
 
@@ -142,7 +152,7 @@ quickTankRegistrationRoutes.post(
     if (defaults.length) {
       selected = await validatedReference(db, defaults[0].templateId);
       if (!selected || selected.template.nominalCapacityLitres !== capacityLitres) {
-        return errResponse(c, 'DEFAULT_CHART_INVALID', 'Default calibration chart no longer matches the verified scanned source or full dip sequence. Review and re-upload corrected readings before registration.', 409);
+        return errResponse(c, 'DEFAULT_CHART_INVALID', 'The saved default chart has invalid or missing numerical dip readings. Correct its draft before using it.', 409);
       }
     } else {
       const eligible = [];
@@ -150,10 +160,10 @@ quickTankRegistrationRoutes.post(
         const checked = await validatedReference(db, candidate.id);
         if (checked) eligible.push(checked);
       }
-      if (eligible.length !== 1) {
+      if (eligible.length !== 1 || (eligible[0]?.warnings.length ?? 0) > 0) {
         return errResponse(c, eligible.length ? 'DEFAULT_CHART_REQUIRED' : 'CALIBRATION_NOT_FOUND',
-          eligible.length ? 'Multiple valid charts exist for this capacity. Set one default once under Calibration Charts.' :
-            'No complete scanned-source-compatible chart is saved for this capacity. Upload the corrected digital dip/volume table in Calibration Charts.', 409);
+          eligible.length ? 'Select a default chart in Calibration Charts once. Acknowledge any +15% or scanned-source difference warnings before using it as a draft reference.' :
+            'No usable numerical dip-to-volume chart exists for this capacity. A scanned PDF alone does not contain the structured rows needed by the calculator.', 409);
       }
       selected = eligible[0];
     }

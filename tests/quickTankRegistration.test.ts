@@ -144,8 +144,25 @@ describe('Two-input global-calibration tank registration', () => {
       { id:'bad-std-0', templateId:'gtct-std-20kl', dipMillimetresMilliunits:0, volumeMilliunits:0, createdAt:now, createdBy:'user-admin' },
       { id:'bad-std-1', templateId:'gtct-std-20kl', dipMillimetresMilliunits:2100000, volumeMilliunits:23001000, createdAt:now, createdBy:'user-admin' },
     ]);
-    const invalidDefault = await request('PUT', '/global-tank-defaults/20000', { templateId:'gtct-std-20kl' });
-    expect(invalidDefault.status).toBe(400);
-    expect(((await invalidDefault.json()) as any).error.code).toBe('INVALID_GLOBAL_CHART');
+    // Above +15% and the scanned-reference mismatch are WARNING-only for
+    // draft defaults; the administrator must explicitly acknowledge both.
+    const notAcknowledged = await request('PUT','/global-tank-defaults/20000',{templateId:'gtct-std-20kl'});
+    expect(notAcknowledged.status).toBe(409);
+    expect(((await notAcknowledged.json()) as any).error.code).toBe('WARNING_ACKNOWLEDGEMENT_REQUIRED');
+    const acknowledged = await request('PUT','/global-tank-defaults/20000',{
+      templateId:'gtct-std-20kl',acknowledgedWarnings:true,
+    });
+    expect(acknowledged.status).toBe(200);
+    const accepted = (await acknowledged.json()) as any;
+    expect(accepted.data.warnings.join(' ')).toContain('+15%');
+    const registered = await request('POST','/outlets/ro-1001/tanks/quick-register',
+      { name:'Warning-only draft tank',capacityLitres:20000 });
+    expect(registered.status).toBe(201);
+    const draft = (await registered.json()) as any;
+    expect(draft.data.status).toBe('PENDING_FUEL');
+    expect(draft.data.templateId).toBe('gtct-std-20kl');
+    const audit=await db.select().from(schema.auditLogs)
+      .where(eq(schema.auditLogs.action,'GLOBAL_TANK_DEFAULT_SET'));
+    expect(audit.some(x=>x.newValueJson?.includes('"acknowledgedWarnings":true'))).toBe(true);
   });
 });

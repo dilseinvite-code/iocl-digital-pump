@@ -44,6 +44,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const [newCapacity,setNewCapacity]=useState('');
   const [newTitle,setNewTitle]=useState('');
   const [savedExcel,setSavedExcel]=useState(false);
+  const [acknowledgedSaveWarning,setAcknowledgedSaveWarning]=useState(false);
+  const [acknowledgedDefaultWarning,setAcknowledgedDefaultWarning]=useState(false);
 
   const loadTemplates=async()=>{
     const result=await apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates');
@@ -69,16 +71,18 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         points:(detail?.id===chosen.id?detail.points||[]:[]).map(p=>({dipMm:p.dipMillimetres,volumeLitres:p.volumeLitres})),
       })
     : null;
+  const defaultOver15=Boolean(chosen&&exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres));
+  const defaultHasWarning=Boolean(defaultOver15||(scannedReview&&!scannedReview.passed));
   const canSetAsDefault=Boolean(chosen && (chosen.pointsCount||0)>=2 &&
-    !exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres) &&
-    (!scannedReview || scannedReview.passed));
+    (!defaultHasWarning || acknowledgedDefaultWarning));
+  useEffect(()=>setAcknowledgedDefaultWarning(false),[chosen?.id]);
   const setDefault=async()=>{
     if(!chosen||!canSetAsDefault||settingDefault)return;
     setSettingDefault(true);setError('');setNotice('');
     try{
       const r=await apiFetch<{capacityLitres:number;templateId:string}>(
         '/api/v1/global-tank-defaults/'+chosen.nominalCapacityLitres,
-        {method:'PUT',body:JSON.stringify({templateId:chosen.id})});
+        {method:'PUT',body:JSON.stringify({templateId:chosen.id,acknowledgedWarnings:defaultHasWarning&&acknowledgedDefaultWarning})});
       if(!r.success)throw new Error(r.error?.message||'Could not save default calibration');
       await loadDefaults();
       setNotice(chosen.nominalCapacityLitres/1000+' KL default saved. New tanks of this capacity will select this calibration automatically.');
@@ -115,11 +119,13 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   };
   const canReplaceExisting=Boolean(chosen&&chosen.status==='DRAFT' &&
     !(chosen.activeAssignedTanksCount||chosen.stagedDraftTanksCount));
-  const previewGood=mode==='excel'?Boolean(preview?.eligibleChartsCount && previewCharts.every(ch=>ch.eligibleForDraftImport && !exceedsGlobalCalibrationLimit(ch.maxVolumeLitres,ch.nominalCapacityLitres))):
-    Boolean(csv?.valid && !csvExcess && selectedNominal && (creatingCustom || canReplaceExisting));
+  const excelOver15=Boolean(previewCharts.some(ch=>exceedsGlobalCalibrationLimit(ch.maxVolumeLitres,ch.nominalCapacityLitres)));
+  const saveNeedsAcknowledgement=mode==='excel'?excelOver15:csvExcess;
+  const previewGood=mode==='excel'?Boolean(preview?.eligibleChartsCount && previewCharts.every(ch=>ch.eligibleForDraftImport && (!exceedsGlobalCalibrationLimit(ch.maxVolumeLitres,ch.nominalCapacityLitres)||acknowledgedSaveWarning))):
+    Boolean(csv?.valid && selectedNominal && (creatingCustom || canReplaceExisting) && (!csvExcess||acknowledgedSaveWarning));
 
   const choose=async(f:File|null)=>{
-    setFile(f);setMode(null);setPreview(null);setCsv(null);setError('');setNotice('');setSavedExcel(false);
+    setFile(f);setMode(null);setPreview(null);setCsv(null);setError('');setNotice('');setSavedExcel(false);setAcknowledgedSaveWarning(false);
     if(!f)return;
     const ext=f.name.toLowerCase().split('.').pop()||'';
     if(f.size>MAX_FILE_BYTES){setError('File too large. Upload a file smaller than 8 MB.');return;}
@@ -152,8 +158,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     setBusy(true);setError('');setNotice('');
     try{
       if(mode==='excel'){
-        if(!preview?.eligibleChartsCount || previewCharts.some(ch=>exceedsGlobalCalibrationLimit(ch.maxVolumeLitres,ch.nominalCapacityLitres)))throw new Error('One or more charts exceed the maximum +15% limit or have invalid readings. Correct and re-upload.');
+        if(!preview?.eligibleChartsCount || previewCharts.some(ch=>!ch.eligibleForDraftImport))throw new Error('Workbook contains unreadable or invalid dip/volume rows.');
+        if(excelOver15&&!acknowledgedSaveWarning)throw new Error('Acknowledge the +15% warning before saving this non-operational draft.');
         const body=new FormData();body.append('file',file);body.append('confirmImport','true');
+        if(excelOver15)body.append('acknowledgeOver15Warning','true');
         const resp=await apiFetch<ImportResponse>('/api/v1/calibration-templates/excel-import',{method:'POST',body});
         if(!resp.success||!resp.data)throw new Error(resp.error?.message || 'Could not save workbook.');
         const imported=resp.data.importedTemplates || [];
@@ -162,7 +170,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         setSavedExcel(true);
       }else if(mode==='csv'){
         if(!csv?.valid)throw new Error(csv?.errors[0]||'CSV needs valid dip/volume rows.');
-        if(csvExcess)throw new Error('Chart exceeds the maximum +15% volume limit for this tank type. Correct the values and upload again.');
+        if(csvExcess&&!acknowledgedSaveWarning)throw new Error('Acknowledge the +15% warning before saving this non-operational draft.');
         let id=chosen?.id;
         if(creatingCustom){
           const nominal=Number(newCapacity);
@@ -182,7 +190,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         const resp=await apiFetch<GlobalTankCalibrationTemplate>(
           '/api/v1/calibration-templates/'+encodeURIComponent(id)+'/import',{
             method:'POST',body:JSON.stringify({
-              csvText:csv.normalizedCsv,status:'DRAFT',simpleUpload:true,allowOverCapacity:true,
+              csvText:csv.normalizedCsv,status:'DRAFT',simpleUpload:true,allowOverCapacity:true,acknowledgeOver15Warning:csvExcess&&acknowledgedSaveWarning,
               sourceFileName:file.name,notes:'Uploaded through simplified calibration review. '+csv.warnings.join('; '),
             })
           });
@@ -242,7 +250,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       {csv.errors.length>0&&<div role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{csv.errors.slice(0,4).join(' · ')}</div>}
       {csv.warnings.length>0&&<div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{csv.warnings.join(' · ')}</div>}
       {csvExcess&&<div className="mt-3 flex gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900" data-testid="csv-over-capacity-warning">
-        <AlertTriangle className="h-4 w-4 shrink-0"/>Maximum {fmt(csv.maxVolumeLitres)} L exceeds the permitted +15% limit of {fmt(globalCalibrationMaxLitres(selectedNominal||0))} L. Correct and re-upload.
+        <AlertTriangle className="h-4 w-4 shrink-0"/>Maximum {fmt(csv.maxVolumeLitres)} L exceeds +15% of {fmt(globalCalibrationMaxLitres(selectedNominal||0))} L. You may acknowledge and save as DRAFT only; this does not activate a tank or approve stock calculations.
       </div>}
       <details className="mt-3"><summary className="cursor-pointer text-sm font-semibold text-[#17365D]">Show uploaded readings</summary>
         <div className="mt-2 max-h-60 overflow-auto rounded border border-slate-200">
@@ -268,7 +276,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
             <p className="mt-2 text-sm text-slate-700">{fmt(ch.actualPointCount)} readings · Max {fmt(ch.maxVolumeLitres)} L · {fmt(ch.maxDipMm)} mm</p>
             {(over||ch.warnings?.length>0||ch.errors?.length>0)&&<div className="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-900" data-testid={'simple-warning-'+ch.templateCode}>
               <AlertTriangle className="mr-1 inline h-4 w-4"/>
-              {over&&<p>Max volume exceeds the maximum permitted {fmt(globalCalibrationMaxLitres(ch.nominalCapacityLitres))} L (+15%). Correct and re-upload to save.</p>}
+              {over&&<p>Max volume exceeds {fmt(globalCalibrationMaxLitres(ch.nominalCapacityLitres))} L (+15%). This can be acknowledged for DRAFT reference storage only; operational activation remains separate.</p>}
               {(ch.errors||[]).concat(ch.warnings||[]).slice(0,3).map((w,i)=><p key={i}>{plainWarning(w)}</p>)}
             </div>}
             <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-[#17365D]">View dip / volume readings</summary>
@@ -281,6 +289,11 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     </section>}
 
     {(mode==='csv'||mode==='excel')&&<section className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      {saveNeedsAcknowledgement&&<label className="flex w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        <input type="checkbox" checked={acknowledgedSaveWarning} onChange={e=>setAcknowledgedSaveWarning(e.target.checked)}
+          data-testid="acknowledge-over-15-draft" className="mt-0.5"/>
+        I understand this chart exceeds +15%. Save these exact uploaded rows as a non-operational DRAFT; do not silently modify or truncate volumes.
+      </label>}
       <button type="button" disabled={!canWriteTankCalibration||busy||!previewGood||(mode==='excel'&&savedExcel)}
         data-testid="simple-save-calibration"
         className="rounded-xl bg-orange-600 px-6 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
@@ -311,15 +324,19 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
                 onClick={()=>{void setDefault();}} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">
                 {settingDefault?'Saving...':'Set as default for '+chosen.nominalCapacityLitres/1000+' KL'}
               </button>}
-          {scannedReview&&!scannedReview.passed&&<div className="w-full rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900" data-testid="scanned-reference-checkpoint-warning">This saved chart does not match the verified-person scan at its sampled checkpoints or complete dip sequence. Upload a corrected digital transcription; do not use the older Excel curve as the automatic default. {scannedReview.issues.slice(0,4).join(' ')}</div>}
+          {scannedReview&&!scannedReview.passed&&<div className="w-full rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900" data-testid="scanned-reference-checkpoint-warning">Warning: The stored digital readings differ from the source PDF at one or more sampled checkpoints, or the full scan is not loaded. Selecting this chart will use its **stored digital values**, not exact transcribed PDF values. {scannedReview.issues.slice(0,3).join(' ')}</div>}
           {scannedReview?.passed&&<span className="text-xs text-green-800">Full dip range and sampled scan checkpoints match. Full row-by-row transcription still requires review before live activation.</span>}
-          {!canSetAsDefault&&!scannedReview&&<span className="text-xs text-amber-800">Save valid readings within the +15% limit first.</span>}
+          {defaultHasWarning&&defaultCharts[chosen.nominalCapacityLitres]!==chosen.id&&<label className="flex w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <input type="checkbox" data-testid="acknowledge-default-chart-warning" checked={acknowledgedDefaultWarning} onChange={e=>setAcknowledgedDefaultWarning(e.target.checked)} className="mt-0.5"/>
+            I acknowledge the source/volume warning. Use this saved digital chart as a DRAFT reference for newly registered inactive tanks; do not mark it operationally approved.
+          </label>}
+          {!canSetAsDefault&&!defaultHasWarning&&<span className="text-xs text-amber-800">At least two numerical dip-to-volume readings must be saved before choosing a default.</span>}
         </div>
         {capped10&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
           Full 10 KL reference range: 0–{fmt(capped10.operationalMaximumDipMm)} mm / 0–{fmt(capped10.operationalMaximumLitres)} L. No 11,000 L truncation. Physical safe-fill remains separate.
         </p>}
         {exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres)&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
-          Warning: Source maximum {fmt(chosen.maxVolumeLitres||0)} L exceeds the permitted +15% limit of {fmt(globalCalibrationMaxLitres(chosen.nominalCapacityLitres))} L. Check and correct/re-upload rather than silently changing volume readings.
+          Warning: Source maximum {fmt(chosen.maxVolumeLitres||0)} L exceeds the +15% threshold of {fmt(globalCalibrationMaxLitres(chosen.nominalCapacityLitres))} L. You can acknowledge it for DRAFT reference use; the system preserves every recorded number.
         </p>}
         {showReadings&&<div className="mt-3 max-h-72 overflow-auto rounded border border-slate-200 bg-white">
           <table className="w-full text-left text-xs"><thead className="sticky top-0 bg-[#E8EEF5]"><tr><th className="p-2">Dip (mm)</th><th className="p-2">Volume (L)</th></tr></thead>

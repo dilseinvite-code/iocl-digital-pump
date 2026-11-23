@@ -5146,6 +5146,7 @@ export class PumpRepository {
       maxDipMmMilliunits?: number | null;
       allowOverCapacity?: boolean;
       allowEngineeringReviewReference?: boolean;
+      allowOverLimitDraft?: boolean;
       requireCompleteRange?: boolean;
     }
   ): Array<{ dipMillimetresMilliunits: number; volumeMilliunits: number }> {
@@ -5243,7 +5244,9 @@ export class PumpRepository {
       throw err;
     }
 
-    if (maxPointVol > maxOverCapacityMilliunits) {
+    // Acknowledged warning-only excess is permitted for non-operational DRAFT storage.
+    // APPROVED/ACTIVE routes do not pass this flag, and operational tank validation is unchanged.
+    if (maxPointVol > maxOverCapacityMilliunits && !options.allowOverLimitDraft) {
       const err = new Error(
         `Chart maximum volume ${formatMilliunits(maxPointVol)} L exceeds the maximum permitted +15% over-capacity ceiling of ${formatMilliunits(maxOverCapacityMilliunits)} L (nominal ${options.nominalCapacityLitres.toLocaleString()} L)`
       );
@@ -5289,6 +5292,7 @@ export class PumpRepository {
     approvedAt?: string | null;
     allowOverCapacity?: boolean;
     allowEngineeringReviewReference?: boolean;
+    allowOverLimitDraft?: boolean;
   }, points: Array<{ dipMillimetresMilliunits: number; volumeMilliunits: number }>): Promise<any> {
     const codeUpper = data.code.toUpperCase();
     const requestedStatus = data.status || 'DRAFT';
@@ -5317,6 +5321,7 @@ export class PumpRepository {
           maxDipMmMilliunits: data.maxDipMmMilliunits,
           allowOverCapacity: data.allowOverCapacity,
           allowEngineeringReviewReference,
+          allowOverLimitDraft: !requiresApprovalValidation && Boolean(data.allowOverLimitDraft),
           requireCompleteRange: requiresApprovalValidation || allowEngineeringReviewReference,
         })
       : [];
@@ -5373,6 +5378,7 @@ export class PumpRepository {
       approveImmediately?: boolean;
       allowOverCapacity?: boolean;
       allowEngineeringReviewReference?: boolean;
+      allowOverLimitDraft?: boolean;
       tankDiameterMmMilliunits?: number | null;
       tankLengthMmMilliunits?: number | null;
       maxDipMmMilliunits?: number | null;
@@ -5424,6 +5430,7 @@ export class PumpRepository {
       maxDipMmMilliunits: effectiveMaxDip,
       allowOverCapacity: options?.allowOverCapacity,
       allowEngineeringReviewReference,
+      allowOverLimitDraft: !requiresApprovalValidation && Boolean(options?.allowOverLimitDraft),
       requireCompleteRange:
         requiresApprovalValidation || isStandardReferenceTemplate || allowEngineeringReviewReference,
     });

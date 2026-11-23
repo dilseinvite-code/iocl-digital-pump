@@ -414,10 +414,10 @@ export class ExcelCalibrationImportService {
       );
     }
 
-    // Operational +10% capacity ceiling check:
+    // +15% is a warning for non-operational reference drafts, not a transcription error.
     const maxCapacityCeiling = nominalCapacityLitres * 1.15;
     const requiresEngineeringReview = maxVolumeLitres > maxCapacityCeiling;
-    const eligibleForDraftImport = errors.length === 0 && !requiresEngineeringReview;
+    const eligibleForDraftImport = errors.length === 0;
 
     let status: ExtractedChartReport['status'] = 'ELIGIBLE_DRAFT';
     let reviewStatusLabel = 'DRAFT / PENDING VERIFICATION';
@@ -426,13 +426,9 @@ export class ExcelCalibrationImportService {
       status = 'BLOCKED';
       reviewStatusLabel = 'BLOCKED';
     } else if (requiresEngineeringReview) {
-      status = 'BLOCKED';
-      reviewStatusLabel = 'BLOCKED / ABOVE +15% LIMIT';
-      const ceilingMsg = `UPLOAD BLOCKED: Source maximum volume ${maxVolumeLitres.toFixed(
-        2
-      )} L exceeds the maximum permitted +15% reference chart ceiling of ${maxCapacityCeiling.toLocaleString()} L (${maxCapacityCeiling.toFixed(
-        2
-      )} L, nominal ${nominalCapacityLitres.toLocaleString()} L). Correct or re-upload this source chart; it cannot be saved as an eligible global chart.`;
+      status = 'ELIGIBLE_DRAFT';
+      reviewStatusLabel = 'DRAFT / ABOVE +15% WARNING';
+      const ceilingMsg = `WARNING: Source maximum volume ${maxVolumeLitres.toFixed(2)} L exceeds the +15% threshold of ${maxCapacityCeiling.toFixed(2)} L (nominal ${nominalCapacityLitres.toLocaleString()} L). Admin may acknowledge this warning to save the original readings as a non-operational draft; no active tank is changed.`;
       warnings.push(ceilingMsg);
     } else if (requiresDimensionVerification) {
       status = 'DRAFT_DIMENSION_VERIFICATION';
@@ -552,7 +548,7 @@ export class ExcelCalibrationImportService {
   /**
    * Imports all three calibration reference charts (or requested target codes) as DRAFT into the database.
    * - Retains already-imported DRAFT templates (15 KL, 20 KL, 10 KL) without duplicating or overwriting readings when identical.
-   * - Uses narrowly scoped engineering-review reference storage for 10 KL (11,073.41 L > 11,000 L +10% ceiling).
+   * - Shows +15% as an acknowledged warning for draft-only reference data; it never authorizes active charts.
    * - Never overwrites STANDARD_20KL or STANDARD_50KL.
    * - Never automatically approves or activates calibrations.
    */
@@ -563,6 +559,7 @@ export class ExcelCalibrationImportService {
     options?: {
       targetCodes?: string[];
       confirmImport: boolean;
+      acknowledgeOver15Warning?: boolean;
       ipAddress?: string | null;
       userAgent?: string | null;
     }
@@ -609,7 +606,7 @@ export class ExcelCalibrationImportService {
         );
       }
 
-      // 2. If chart has data corruption / missing dips / non-monotonic errors, skip
+      // 2. Corrupt numerical rows remain blocked; +15% alone is a warning.
       if (!chart.eligibleForDraftImport) {
         skippedCharts.push({
           templateCode: chart.templateCode,
@@ -617,6 +614,14 @@ export class ExcelCalibrationImportService {
             chart.errors[0] ||
             chart.warnings[0] ||
             'Chart is blocked due to validation errors.',
+        });
+        continue;
+      }
+
+      if (chart.requiresEngineeringReview && options?.acknowledgeOver15Warning !== true) {
+        skippedCharts.push({
+          templateCode: chart.templateCode,
+          reason: 'The +15% volume warning must be acknowledged to store this chart as a draft.',
         });
         continue;
       }
@@ -683,6 +688,7 @@ export class ExcelCalibrationImportService {
             status: 'DRAFT',
             allowOverCapacity: true,
             allowEngineeringReviewReference: Boolean(chart.requiresEngineeringReview),
+            allowOverLimitDraft: Boolean(chart.requiresEngineeringReview && options?.acknowledgeOver15Warning),
             sourceFileName: extractedResult.workbookName,
             referenceDocument: `IOCL-${chart.templateCode}-EXCEL`,
             notes: noteDetails,
@@ -750,6 +756,7 @@ export class ExcelCalibrationImportService {
             approvedAt: null,
             allowOverCapacity: true,
             allowEngineeringReviewReference: Boolean(chart.requiresEngineeringReview),
+            allowOverLimitDraft: Boolean(chart.requiresEngineeringReview && options?.acknowledgeOver15Warning),
           },
           repoPoints
         );

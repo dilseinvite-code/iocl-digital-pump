@@ -448,7 +448,22 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
         )
       ).rejects.toThrow('exceeds the maximum permitted +15% over-capacity ceiling');
 
-      // 2. Operational approval still requires a verified calibration record and Document Vault evidence
+      // 1b. Explicit warning acknowledgement is permitted for NON-OPERATIONAL
+      // draft reference storage, never for active chart approval.
+      const draftOnly = await pumpRepo.importGlobalTankCalibrationTemplatePoints(
+        tpl10.id,
+        [
+          {dipMillimetresMilliunits:0,volumeMilliunits:0},
+          {dipMillimetresMilliunits:1940000,volumeMilliunits:11500100},
+        ],
+        adminUserId,
+        {allowOverCapacity:true,allowOverLimitDraft:true,status:'DRAFT'}
+      );
+      expect(draftOnly.status).toBe('DRAFT');
+      expect(draftOnly.maxVolumeLitres).toBe(11500.1);
+
+      // 2. Operational approval remains independent; exceeding +15% cannot
+      // be silently promoted to an approved active chart.
       const approveRes = await app.request(
         `/api/v1/calibration-templates/${encodeURIComponent(tpl10.id)}/status`,
         {
@@ -468,7 +483,8 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(approveRes.status).toBe(400);
       const approveJson = (await approveRes.json()) as any;
       expect(approveJson.success).toBe(false);
-      expect(approveJson.error.code).toBe('ENGINEERING_VERIFICATION_REQUIRED');
+      expect(['OVER_CAPACITY_CEILING_EXCEEDED','ENGINEERING_VERIFICATION_REQUIRED'])
+        .toContain(approveJson.error.code);
 
       // 3. Assignment preview still rejects a physically mismatched or unverified tank
       const tanks = await db.select().from(schema.tanks);
