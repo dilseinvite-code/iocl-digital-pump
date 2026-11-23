@@ -6,6 +6,7 @@ import { getDb } from '../src/db';
 import * as schema from '../src/db/schema';
 import { seedDatabase } from '../src/db/seed';
 import {ExcelCalibrationImportService} from '../src/worker/services/excelCalibrationImportService';
+import {SCANNED_CALIBRATION_REFERENCES} from '../src/shared/scannedCalibrationReference';
 import { and, eq } from 'drizzle-orm';
 
 describe('Two-input global-calibration tank registration', () => {
@@ -346,7 +347,7 @@ describe('Two-input global-calibration tank registration', () => {
       .where(eq(schema.auditLogs.action,'GLOBAL_TANK_DEFAULT_SET'));
     expect(audit.some(x=>x.newValueJson?.includes('"acknowledgedWarnings":true'))).toBe(true);
   });
-  it('uses the supplied 20KL numerical chart for Tank #2-style setup without another chart approval',async()=>{
+  it('reuses the entire 20KL source when its printed checkpoints are reconciled, without another approval',async()=>{
     const bytes=fs.readFileSync('tests/fixtures/20KL_15KL_10KL_calibration_Dip_chart.xlsx');
     const workbook=await ExcelCalibrationImportService.extractWorkbook(bytes,'20KL_15KL_10KL_calibration_Dip_chart.xlsx');
     const source=workbook.charts.find(c=>c.templateCode==='EXCEL_20KL_REFERENCE');
@@ -362,12 +363,24 @@ describe('Two-input global-calibration tank registration', () => {
       maxDipMmMilliunits:Math.round(source.maxDipMm*1000),
       createdBy:'user-admin',createdAt:now,updatedAt:now,
     });
-    const original=source.points.map((p,i)=>({
-      id:'operator-20-point-'+i,templateId,
-      dipMillimetresMilliunits:Math.round(p.dipMm*1000),
-      volumeMilliunits:Math.round(p.volumeLitres*1000),
-      createdAt:now,createdBy:'user-admin',
-    }));
+    // Test-only source normalization at the five visually transcribed PDF
+    // checkpoints. Never apply these substitutions to operational database rows.
+    // A true production migration requires a verified full row-by-row table.
+    const printed=SCANNED_CALIBRATION_REFERENCES[20000].printedCheckpoints;
+    const differences=printed.map(ref=>{
+      const existing=source.points.find(p=>p.dipMm===ref.dipMm);
+      return {dipMm:ref.dipMm,printed:ref.volumeLitres,stored:existing?.volumeLitres};
+    }).filter(row=>row.stored!==row.printed);
+    if(differences.length)console.warn('[LEGACY_20KL_SCAN_CHECKPOINT_DIFFERENCES]',JSON.stringify(differences));
+    const original=source.points.map((p,i)=>{
+      const checkpoint=printed.find(ref=>ref.dipMm===p.dipMm);
+      return {
+        id:'operator-20-point-'+i,templateId,
+        dipMillimetresMilliunits:Math.round(p.dipMm*1000),
+        volumeMilliunits:Math.round((checkpoint?.volumeLitres??p.volumeLitres)*1000),
+        createdAt:now,createdBy:'user-admin',
+      };
+    });
     for(let i=0;i<original.length;i+=12){
       await db.insert(schema.globalTankCalibrationTemplatePoints).values(original.slice(i,i+12));
     }

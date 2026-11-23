@@ -27,3 +27,7 @@ The +15% figure is a chart-volume warning threshold and is **not** the tank's ph
 - PR #111 stays a **draft** until its checks pass. No production merge, Cloudflare Worker/database migration, or manual Vercel production release is part of this change.
 
 **Remaining release gate:** a full machine-readable, row-by-row PDF transcription has not been established. Any remapping of a tank that has stock history must preserve the original revision and audit trail. A successful fixture test is not a live D1 Tank #2 activation test.
+
+## Automated integration test scope
+
+The end-to-end registration test uses the stored 20 KL workbook as its starting numerical source, then substitutes the **five verified printed checkpoints in an isolated, test-only database**. This tests that a completely populated, checkpoint-consistent curve can be copied and activated without repeating chart approval. **It is not a production remap or a verified full transcription of every scanned row.** Any differences found in the legacy workbook are reported by the test runner; the original fixture and live database remain unchanged.
