@@ -61,7 +61,7 @@ try {
   guard(db.uuid === UUID && db.name === DB && db.version === 'production', 'D1 identity mismatch');
   const bookmark = await cf('/time_travel/bookmark');
   guard(typeof bookmark?.bookmark === 'string' && bookmark.bookmark.length >= 20, 'No D1 recovery bookmark');
-  guard(fs.existsSync('migrations/' + MIGRATION), 'Expected additive migration missing');
+  guard(fs.existsSync('migrations/additive/' + MIGRATION), 'Expected additive migration missing');
 
   console.log('[2/5] Capture protected-table counts. Never replace active charts.');
   const before = captureCounts();
@@ -70,7 +70,7 @@ try {
   if (applied === 0) {
     console.log('[3/5] Apply only the additive table-creation migration 0041.');
     run(['d1', 'execute', DB, '--remote', '--config', 'wrangler.jsonc',
-      '--file', 'migrations/' + MIGRATION, '--yes']);
+      '--file', 'migrations/additive/' + MIGRATION, '--yes']);
     const names = query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('global_tank_capacity_defaults','pending_underground_tanks') ORDER BY name");
     guard(names.length === 2, 'New registration tables were not created');
     run(['d1', 'execute', DB, '--remote', '--config', 'wrangler.jsonc',
