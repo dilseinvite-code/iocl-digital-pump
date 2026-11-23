@@ -68,7 +68,7 @@ import {
   ClientDryRunReport,
 } from '../components/pump/pumpInfrastructureUi';
 import { PERMISSIONS } from '../../shared/constants';
-import { GlobalCalibrationMasterSection } from '../components/pump/GlobalCalibrationMasterSection';
+import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
@@ -1347,7 +1347,7 @@ export const PumpInfrastructurePage: React.FC = () => {
           {id:'storage',label:'1. Fuel & Storage',items:[
             {id:'products',label:'Mapped Products',icon:Fuel},
             {id:'tanks',label:'Underground Tanks',icon:Gauge},
-            ...(canReadTankCalibration?[{id:'globalCalibration' as const,label:'Global Calibration Masters',icon:Layers,testId:'tab-global-calibration-masters'}]:[])]},
+            ...(canReadTankCalibration?[{id:'globalCalibration' as const,label:'Calibration Charts',icon:Layers,testId:'tab-global-calibration-masters'}]:[])]},
           {id:'dispensing',label:'2. Dispensing & Mapping',items:[
             {id:'dispensers',label:'Dispensers / MPDs',icon:Sliders},
             {id:'nozzles',label:'Nozzles',icon:Flame},
@@ -1407,7 +1407,7 @@ export const PumpInfrastructurePage: React.FC = () => {
 
       {/* 2A. GLOBAL CALIBRATION MASTERS */}
       {activeTab === 'globalCalibration' && canReadTankCalibration && (
-        <GlobalCalibrationMasterSection
+        <SimpleGlobalCalibrationManager
           selectedOutletId={selectedOutletId}
           selectedOutletName={
             selectedOutlet ? `${selectedOutlet.roCode} — ${selectedOutlet.name}` : undefined
@@ -1435,7 +1435,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F1F5F9] hover:bg-[#E8EEF5] text-orange-800 border border-orange-500/30 rounded-lg text-xs font-mono font-bold transition-colors"
                 >
                   <Layers className="w-3.5 h-3.5 text-[#B8530D]" />
-                  <span>Global Calibration Masters (20 KL / 50 KL)</span>
+                  <span>Calibration Charts</span>
                 </button>
               )}
               {canWriteTanks && (
