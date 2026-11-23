@@ -2245,8 +2245,10 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
                   You have reported that an engineer already approved the scanned chart. Record the
                   actual certificate/document, issuer, signatory and verification date through the
                   existing Engineering Verification form. This comparison is not a substitute for
-                  that approval record. The chart maximum exceeds the system's 11,000 L policy
-                  ceiling by 73.41 L; any scoped exception must cite authentic engineering authority.
+                  that approval record. The original scanned source includes 73.41 L above the
+                  11,000 L limit. The restricted operational curve now stops at exactly 11,000 L;
+                  its original source values remain available for audit. Approval still requires
+                  certified evidence and resolution of differing scanned/stored readings.
                 </p>
                 {canApproveCalibrationChart && suppliedTenKlComparison.status==='MATCH' && (
                   <button type="button"
@@ -2963,8 +2965,9 @@ export const GlobalCalibrationMasterSection: React.FC<GlobalCalibrationMasterSec
                       </strong>{' '}
                       for nominal{' '}
                       <strong>{activeTemplate.nominalCapacityLitres.toLocaleString()} L</strong>).
-                      Operational approval, tank assignment, chart activation, and DSR calculation
-                      use are strictly blocked until verified by an authorised engineer.
+                      {activeTemplate.code===TEN_KL_TEMPLATE_CODE
+                        ? 'The 11,000 L operational projection excludes those higher original readings; the complete source is retained for audit. Template approval and physical tank activation remain blocked until certified evidence and source-point reconciliation are complete.'
+                        : 'Operational approval, tank assignment, chart activation, and DSR calculation use are strictly blocked until verified by an authorised engineer.'}
                     </div>
                   </div>
                   {Boolean(
