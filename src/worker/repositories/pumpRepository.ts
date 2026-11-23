@@ -6456,7 +6456,7 @@ export class PumpRepository {
       throw err;
     }
 
-    if (!draftOnlyFromAddTank && (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException)) {
+    if (!draftOnlyFromAddTank && (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException))) {
       const err = new Error(
         `Global reference template ${template.code} requires engineering review (chart maximum volume ${template.maxVolumeLitresStr} L exceeds the +15% operational capacity ceiling) and cannot be assigned, activated, or used in DSR calculations.`
       );
