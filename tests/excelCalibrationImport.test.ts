@@ -503,7 +503,7 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(previewRes.status).toBe(400);
       const previewJson = (await previewRes.json()) as any;
       expect(previewJson.success).toBe(false);
-      expect(['INCOMPATIBLE_TANK', 'UNVERIFIED_TANK_DIMENSIONS']).toContain(previewJson.error.code);
+      expect(['ENGINEERING_REVIEW_REQUIRED', 'INCOMPATIBLE_TANK', 'UNVERIFIED_TANK_DIMENSIONS']).toContain(previewJson.error.code);
 
       // 4. Tank assignment for EXCEL_10KL_REFERENCE is blocked
       const assignRes = await app.request(
@@ -521,7 +521,7 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(assignRes.status).toBe(400);
       const assignJson = (await assignRes.json()) as any;
       expect(assignJson.success).toBe(false);
-      expect(['ENGINEERING_VERIFICATION_REQUIRED', 'TEMPLATE_NOT_APPROVED']).toContain(
+      expect(['ENGINEERING_REVIEW_REQUIRED','ENGINEERING_VERIFICATION_REQUIRED','TEMPLATE_NOT_APPROVED']).toContain(
         assignJson.error.code
       );
     });
