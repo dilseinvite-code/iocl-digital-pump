@@ -2934,7 +2934,7 @@ tankCalibration.post('/calibration-templates/:id/assign', requirePermission(PERM
   }
 
   const body = await c.req.json().catch(() => ({}));
-  const { tankIds, notes } = body;
+  const { tankIds, notes, draftOnlyFromAddTank } = body;
 
   if (!Array.isArray(tankIds) || tankIds.length === 0) {
     return c.json({ success: false, data: null, error: { code: 'BAD_REQUEST', message: 'tankIds array is required' } }, 400);
@@ -2963,6 +2963,7 @@ tankCalibration.post('/calibration-templates/:id/assign', requirePermission(PERM
     const result = await pumpRepo.assignGlobalTemplateToTanks(id, tankIds, userCtx.user.id, {
       activateImmediately: false,
       preserveExistingDraft: true,
+      draftOnlyFromAddTank: draftOnlyFromAddTank === true,
       notes,
     });
 
