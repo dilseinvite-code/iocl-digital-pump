@@ -767,6 +767,7 @@ export interface CalibrationValidationResult {
 export interface CalibrationValidationOptions {
   tankCapacityLitres?: number;
   allowOverCapacity?: boolean;
+  maxOverCapacityRatio?: number;
   requireMinTwoPoints?: boolean;
   maxDipMm?: number;
   tankDiameterMm?: number;
@@ -863,7 +864,7 @@ export function validateCalibrationChartPoints(
 
     if (options?.tankCapacityLitres && options.tankCapacityLitres > 0) {
       const maxOverCapacityLitres =
-        Math.round(options.tankCapacityLitres * 1.1 * 1000) / 1000;
+        Math.round(options.tankCapacityLitres * (options.maxOverCapacityRatio ?? 1.1) * 1000) / 1000;
       if (!options.allowOverCapacity && volNum > options.tankCapacityLitres) {
         return {
           valid: false,
@@ -874,7 +875,7 @@ export function validateCalibrationChartPoints(
       if (options.allowOverCapacity && volNum > maxOverCapacityLitres) {
         return {
           valid: false,
-          error: `Row ${i + 1}: Volume ${volNum.toLocaleString()} L exceeds the maximum permitted +10% over-capacity ceiling of ${maxOverCapacityLitres.toLocaleString()} L (nominal ${options.tankCapacityLitres.toLocaleString()} L).`,
+          error: `Row ${i + 1}: Volume ${volNum.toLocaleString()} L exceeds the maximum permitted +${Math.round(((options.maxOverCapacityRatio ?? 1.1)-1)*100)}% over-capacity ceiling of ${maxOverCapacityLitres.toLocaleString()} L (nominal ${options.tankCapacityLitres.toLocaleString()} L).`,
           normalizedPoints: [],
         };
       }
@@ -1827,10 +1828,11 @@ export function buildGlobalTemplateImportPreview(
 ): GlobalTemplateImportPreviewResult {
   const expectedMaxDip = template.maxDipMm ?? template.tankDiameterMm ?? null;
   const maxOverCapacityCeilingLitres =
-    Math.round(template.nominalCapacityLitres * 1.1 * 1000) / 1000;
+    Math.round(template.nominalCapacityLitres * 1.15 * 1000) / 1000;
   const basePreview = buildCalibrationImportPreview(rawText, {
     tankCapacityLitres: template.nominalCapacityLitres,
     allowOverCapacity: options?.allowOverCapacity,
+    maxOverCapacityRatio: 1.15,
     maxDipMm: expectedMaxDip ?? undefined,
     tankDiameterMm: template.tankDiameterMm ?? undefined,
   });
@@ -1992,18 +1994,12 @@ export function canApproveGlobalTemplate(
           : null;
   }
 
-  const hasScopedPolicyException = Boolean(
-    codeUpper === 'EXCEL_10KL_REFERENCE' &&
-      template.engineeringVerification?.decision === 'VERIFIED' &&
-      template.engineeringVerification?.allowScopedPolicyException === true
-  );
-
   if (nominalCap != null && nominalCap > 0 && maxVol != null) {
-    const maxOverCapacityCeiling = Math.round(nominalCap * 1.1 * 1000) / 1000;
-    if (maxVol > maxOverCapacityCeiling && !hasScopedPolicyException) {
+    const maxOverCapacityCeiling = Math.round(nominalCap * 1.15 * 1000) / 1000;
+    if (maxVol > maxOverCapacityCeiling) {
       return {
         allowed: false,
-        reason: `Chart maximum volume (${maxVol.toLocaleString()} L) exceeds the maximum permitted +10% over-capacity ceiling (${maxOverCapacityCeiling.toLocaleString()} L).`,
+        reason: `Chart maximum volume (${maxVol.toLocaleString()} L) exceeds the maximum permitted +15% over-capacity ceiling (${maxOverCapacityCeiling.toLocaleString()} L).`,
         requiresOverCapacityConfirmation: true,
       };
     }

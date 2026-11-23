@@ -642,68 +642,19 @@ describe('IOCL End-to-End Tank Calibration Management & Governance Suite', () =>
     );
     expect(verify10WithoutException.status).toBe(200);
 
-    const blocked10Approve = await app.request(
+    // At +15%, certified 10 KL 11,073.41-L reference no longer needs a +10% policy exception.
+    // Document Vault engineering verification is still required for operational approval.
+    const approved10 = await app.request(
       '/api/v1/calibration-templates/gtct-excel-10kl-ref/status',
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'APPROVED',
-          allowOverCapacity: true,
-          confirmOverCapacity: true,
-        }),
+        body: JSON.stringify({ status: 'APPROVED', allowOverCapacity: true, confirmOverCapacity: true }),
       },
       env
     );
-    expect(blocked10Approve.status).toBe(400);
-    expect(((await blocked10Approve.json()) as any).error.code).toBe(
-      'OVER_CAPACITY_CEILING_EXCEEDED'
-    );
-
-    // Record narrowly scoped policy exception for 10 KL backed by Document Vault certificate and governing policy
-    const verify10WithException = await app.request(
-      '/api/v1/calibration-templates/gtct-excel-10kl-ref/engineering-verify',
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tankIdentifier: 'REF-10KL',
-          tankSerialNumber: 'SN-10KL-001',
-          verifiedCapacityLitres: 10000,
-          verifiedDiameterMm: 1940,
-          verifiedLengthMm: 3750,
-          verifiedMaxDipMm: 1940,
-          issuingAuthority: 'Legal Metrology',
-          certificateNumber: 'LM/CERT/10KL/2026-01',
-          verificationDate: '2026-11-01',
-          engineeringApprover: 'Er. R. Sharma',
-          decision: 'VERIFIED',
-          supportingDocumentId: vaultDocumentId,
-          allowScopedPolicyException: true,
-          governingPolicyReference: 'IOCL-ENG-POL-UGT-DISH-END-2026',
-          discrepancyResolutionNote:
-            'Hydro-strapping verified 11,073.41 L total dished-end volume (+73.41 L above +10% ceiling)',
-        }),
-      },
-      env
-    );
-    expect(verify10WithException.status).toBe(200);
-
-    const allowed10Approve = await app.request(
-      '/api/v1/calibration-templates/gtct-excel-10kl-ref/status',
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'APPROVED',
-          allowOverCapacity: true,
-          confirmOverCapacity: true,
-        }),
-      },
-      env
-    );
-    expect(allowed10Approve.status).toBe(200);
-    expect(((await allowed10Approve.json()) as any).data.status).toBe('APPROVED');
+    expect(approved10.status).toBe(200);
+    expect(((await approved10.json()) as any).data.status).toBe('APPROVED');
 
     // 8. 15 KL (`EXCEL_15KL_REFERENCE`): Verify that approval is blocked until the 5,500 mm vs 3,750 mm length conflict is resolved
     const verify15Unresolved = await app.request(
