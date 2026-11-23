@@ -127,6 +127,89 @@ describe('Two-input global-calibration tank registration', () => {
     expect(audit.some(a => a.action === 'TANK_REGISTER_FINALIZE')).toBe(true);
   });
 
+
+  it.each([
+    { capacity: 20000, templateId: 'gtct-std-20kl', count: 211, maxLitres: 21628.93 },
+    { capacity: 50000, templateId: 'gtct-std-50kl', count: 301, maxLitres: 53015 },
+  ])('finalizes a full $count-point $capacity L chart under the actual D1 bound-parameter limit', async ({capacity,templateId,count,maxLitres}) => {
+    const db = getDb(localD1);
+    const now = new Date().toISOString();
+    // Synthetic monotonic points exist ONLY in this isolated local test DB.
+    // They are not claimed to be the original signed scanned calibration.
+    const values = Array.from({ length:count }, (_,i)=>({
+      id: 'test-quick-full-' + capacity + '-' + i,
+      templateId,
+      dipMillimetresMilliunits: i * 10000,
+      volumeMilliunits: Math.round(maxLitres * 1000 * i / (count-1)),
+      createdAt: now,
+      createdBy: 'user-admin',
+    }));
+    for(let i=0;i<values.length;i+=40){
+      await db.insert(schema.globalTankCalibrationTemplatePoints).values(values.slice(i,i+40));
+    }
+    const pick = await request('PUT','/global-tank-defaults/'+capacity,{
+      templateId, acknowledgedWarnings:true,
+    });
+    expect(pick.status).toBe(200);
+    const queued = await request('POST','/outlets/ro-1001/tanks/quick-register',{
+      name:'Full chart '+capacity,capacityLitres:capacity,
+    });
+    expect(queued.status).toBe(201);
+    const pendingId=((await queued.json()) as any).data.id;
+    const before=await db.select().from(schema.tanks);
+    const originalBatch = localD1.batch.bind(localD1);
+    const pointInsertBindCounts:number[]=[];
+    localD1.batch = async (statements:any[])=>{
+      // Local SQLite normally permits >100 variables; simulate production D1
+      // enforcing a hard 100-bound-parameters ceiling PER prepared statement.
+      for(const stmt of statements){
+        const binds=(stmt as any).params as unknown[]|undefined;
+        expect(binds).toBeDefined();
+        const count=binds!.length;
+        if(count>100)throw new Error('D1_ERROR: too many SQL variables');
+        if((stmt as any).sql?.includes('tank_calibration_points')){
+          pointInsertBindCounts.push(count);
+        }
+      }
+      return originalBatch(statements);
+    };
+    let finalized:Response;
+    try{
+      finalized=await request('POST','/outlets/ro-1001/pending-tanks/'+pendingId+'/finalize',{
+        productId:'prod-hsd',
+      });
+    }finally{
+      localD1.batch=originalBatch;
+    }
+    expect(finalized.status).toBe(201);
+    const saved=(await finalized.json()) as any;
+    expect(saved.data.status).toBe('INACTIVE');
+    expect(saved.data.calibrationStatus).toBe('DRAFT');
+    expect(saved.data.pointsCount).toBe(count);
+    expect(pointInsertBindCounts.length).toBeGreaterThan(1);
+    expect(pointInsertBindCounts.every(x=>x<=100)).toBe(true);
+    const after=await db.select().from(schema.tanks);
+    expect(after).toHaveLength(before.length+1);
+    const charts=await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId,saved.data.id));
+    expect(charts).toHaveLength(1);
+    expect(charts[0].status).toBe('DRAFT');
+    const savedPoints=await db.select().from(schema.tankCalibrationPoints)
+      .where(eq(schema.tankCalibrationPoints.chartId,charts[0].id));
+    expect(savedPoints).toHaveLength(count);
+    expect(savedPoints[count-1].volumeMilliunits).toBe(Math.round(maxLitres*1000));
+    const pending=await db.select().from(schema.pendingUndergroundTanks)
+      .where(eq(schema.pendingUndergroundTanks.id,pendingId));
+    expect(pending[0].status).toBe('FINALIZED');
+    expect(pending[0].finalizedTankId).toBe(saved.data.id);
+    // Retrying the same pending ID must never create a duplicate tank.
+    const retry=await request('POST','/outlets/ro-1001/pending-tanks/'+pendingId+'/finalize',{
+      productId:'prod-hsd',
+    });
+    expect(retry.status).toBe(409);
+    expect(await db.select().from(schema.tanks)).toHaveLength(before.length+1);
+  });
+
   it('rejects unsupported capacity and unreviewed charts, with no tank or pending mutation', async () => {
     const db = getDb(localD1);
     const wrongCapacity = await request('POST', '/outlets/ro-1001/tanks/quick-register',
