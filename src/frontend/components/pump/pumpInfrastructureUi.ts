@@ -686,7 +686,8 @@ export function findTankProduct(
 // =========================================================================
 
 export interface TankCalibrationStatusInfo {
-  isConfigured: boolean;
+  isConfigured: boolean; // means readings attached, NOT necessarily operationally active
+  isActive: boolean;
   pointsCount: number;
   badgeLabel: string;
   fullLabel: string;
@@ -694,28 +695,57 @@ export interface TankCalibrationStatusInfo {
   warningText: string | null;
 }
 
-export function getTankCalibrationStatus(pointsCount?: number | null): TankCalibrationStatusInfo {
+export function getTankCalibrationStatus(
+  pointsCount?: number | null,
+  chartStatus?: 'DRAFT' | 'APPROVED' | 'ACTIVE' | 'SUPERSEDED' | 'ARCHIVED' | null
+): TankCalibrationStatusInfo {
   const count = Math.max(0, Number(pointsCount) || 0);
-  if (count >= 2) {
+  if (count < 2) {
     return {
-      isConfigured: true,
-      pointsCount: count,
-      badgeLabel: `Configured (${count} points)`,
-      fullLabel: `Calibration: Configured (${count} points)`,
-      badgeClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-      warningText: null,
-    };
-  }
-  return {
-    isConfigured: false,
-    pointsCount: count,
-    badgeLabel: 'Missing',
-    fullLabel: 'Calibration: Missing',
-    badgeClass: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
-    warningText:
-      count === 1
+      isConfigured: false, isActive: false, pointsCount: count,
+      badgeLabel: 'Missing', fullLabel: 'Calibration: Missing',
+      badgeClass: 'bg-amber-500/10 text-amber-800 border-amber-500/30',
+      warningText: count === 1
         ? 'At least 2 calibration points are required before recording tank dips in Daily Operations.'
         : 'Upload calibration chart before recording dips in Daily Operations.',
+    };
+  }
+  const states = {
+    DRAFT: {
+      label: 'DRAFT',
+      style: 'bg-amber-500/10 text-amber-800 border-amber-500/30',
+      warning: 'Chart readings are attached as DRAFT, not active for Daily Operations.',
+    },
+    APPROVED: {
+      label: 'APPROVED',
+      style: 'bg-sky-500/10 text-sky-800 border-sky-500/30',
+      warning: 'Chart is approved but not yet ACTIVE for Daily Operations.',
+    },
+    ACTIVE: {
+      label: 'ACTIVE',
+      style: 'bg-emerald-500/10 text-emerald-800 border-emerald-500/30',
+      warning: null,
+    },
+    SUPERSEDED: {
+      label: 'SUPERSEDED',
+      style: 'bg-slate-500/10 text-slate-700 border-slate-500/30',
+      warning: 'This revision was superseded and is not the current operational chart.',
+    },
+    ARCHIVED: {
+      label: 'ARCHIVED',
+      style: 'bg-slate-500/10 text-slate-700 border-slate-500/30',
+      warning: 'This revision is archived, not operationally active.',
+    },
+  } as const;
+  const state = chartStatus ? states[chartStatus] : null;
+  const statusLabel = state?.label ?? 'STATUS UNKNOWN';
+  const badgeLabel = `${count} points attached · ${statusLabel}`;
+  return {
+    isConfigured: true, isActive: chartStatus === 'ACTIVE',
+    pointsCount: count, badgeLabel,
+    fullLabel: `Calibration: ${badgeLabel}`,
+    badgeClass: state?.style ?? 'bg-amber-500/10 text-amber-800 border-amber-500/30',
+    warningText: state?.warning ?? (chartStatus === 'ACTIVE' ? null : 'Chart status has not been confirmed; these readings are not verified as active.'),
   };
 }
 
