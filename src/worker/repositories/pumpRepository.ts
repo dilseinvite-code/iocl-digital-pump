@@ -6449,8 +6449,14 @@ export class PumpRepository {
         template.engineeringVerification?.decision === 'VERIFIED' &&
         template.engineeringVerification?.allowScopedPolicyException === true
     );
+    const draftOnlyFromAddTank = options?.draftOnlyFromAddTank === true;
+    if (draftOnlyFromAddTank && (!Number.isFinite(template.maxVolumeLitres) || (template.maxVolumeLitres ?? 0) > template.nominalCapacityLitres * 1.15)) {
+      const err = new Error('Global chart is missing data or exceeds the strict +15% calibration reference limit. Re-upload corrected chart.');
+      (err as any).code='OVER_CAPACITY_CEILING_EXCEEDED';
+      throw err;
+    }
 
-    if (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException)) {
+    if (!draftOnlyFromAddTank && (template.requiresEngineeringReview || (template.isOverCapacityCeiling && !hasScopedPolicyException)) {
       const err = new Error(
         `Global reference template ${template.code} requires engineering review (chart maximum volume ${template.maxVolumeLitresStr} L exceeds the +15% operational capacity ceiling) and cannot be assigned, activated, or used in DSR calculations.`
       );
@@ -6458,7 +6464,7 @@ export class PumpRepository {
       throw err;
     }
 
-    if (template.requiresDimensionVerification) {
+    if (!draftOnlyFromAddTank && template.requiresDimensionVerification) {
       const err = new Error(
         `Global reference template ${template.code} has an unresolved dimensional conflict (5,500 mm vs 3,750 mm length note) and cannot be assigned until engineering verification confirms the physical tank certificate.`
       );
@@ -6508,7 +6514,7 @@ export class PumpRepository {
       );
 
       // Requirement 6: Reject incompatible or unverified tank IDs even if submitted directly through the API
-      if (!evalResult.isCompatible) {
+      if (!draftOnlyFromAddTank && !evalResult.isCompatible) {
         const err = new Error(
           `Tank #${tank.tankNumber} (${tank.name}, ${tank.capacityLitres.toLocaleString()} L) is not eligible for ${template.code}: ${evalResult.ineligibilityReason}`
         );
@@ -6581,6 +6587,7 @@ export class PumpRepository {
     options?: {
       activateImmediately?: boolean;
       preserveExistingDraft?: boolean;
+      draftOnlyFromAddTank?: boolean;
       notes?: string;
     }
   ): Promise<{
@@ -6625,7 +6632,7 @@ export class PumpRepository {
     }
 
     if (
-      String(template.code || '').toUpperCase().startsWith('EXCEL_') &&
+      !draftOnlyFromAddTank && String(template.code || '').toUpperCase().startsWith('EXCEL_') &&
       template.engineeringVerification?.decision !== 'VERIFIED'
     ) {
       const err = new Error(
@@ -6635,7 +6642,7 @@ export class PumpRepository {
       throw err;
     }
 
-    if (template.status !== 'APPROVED' && template.status !== 'ACTIVE') {
+    if (!draftOnlyFromAddTank && template.status !== 'APPROVED' && template.status !== 'ACTIVE') {
       const err = new Error(
         `Global template ${template.code} is in ${template.status} status and cannot be assigned to tanks until its dip-to-volume points are imported, validated, and marked APPROVED`
       );
@@ -6676,6 +6683,11 @@ export class PumpRepository {
       const outletType = outletRows[0]?.outletType || 'COCO';
 
       const charts = await this.listCalibrationCharts(tankId);
+      if (draftOnlyFromAddTank && (charts.length > 0 || tank.capacityLitres !== template.nominalCapacityLitres)) {
+        const err = new Error('A new tank must have no existing calibration charts and must match the global tank type exactly.');
+        (err as any).code = 'INCOMPATIBLE_TANK';
+        throw err;
+      }
       const evalResult = this.evaluateTankCompatibilityWithTemplate(
         tank,
         outletType,
