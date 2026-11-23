@@ -63,7 +63,7 @@ describe('Two-input global-calibration tank registration', () => {
     });
     await db.insert(schema.globalTankCalibrationTemplatePoints).values([
       { id: 'quick-alt-0', templateId: 'gtct-quick-alt', dipMillimetresMilliunits: 0, volumeMilliunits: 0, createdAt: now, createdBy: 'user-admin' },
-      { id: 'quick-alt-1', templateId: 'gtct-quick-alt', dipMillimetresMilliunits: 1940000, volumeMilliunits: 19400000, createdAt: now, createdBy: 'user-admin' },
+      { id: 'quick-alt-1', templateId: 'gtct-quick-alt', dipMillimetresMilliunits: 1940000, volumeMilliunits: 16240000, createdAt: now, createdBy: 'user-admin' },
     ]);
   }
 

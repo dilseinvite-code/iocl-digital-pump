@@ -1,0 +1,37 @@
+name: Release Full 10/20 KL Scanned Reference Ranges
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-full-scan-ranges.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iocl-worker-production-releases
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Read-only D1 preflight and single Worker deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Validate full-range calibration and app
+        run: |
+          node --check scripts/release/activate-readonly-excel-pdf.mjs
+          bun run typecheck
+          bun test tests/tenKlCalibrationLimit.test.ts tests/scannedCalibrationReference.test.ts tests/endToEndTankCalibration.test.ts tests/quickTankRegistration.test.ts
+          bun run build
+      - name: Deploy Cloudflare Worker with unchanged D1 records
+        run: bun scripts/release/activate-readonly-excel-pdf.mjs
