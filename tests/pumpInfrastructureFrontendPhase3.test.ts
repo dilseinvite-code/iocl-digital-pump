@@ -416,14 +416,29 @@ describe('Phase 3 Pump Infrastructure Pure Frontend Helpers Suite', () => {
       expect(status.warningText).toContain('At least 2 calibration points');
     });
 
-    it('Tank card shows Calibration Configured (5 points) when 5 points exist', () => {
-      const status = getTankCalibrationStatus(5);
-      expect(status.isConfigured).toBe(true);
-      expect(status.pointsCount).toBe(5);
-      expect(status.badgeLabel).toBe('Configured (5 points)');
-      expect(status.fullLabel).toBe('Calibration: Configured (5 points)');
-      expect(status.badgeClass).toContain('emerald');
-      expect(status.warningText).toBeNull();
+    it('Tank card distinguishes attached readings from DRAFT, APPROVED, and ACTIVE', () => {
+      const draft = getTankCalibrationStatus(211, 'DRAFT');
+      expect(draft.isConfigured).toBe(true);
+      expect(draft.isActive).toBe(false);
+      expect(draft.badgeLabel).toBe('211 points attached · DRAFT');
+      expect(draft.badgeClass).toContain('amber');
+      expect(draft.warningText).toContain('not active');
+
+      const approved = getTankCalibrationStatus(211, 'APPROVED');
+      expect(approved.isActive).toBe(false);
+      expect(approved.badgeLabel).toContain('APPROVED');
+      expect(approved.warningText).toContain('not yet ACTIVE');
+
+      const active = getTankCalibrationStatus(211, 'ACTIVE');
+      expect(active.isActive).toBe(true);
+      expect(active.badgeLabel).toBe('211 points attached · ACTIVE');
+      expect(active.badgeClass).toContain('emerald');
+      expect(active.warningText).toBeNull();
+
+      const unknown = getTankCalibrationStatus(211);
+      expect(unknown.isActive).toBe(false);
+      expect(unknown.badgeLabel).toContain('STATUS UNKNOWN');
+      expect(unknown.warningText).toContain('not been confirmed');
     });
 
     it('generates 5-point dummy/UAT preset for 20,000 L tank (0->0, 500->5000, 1000->10000, 1500->15000, 2000->20000)', () => {

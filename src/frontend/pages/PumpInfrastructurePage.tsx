@@ -133,8 +133,9 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [modalError, setModalError] = useState<string | null>(null);
 
   // Tank Calibration Chart states
-  const [tankCalibrationByTankId, setTankCalibrationByTankId] = useState<
-    Record<string, TankCalibrationPoint[]>
+  const [tankCalibrationByTankId, setTankCalibrationByTankId] = useState<Record<string, TankCalibrationPoint[]>>({});
+  const [tankChartStatusByTankId, setTankChartStatusByTankId] = useState<
+    Record<string, { status: TankCalibrationChart['status'] | null; pointsCount: number }>
   >({});
   const [calibratingTank, setCalibratingTank] = useState<Tank | null>(null);
   const [loadingCalibrationTankId, setLoadingCalibrationTankId] = useState<string | null>(null);
@@ -156,6 +157,7 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [calEffectiveFrom, setCalEffectiveFrom] = useState('');
   const [calNotes, setCalNotes] = useState('');
   const [calSaveMode, setCalSaveMode] = useState<'ACTIVE' | 'DRAFT'>('DRAFT');
+  const [confirmChartActivation, setConfirmChartActivation] = useState(false);
   const [calShowPreview, setCalShowPreview] = useState(false);
 
   // Dry-Run Comparison states
@@ -181,6 +183,8 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [editTankSafeFill, setEditTankSafeFill] = useState(19000);
   const [editTankMinOperating, setEditTankMinOperating] = useState(1000);
   const [editTankStatus, setEditTankStatus] = useState<'ACTIVE' | 'INACTIVE' | 'MAINTENANCE' | 'DECOMMISSIONED'>('ACTIVE');
+  const [confirmTankPhysicalCompatibility, setConfirmTankPhysicalCompatibility] = useState(false);
+  const [confirmTankOperatingLimits, setConfirmTankOperatingLimits] = useState(false);
 
   const [dispNumber, setDispNumber] = useState(1);
   const [dispName, setDispName] = useState('');
@@ -236,6 +240,7 @@ export const PumpInfrastructurePage: React.FC = () => {
       setTanks([]);
       setPendingQuickTanks([]);
       setTankCalibrationByTankId({});
+      setTankChartStatusByTankId({});
       setDispensers([]);
       setNozzles([]);
       setNozzleDiagnostics(null);
@@ -250,6 +255,7 @@ export const PumpInfrastructurePage: React.FC = () => {
     setTanks([]);
     setPendingQuickTanks([]);
     setTankCalibrationByTankId({});
+      setTankChartStatusByTankId({});
     setDispensers([]);
     setNozzles([]);
     setNozzleDiagnostics(null);
@@ -270,20 +276,22 @@ export const PumpInfrastructurePage: React.FC = () => {
     if (tRes.success && tRes.data) {
       setTanks(tRes.data);
       if (canReadTankCalibration && tRes.data.length > 0) {
-        const calEntries = await Promise.all(
-          tRes.data.map(async (tank) => {
-            const calRes = await apiFetch<TankCalibrationPoint[]>(
-              `/api/v1/tanks/${tank.id}/calibration`,
-              { cache: 'no-store' }
-            );
-            return [tank.id, calRes.success && calRes.data ? calRes.data : []] as const;
-          })
-        );
+        const calEntries = await Promise.all(tRes.data.map(async tank => {
+          const res = (await apiFetch<TankCalibrationPoint[]>(
+            `/api/v1/tanks/${tank.id}/calibration`, { cache: 'no-store' }
+          )) as any;
+          const pts: TankCalibrationPoint[] = res.success && Array.isArray(res.data) ? res.data : [];
+          const chart: TankCalibrationChart | null = res.activeChart ?? res.selectedChart ?? res.charts?.[0] ?? null;
+          return { id: tank.id, pts, status: chart?.status ?? null, count: chart?.pointsCount ?? pts.length };
+        }));
         const calMap: Record<string, TankCalibrationPoint[]> = {};
-        for (const [tid, pts] of calEntries) {
-          calMap[tid] = pts;
+        const statusMap: Record<string, {status: TankCalibrationChart['status'] | null; pointsCount: number}> = {};
+        for (const entry of calEntries) {
+          calMap[entry.id] = entry.pts;
+          statusMap[entry.id] = { status: entry.status, pointsCount: entry.count };
         }
         setTankCalibrationByTankId(calMap);
+        setTankChartStatusByTankId(statusMap);
       }
     } else {
       failures.push('tanks');
@@ -647,6 +655,8 @@ export const PumpInfrastructurePage: React.FC = () => {
     setEditTankSafeFill(t.safeFillCapacityLitres);
     setEditTankMinOperating(t.minimumOperatingLevelLitres);
     setEditTankStatus((t.status as any) || 'ACTIVE');
+    setConfirmTankPhysicalCompatibility(false);
+    setConfirmTankOperatingLimits(false);
     setModalError(null);
     setModalType('editTank');
   };
@@ -654,6 +664,12 @@ export const PumpInfrastructurePage: React.FC = () => {
   const handleEditTank = async (e: React.FormEvent) => {
     e.preventDefault();
     if (modalSubmitting || !editingTank) return;
+    const needsReview = editingTank.id.startsWith('tank-pgt-') &&
+      editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE';
+    if (needsReview && (!confirmTankPhysicalCompatibility || !confirmTankOperatingLimits)) {
+      setModalError('Confirm physical tank/fuel mapping and approved safe-fill and minimum operating limits before activation.');
+      return;
+    }
     setModalSubmitting(true);
     setModalError(null);
 
@@ -667,6 +683,7 @@ export const PumpInfrastructurePage: React.FC = () => {
           safeFillCapacityLitres: Number(editTankSafeFill),
           minimumOperatingLevelLitres: Number(editTankMinOperating),
           status: editTankStatus,
+          ...(needsReview ? { confirmPhysicalCompatibility: true, confirmOperationalLimits: true } : {}),
         }),
       });
 
@@ -737,6 +754,13 @@ export const PumpInfrastructurePage: React.FC = () => {
       setCalActiveChart(activeChart);
       setCalSelectedChart(selectedChart);
       setCalModalPoints(pts);
+      const badgeChart = activeChart ?? selectedChart;
+      setTankChartStatusByTankId(prev => ({
+        ...prev, [tankId]: {
+          status: badgeChart?.status ?? null,
+          pointsCount: badgeChart?.pointsCount ?? (badgeChart?.id === selectedChart?.id ? pts.length : 0),
+        },
+      }));
 
       // Keep tankCalibrationByTankId synced with the active chart's points so tank card badges reflect active status
       if (!chartId || (activeChart && selectedChart && activeChart.id === selectedChart.id)) {
@@ -792,6 +816,7 @@ export const PumpInfrastructurePage: React.FC = () => {
     setCalEffectiveFrom('');
     setCalNotes('');
     setCalSaveMode('DRAFT');
+    setConfirmChartActivation(false);
     setCalShowPreview(false);
     setCalShowDryRun(false);
     setCalDryRunText('');
@@ -805,6 +830,7 @@ export const PumpInfrastructurePage: React.FC = () => {
 
   const handleSelectCalibrationChartRevision = async (chartId: string) => {
     if (!calibratingTank) return;
+    setConfirmChartActivation(false);
     setModalError(null);
     setCalEditingPoint(null);
     setCalDryRunReport(null);
@@ -816,6 +842,10 @@ export const PumpInfrastructurePage: React.FC = () => {
     nextStatus: 'DRAFT' | 'APPROVED' | 'ACTIVE' | 'ARCHIVED'
   ) => {
     if (!calibratingTank || modalSubmitting) return;
+    if (nextStatus === 'ACTIVE' && !confirmChartActivation) {
+      setModalError('Check the explicit chart activation confirmation first.');
+      return;
+    }
     setModalError(null);
     setModalSubmitting(true);
     try {
@@ -827,12 +857,14 @@ export const PumpInfrastructurePage: React.FC = () => {
             status: nextStatus,
             effectiveFrom: calEffectiveFrom.trim() || null,
             notes: calNotes.trim() || null,
+            ...(nextStatus === 'ACTIVE' ? { confirmActivation: true } : {}),
           }),
         }
       );
 
       if (res.success && res.data) {
         await refreshTankCalibration(calibratingTank.id, res.data.id);
+        setConfirmChartActivation(false);
         notifyCalibrationChanged(calibratingTank.id);
         setSuccessMsg(
           `Revision #${res.data.revisionNumber} marked as ${res.data.status} for Tank #${calibratingTank.tankNumber}`
@@ -1515,7 +1547,8 @@ export const PumpInfrastructurePage: React.FC = () => {
             {tanks.map(t => {
               const safeFillPercent = Math.min(100, Math.round((t.safeFillCapacityLitres / t.capacityLitres) * 100));
               const calPoints = tankCalibrationByTankId[t.id] || [];
-              const calStatus = getTankCalibrationStatus(calPoints.length);
+              const summary = tankChartStatusByTankId[t.id];
+              const calStatus = getTankCalibrationStatus(summary?.pointsCount ?? calPoints.length, summary?.status);
 
               return (
                 <div key={t.id} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 space-y-3">
@@ -1539,7 +1572,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   {/* Visual Safe Fill Capacity Meter */}
                   <div>
                     <div className="flex justify-between text-xs text-[#64748B] font-mono mb-1">
-                      <span>Safe Fill Limit: {t.safeFillCapacityLitres.toLocaleString()} L</span>
+                      <span>Safe Fill Limit: {t.safeFillCapacityLitres.toLocaleString()} L{t.id.startsWith('tank-pgt-') && t.status === 'INACTIVE' ? ' (provisional)' : ''}</span>
                       <span>Total: {t.capacityLitres.toLocaleString()} L</span>
                     </div>
                     <div className="w-full bg-[#F1F5F9] rounded-full h-3 overflow-hidden border border-[#D7E0EA]/80">
@@ -1576,7 +1609,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                         <span>{calStatus.badgeLabel}</span>
                       </span>
                     </div>
-                    {!calStatus.isConfigured && calStatus.warningText && (
+                    {calStatus.warningText && (
                       <div className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-800 font-mono flex items-center gap-1.5">
                         <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                         <span>{calStatus.warningText}</span>
@@ -2822,6 +2855,20 @@ export const PumpInfrastructurePage: React.FC = () => {
                 ℹ️ Notice: Changing fuel grade product on an operational tank will be safely rejected if connected nozzles, historical meter readings, or fuel receipts are recorded.
               </div>
 
+              {editingTank.id.startsWith('tank-pgt-') && editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE' && (
+                <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                  <strong>Activate Tank — separate from calibration activation</strong>
+                  <p>This tank was registered with a provisional 90% safe-fill value. Use the approved physical tank records to check the fuel grade, dimensions and actual operating limits. An ACTIVE calibration revision is required first.</p>
+                  <label className="flex items-start gap-2">
+                    <input type="checkbox" className="mt-0.5" checked={confirmTankPhysicalCompatibility} onChange={e => setConfirmTankPhysicalCompatibility(e.target.checked)} />
+                    I verified the physical tank dimensions, fuel grade and applicable active calibration.
+                  </label>
+                  <label className="flex items-start gap-2">
+                    <input type="checkbox" className="mt-0.5" checked={confirmTankOperatingLimits} onChange={e => setConfirmTankOperatingLimits(e.target.checked)} />
+                    I independently checked the safe-fill and minimum operating levels (not just the provisional default).
+                  </label>
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-3">
                 <button
                   type="button"
@@ -2996,7 +3043,9 @@ export const PumpInfrastructurePage: React.FC = () => {
       {modalType === 'tankCalibration' && calibratingTank && (() => {
         const activePoints = tankCalibrationByTankId[calibratingTank.id] || [];
         const calPoints = calModalPoints.length > 0 || calSelectedChart ? calModalPoints : activePoints;
-        const calStatus = getTankCalibrationStatus(activePoints.length);
+        const calStatus = getTankCalibrationStatus(calPoints.length, calSelectedChart?.status);
+        const lastRecordedPoint = calPoints.reduce<TankCalibrationPoint | null>((last, point) =>
+          !last || point.dipMillimetresMilliunits > last.dipMillimetresMilliunits ? point : last, null);
         const isLoadingPoints = loadingCalibrationTankId === calibratingTank.id;
         const isChartLocked = Boolean(calSelectedChart?.isReferenced);
         const maxDipNum = calMaxDipMmInput.trim() ? Number(calMaxDipMmInput) : undefined;
@@ -3146,12 +3195,10 @@ export const PumpInfrastructurePage: React.FC = () => {
                             Approve Revision
                           </button>
                         )}
-                        {canApproveCalibrationChart &&
-                          (calSelectedChart.status === 'DRAFT' ||
-                            calSelectedChart.status === 'APPROVED') && (
+                        {canApproveCalibrationChart && calSelectedChart.status === 'APPROVED' && (
                           <button
                             type="button"
-                            disabled={modalSubmitting || calPoints.length < 2}
+                            disabled={modalSubmitting || calPoints.length < 2 || !confirmChartActivation}
                             onClick={() => handleUpdateCalibrationChartStatus(calSelectedChart.id, 'ACTIVE')}
                             className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 disabled:opacity-50 text-emerald-800 border border-emerald-500/30 text-[11px] font-mono font-bold"
                           >
@@ -3171,9 +3218,22 @@ export const PumpInfrastructurePage: React.FC = () => {
                     )}
                   </div>
 
+                  {calSelectedChart?.status === 'DRAFT' && (
+                    <p className="text-xs text-amber-100">Step 1: Review the source and physical tank, then approve this DRAFT revision. It is not active for Daily Operations.</p>
+                  )}
+                  {canApproveCalibrationChart && calSelectedChart?.status === 'APPROVED' && (
+                    <label className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-50 p-3 text-xs text-amber-900">
+                      <input type="checkbox" checked={confirmChartActivation} onChange={e => setConfirmChartActivation(e.target.checked)}
+                        data-testid="confirm-tank-chart-activation" className="mt-0.5"/>
+                      I confirm the approved chart matches the physical tank and understand activation changes stock dip-to-volume conversion. Tank operational status is separate.
+                    </label>
+                  )}
+                  {calSelectedChart?.status === 'ACTIVE' && (
+                    <p className="text-xs text-emerald-100">Calibration ACTIVE. Tank operational status is managed separately under Edit Tank.</p>
+                  )}
                   {/* Selected Revision Metadata */}
                   {calSelectedChart && (
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 border-t border-[#E2E8F0]/80 text-[11px] font-mono">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2 border-t border-[#E2E8F0]/80 text-[11px] font-mono">
                       <div>
                         <span className="text-[#64748B] block text-[10px]">DIMENSIONS (D × L)</span>
                         <span className="text-[#334155]">
@@ -3187,16 +3247,16 @@ export const PumpInfrastructurePage: React.FC = () => {
                         </span>
                       </div>
                       <div>
-                        <span className="text-[#64748B] block text-[10px]">MAX DIP / VOL</span>
-                        <span className="text-[#334155]">
-                          {calSelectedChart.maxDipMmStr
-                            ? `${formatCalibrationDisplay(calSelectedChart.maxDipMmStr)} mm`
-                            : `${formatCalibrationDisplay(currentChartDiagnostics.maxDipMm)} mm`}{' '}
-                          /{' '}
-                          {calSelectedChart.chartCapacityLitreStr
-                            ? `${formatCalibrationDisplay(calSelectedChart.chartCapacityLitreStr)} L`
-                            : `${formatCalibrationDisplay(currentChartDiagnostics.maxVolumeLitres)} L`}
-                        </span>
+                        <span className="text-[#64748B] block text-[10px]">LAST RECORDED DIP / VOLUME</span>
+                        <span className="text-[#334155]">{lastRecordedPoint
+                          ? `${formatCalibrationDisplay(lastRecordedPoint.dipMillimetresMilliunits / 1000)} mm / ${formatCalibrationDisplay(lastRecordedPoint.volumeMilliunits / 1000)} L`
+                          : 'No recorded readings'}</span>
+</div>
+                      <div>
+                        <span className="text-[#64748B] block text-[10px]">CHART NOMINAL CAPACITY</span>
+                        <span className="text-[#334155]">{calSelectedChart.chartCapacityLitreStr
+                          ? `${formatCalibrationDisplay(calSelectedChart.chartCapacityLitreStr)} L`
+                          : `${calibratingTank.capacityLitres.toLocaleString()} L`}</span>
                       </div>
                       <div>
                         <span className="text-[#64748B] block text-[10px]">CURVE / STEP</span>

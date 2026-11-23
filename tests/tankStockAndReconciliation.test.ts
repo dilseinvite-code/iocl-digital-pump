@@ -1185,7 +1185,7 @@ describe('IOCL Digital Pump Manager Phase 2B Tank Stock, Fuel Receipt & Reconcil
 
     const status5 = getTankCalibrationStatus(importedPoints.length);
     expect(status5.isConfigured).toBe(true);
-    expect(status5.fullLabel).toBe('Calibration: Configured (5 points)');
+    expect(status5.fullLabel).toBe('Calibration: 5 points attached · STATUS UNKNOWN');
 
     // 11. Daily Operations removes TANK CALIBRATION REQUIRED after calibration exists
     const bootAfterRes = await app.fetch(
