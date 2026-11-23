@@ -55,6 +55,8 @@ export const SCANNED_CALIBRATION_REFERENCES: Readonly<Record<10000 | 20000, Scan
       { dipMm: 10, volumeLitres: 11.97 },
       { dipMm: 410, volumeLitres: 2974.02 },
       { dipMm: 810, volumeLitres: 7694.26 },
+      // 202 cm confirmed from the original 20 KL chart by the operator on 2026-11-23.
+      { dipMm: 2020, volumeLitres: 21359.52 },
       { dipMm: 2100, volumeLitres: 21628.93 },
     ],
   },

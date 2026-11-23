@@ -31,3 +31,7 @@ The +15% figure is a chart-volume warning threshold and is **not** the tank's ph
 ## Automated integration test scope
 
 The end-to-end registration test uses the stored 20 KL workbook as its starting numerical source, then substitutes the **five verified printed checkpoints in an isolated, test-only database**. This tests that a completely populated, checkpoint-consistent curve can be copied and activated without repeating chart approval. **It is not a production remap or a verified full transcription of every scanned row.** Any differences found in the legacy workbook are reported by the test runner; the original fixture and live database remain unchanged.
+
+## 20 KL 202 cm reading — operator confirmation
+
+On 23 November 2026, the operator explicitly confirmed that the scanned 20 KL source at **2020 mm (202 cm)** reads **21,359.52 L**, replacing the provisional visual transcription 21,369.52 L. The draft CSV and scan-checkpoint tests were updated accordingly. The previous recorded Excel and all live tank/stock histories remain unchanged. Other scanned rows still require an independent proofreading pass before operational source remapping.

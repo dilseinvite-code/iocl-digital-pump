@@ -10,7 +10,7 @@ The two CSVs in this directory contain visually/manual-transcribed dip and volum
 ## Review warning
 These are candidate transcriptions pending independent proofreading against the printed PDF, not a signed engineering certificate and not live operational calibration. Do not auto-activate any existing tank or overwrite stored calibration history from these files.
 
-The 20 KL row at 2020 mm is especially ambiguous: the scanned page appears to read 21369.52 L but the steps between 2010 mm (21307.88 L) and 2030 mm (21408.13 L) are inconsistent with adjacent increments. An alternative reading of 21359.52 L would be smoother, but that is a mathematical inference; it MUST NOT silently replace the printed source. Confirm this original-paper digit before operational use.
+The operator explicitly confirmed on 23 November 2026 that the correct 20 KL dip reading at **2020 mm (202 cm) is 21359.52 L**. The previous provisional transcription of 21369.52 L was corrected on that basis, not by smoothing, interpolation, or assuming a formula. Adjacent readings remain 2010 mm = 21307.88 L and 2030 mm = 21408.13 L. The remaining rows are manual PDF transcriptions and should still undergo independent proofreading before operational remapping.
 
 ## How to compare
 Run: bun test tests/scannedPdfTranscriptionReview.test.ts

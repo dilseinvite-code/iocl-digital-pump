@@ -51,13 +51,14 @@ describe('Scanned PDF candidate transcriptions compared with legacy Excel',()=>{
      }));
    }
  });
- it('retains the flagged 20KL printed anomaly instead of inventing a smooth replacement',()=>{
+ it('locks the operator-confirmed 2020mm reading and checks adjacent increments',()=>{
    const rows=candidate(20);
    const get=(dip:number)=>rows.find(p=>p.dipMm===dip)!.volumeLitres;
    expect(get(100)).toBe(375.61);
    expect(get(2010)).toBe(21307.88);
-   expect(get(2020)).toBe(21369.52);
+   expect(get(2020)).toBe(21359.52);
    expect(get(2030)).toBe(21408.13);
-   expect(Math.abs((get(2020)-get(2010))-(get(2030)-get(2020)))).toBeGreaterThan(20);
+   expect(Number((get(2020)-get(2010)).toFixed(2))).toBe(51.64);
+   expect(Number((get(2030)-get(2020)).toFixed(2))).toBe(48.61);
  });
 });
