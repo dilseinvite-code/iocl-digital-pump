@@ -110,6 +110,13 @@ describe('Two-input global-calibration tank registration', () => {
         eq(schema.pendingUndergroundTanks.status, 'FINALIZED')));
     expect(pendingAfter).toHaveLength(1);
     expect(pendingAfter[0].finalizedTankId).toBe(tank.id);
+    // A repeated submit must never create another physical tank or chart.
+    const retry = await request('POST',
+      '/outlets/ro-1001/pending-tanks/' + createdJson.data.id + '/finalize', { productId: 'prod-ms' });
+    expect(retry.status).toBe(409);
+    expect((await db.select().from(schema.tanks)).length).toBe(beforeTanks.length + 1);
+    const audit = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.entityId, tank.id));
+    expect(audit.some(a => a.action === 'TANK_REGISTER_FINALIZE')).toBe(true);
   });
 
   it('rejects unsupported capacity and unreviewed charts, with no tank or pending mutation', async () => {

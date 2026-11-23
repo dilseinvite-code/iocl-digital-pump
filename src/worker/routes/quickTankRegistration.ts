@@ -75,10 +75,19 @@ quickTankRegistrationRoutes.put(
       return errResponse(c, 'INVALID_GLOBAL_CHART', 'The chosen chart must have valid readings within the +15% limit and match this tank capacity');
     }
     const now = new Date().toISOString();
-    await db.insert(schema.globalTankCapacityDefaults)
-      .values({ capacityLitres: capacity, templateId: selected.template.id, updatedAt: now, updatedBy: c.var.user!.user.id })
-      .onConflictDoUpdate({ target: schema.globalTankCapacityDefaults.capacityLitres,
-        set: { templateId: selected.template.id, updatedAt: now, updatedBy: c.var.user!.user.id } });
+    await (db as any).batch([
+      db.insert(schema.globalTankCapacityDefaults)
+        .values({ capacityLitres: capacity, templateId: selected.template.id, updatedAt: now, updatedBy: c.var.user!.user.id })
+        .onConflictDoUpdate({ target: schema.globalTankCapacityDefaults.capacityLitres,
+          set: { templateId: selected.template.id, updatedAt: now, updatedBy: c.var.user!.user.id } }),
+      db.insert(schema.auditLogs).values({
+        id: 'aud-' + crypto.randomUUID(), userId: c.var.user!.user.id,
+        action: 'GLOBAL_TANK_DEFAULT_SET', entityType: 'GLOBAL_TANK_CAPACITY_DEFAULT',
+        entityId: String(capacity), newValueJson: JSON.stringify({ capacityLitres: capacity, templateId: selected.template.id }),
+        ipAddress: c.req.header('cf-connecting-ip') || null,
+        userAgent: c.req.header('user-agent') || null, createdAt: now,
+      }),
+    ]);
     return c.json({ success: true, data: { capacityLitres: capacity, templateId: selected.template.id }, error: null });
   }
 );
@@ -140,7 +149,16 @@ quickTankRegistrationRoutes.post(
       finalizedTankId: null,
       createdAt: now, updatedAt: now, createdBy: c.var.user!.user.id,
     };
-    await db.insert(schema.pendingUndergroundTanks).values(row);
+    await (db as any).batch([
+      db.insert(schema.pendingUndergroundTanks).values(row),
+      db.insert(schema.auditLogs).values({
+        id: 'aud-' + crypto.randomUUID(), userId: c.var.user!.user.id,
+        action: 'TANK_REGISTRATION_PENDING_CREATE', entityType: 'PENDING_TANK',
+        entityId: row.id, newValueJson: JSON.stringify({ name, capacityLitres, templateId: row.templateId, status: row.status }),
+        ipAddress: c.req.header('cf-connecting-ip') || null,
+        userAgent: c.req.header('user-agent') || null, createdAt: now,
+      }),
+    ]);
     return c.json({ success: true, data: { ...row, templateName: selected.template.name,
       message: 'Registered with global calibration as a non-operational draft. Map the fuel grade separately to create an operational tank.' }, error: null }, 201);
   }
@@ -177,8 +195,10 @@ quickTankRegistrationRoutes.post(
     const tanks = await repo.listTanksByOutlet(outletId);
     const nextNumber = tanks.reduce((n, tank) => Math.max(n, tank.tankNumber), 0) + 1;
     const now = new Date().toISOString();
-    const id = 'tank-' + crypto.randomUUID();
-    const chartId = 'tcc-' + crypto.randomUUID();
+    // Deterministic IDs make concurrent finalizations safe: duplicate requests
+    // collide on the tank primary key and the full D1 batch rolls back.
+    const id = 'tank-' + pendingId;
+    const chartId = 'tcc-' + pendingId;
     const safeFillProvisional = Math.round(pending.capacityLitres * 0.9);
     const stmts: any[] = [
       db.insert(schema.tanks).values({
@@ -217,6 +237,15 @@ quickTankRegistrationRoutes.post(
       status: 'FINALIZED', finalizedTankId: id, updatedAt: now,
     }).where(and(eq(schema.pendingUndergroundTanks.id, pendingId),
       eq(schema.pendingUndergroundTanks.status, 'PENDING_FUEL'))));
+    stmts.push(db.insert(schema.auditLogs).values({
+      id: 'aud-' + crypto.randomUUID(), userId: c.var.user!.user.id,
+      action: 'TANK_REGISTER_FINALIZE', entityType: 'TANK', entityId: id,
+      newValueJson: JSON.stringify({ pendingId, name: pending.name, tankNumber: nextNumber,
+        capacityLitres: pending.capacityLitres, productId: parsed.data.productId,
+        templateId: source.template.id, calibrationStatus: 'DRAFT', tankStatus: 'INACTIVE' }),
+      ipAddress: c.req.header('cf-connecting-ip') || null,
+      userAgent: c.req.header('user-agent') || null, createdAt: now,
+    }));
     try {
       // D1 batch is atomic: never leave a tank without its draft chart after a failed mapping.
       await (db as any).batch(stmts);
