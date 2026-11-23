@@ -1,0 +1,37 @@
+name: Release Quick Tank D1 Binding Fix
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-fix-quick-tank-d1-bind-limit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iocl-worker-production-releases
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Read-only D1 preflight and single Worker deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Validate full calibration tank registration
+        run: |
+          node --check scripts/release/activate-readonly-excel-pdf.mjs
+          bun run typecheck
+          bun test tests/quickTankRegistration.test.ts
+          bun run build
+      - name: Deploy Cloudflare Worker without D1 migrations
+        run: bun scripts/release/activate-readonly-excel-pdf.mjs

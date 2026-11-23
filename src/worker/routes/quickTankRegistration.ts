@@ -258,8 +258,14 @@ quickTankRegistrationRoutes.post(
       volumeMilliunits: p.volumeMilliunits,
       createdAt: now, createdBy: c.var.user!.user.id,
     }));
-    for (let offset = 0; offset < points.length; offset += 75) {
-      stmts.push(db.insert(schema.tankCalibrationPoints).values(points.slice(offset, offset + 75)));
+    // Cloudflare D1 accepts at most 100 bound parameters per SQL statement.
+    // Each calibration point inserts 7 bound columns (id, chartId, tankId,
+    // dip, volume, createdAt, createdBy). 12 rows = 84 parameters.
+    // Keep all chunks in the same atomic D1 batch; a failure rolls back
+    // the tank, its chart, every reading, and the pending-status update.
+    const POINTS_PER_D1_INSERT = 12;
+    for (let offset = 0; offset < points.length; offset += POINTS_PER_D1_INSERT) {
+      stmts.push(db.insert(schema.tankCalibrationPoints).values(points.slice(offset, offset + POINTS_PER_D1_INSERT)));
     }
     stmts.push(db.update(schema.pendingUndergroundTanks).set({
       status: 'FINALIZED', finalizedTankId: id, updatedAt: now,
@@ -277,8 +283,21 @@ quickTankRegistrationRoutes.post(
     try {
       // D1 batch is atomic: never leave a tank without its draft chart after a failed mapping.
       await (db as any).batch(stmts);
-    } catch {
-      return errResponse(c, 'TANK_CREATE_CONFLICT', 'Could not finalize tank; check duplicate tank numbers or retry after refreshing.', 409);
+    } catch (error) {
+      // No partial tank records should survive an unsuccessful atomic batch.
+      // Do not expose SQL statements or their bound values to the client.
+      const reason = error instanceof Error ? error.message : String(error);
+      const duplicateNumber = /unique constraint failed.*tanks\.(outlet_id|tank_number)|idx_tanks_outlet_tank_num/i.test(reason);
+      const kind = duplicateNumber ? 'DUPLICATE_TANK_NUMBER'
+        : /too many sql variables|too many bound parameters/i.test(reason) ? 'D1_BIND_LIMIT'
+        : /foreign key constraint failed/i.test(reason) ? 'FOREIGN_KEY'
+        : 'UNKNOWN';
+      console.error('[QUICK_TANK_FINALIZE_FAILED]', {
+        outletId, pendingId, chartPointCount: points.length, tankNumber: nextNumber, kind,
+      });
+      return duplicateNumber
+        ? errResponse(c, 'TANK_NUMBER_CONFLICT', 'Another tank already uses this number. Refresh and retry the pending registration.', 409)
+        : errResponse(c, 'TANK_FINALIZATION_FAILED', 'Could not save the tank and calibration together. Your pending registration remains available. Please retry after refreshing; if it continues, contact support.', 500);
     }
     return c.json({ success: true, data: {
       id, tankNumber: nextNumber, name: pending.name, status: 'INACTIVE',
