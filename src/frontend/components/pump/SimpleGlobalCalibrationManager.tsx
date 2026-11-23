@@ -89,6 +89,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const defaultOver15=Boolean(chosen&&exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres));
   const defaultHasWarning=Boolean(defaultOver15||alternateToScannedReference||(scannedReview&&!scannedReview.passed));
   const canSetAsDefault=Boolean(chosen && !['ARCHIVED','SUPERSEDED'].includes(chosen.status) && (chosen.pointsCount||0)>=2 &&
+    (!suppliedSource || Boolean(detail?.id===chosen.id&&scannedReview?.passed)) &&
     (!defaultHasWarning || acknowledgedDefaultWarning));
   useEffect(()=>{setAcknowledgedDefaultWarning(false);setAcknowledgedApproval(false);},[chosen?.id]);
   const capacityCards=GLOBAL_TANK_CAPACITIES_LITRES.map(capacity=>{
@@ -434,7 +435,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
              Sample PDF checkpoints match. This is not a full row-by-row transcription of the scanned document.
            </span>}
            {!canSetAsDefault&&!defaultHasWarning&&<span className="text-xs text-amber-800">
-             Save numerical dip-to-volume readings first.
+             {suppliedSource?'Correct the sampled PDF/Excel discrepancies before assigning this reference.':'Save numerical dip-to-volume readings first.'}
            </span>}
            <p className="text-xs text-slate-500">
              Default selection affects only future registrations, not Tank #1, Tank #2 or other existing tanks.

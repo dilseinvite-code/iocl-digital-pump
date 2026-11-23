@@ -11,7 +11,7 @@ import { requirePermission } from '../middleware/permission';
 import { PERMISSIONS } from '../../shared/constants';
 import { globalCalibrationMaxLitres, isGlobalTankCapacity } from '../../shared/globalTankTypes';
 import { scannedReferenceSpec, reviewScannedCalibrationCandidate } from '../../shared/scannedCalibrationReference';
-import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
+import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../shared/operatorSuppliedCalibration';
 
 export const quickTankRegistrationRoutes = new Hono<{ Bindings: EnvBindings }>();
 quickTankRegistrationRoutes.use('*', requireAuth as any);
@@ -99,6 +99,11 @@ quickTankRegistrationRoutes.put(
     const selected = await validatedReference(db, parsed.data.templateId);
     if (!selected || selected.template.nominalCapacityLitres !== capacity) {
       return errResponse(c, 'INVALID_GLOBAL_CHART', 'Choose a saved chart with valid numerical dip and volume readings for this capacity.'); 
+    }
+    if (isOperatorSuppliedSourceMetadata(selected.template) &&
+        !isOperatorSuppliedReference(selected.template,selected.points)) {
+      return errResponse(c,'SUPPLIED_CHART_RECONCILIATION_REQUIRED',
+        'The stored Excel chart differs from the supplied PDF checkpoints. Correct the numerical values before making this the default for new tanks.',409);
     }
     if (selected.warnings.length && parsed.data.acknowledgedWarnings !== true) {
       return errResponse(c, 'WARNING_ACKNOWLEDGEMENT_REQUIRED', selected.warnings.join(' '), 409);
