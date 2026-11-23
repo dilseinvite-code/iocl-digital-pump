@@ -10,6 +10,7 @@ import { requireAuth, type AppContext, type EnvBindings } from '../middleware/au
 import { requirePermission } from '../middleware/permission';
 import { PERMISSIONS } from '../../shared/constants';
 import { globalCalibrationMaxLitres, isGlobalTankCapacity } from '../../shared/globalTankTypes';
+import { scannedReferenceSpec, reviewScannedCalibrationCandidate } from '../../shared/scannedCalibrationReference';
 
 export const quickTankRegistrationRoutes = new Hono<{ Bindings: EnvBindings }>();
 quickTankRegistrationRoutes.use('*', requireAuth as any);
@@ -48,6 +49,23 @@ async function validatedReference(db: ReturnType<typeof getDb>, id: string) {
   }
   const maxVolume = prevVolume / 1000;
   if (maxVolume > globalCalibrationMaxLitres(template.nominalCapacityLitres) + 0.000001) return null;
+  // Only for the two supplied scanned references: require complete 10 mm
+  // coverage, exact printed endpoints and sampled printed values before
+  // allowing selection as an automatic DRAFT default.
+  if (scannedReferenceSpec(template.nominalCapacityLitres)) {
+    const review = reviewScannedCalibrationCandidate({
+      code: template.code,
+      nominalCapacityLitres: template.nominalCapacityLitres,
+      tankDiameterMm: template.tankDiameterMm,
+      tankLengthMm: template.tankLengthMm,
+      maxDipMm: template.maxDipMm,
+      points: points.map(p=>({
+        dipMm:p.dipMillimetresMilliunits / 1000,
+        volumeLitres:p.volumeMilliunits / 1000,
+      })),
+    });
+    if (!review.passed) return null;
+  }
   return { template, points, maxVolume };
 }
 
@@ -72,7 +90,7 @@ quickTankRegistrationRoutes.put(
     const db = getDb(c.env.DB);
     const selected = await validatedReference(db, parsed.data.templateId);
     if (!selected || selected.template.nominalCapacityLitres !== capacity) {
-      return errResponse(c, 'INVALID_GLOBAL_CHART', 'The chosen chart must have valid readings within the +15% limit and match this tank capacity');
+      return errResponse(c, 'INVALID_GLOBAL_CHART', 'The chosen chart must match the supplied scan checkpoints, contain the full dip range, and remain within the +15% validation ceiling');
     }
     const now = new Date().toISOString();
     await (db as any).batch([
@@ -124,7 +142,7 @@ quickTankRegistrationRoutes.post(
     if (defaults.length) {
       selected = await validatedReference(db, defaults[0].templateId);
       if (!selected || selected.template.nominalCapacityLitres !== capacityLitres) {
-        return errResponse(c, 'DEFAULT_CHART_INVALID', 'Default calibration chart is no longer valid. Select a valid default in Calibration Charts.', 409);
+        return errResponse(c, 'DEFAULT_CHART_INVALID', 'Default calibration chart no longer matches the verified scanned source or full dip sequence. Review and re-upload corrected readings before registration.', 409);
       }
     } else {
       const eligible = [];
@@ -135,7 +153,7 @@ quickTankRegistrationRoutes.post(
       if (eligible.length !== 1) {
         return errResponse(c, eligible.length ? 'DEFAULT_CHART_REQUIRED' : 'CALIBRATION_NOT_FOUND',
           eligible.length ? 'Multiple valid charts exist for this capacity. Set one default once under Calibration Charts.' :
-            'No valid global calibration chart is saved for this capacity. Upload it once under Calibration Charts.', 409);
+            'No complete scanned-source-compatible chart is saved for this capacity. Upload the corrected digital dip/volume table in Calibration Charts.', 409);
       }
       selected = eligible[0];
     }

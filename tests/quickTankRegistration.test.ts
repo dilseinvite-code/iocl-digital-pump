@@ -40,42 +40,50 @@ describe('Two-input global-calibration tank registration', () => {
     }), env
   );
 
-  async function createCalibratedTwentyKlVariants() {
+  async function createCalibratedFifteenKlVariants() {
     const db = getDb(localD1);
     const now = new Date().toISOString();
+    await db.insert(schema.globalTankCalibrationTemplates).values({
+      id:'gtct-test-std-15kl', code:'TEST_STANDARD_15KL',
+      name:'Test standard 15 KL', nominalCapacityLitres:15000,
+      revisionNumber:1, status:'DRAFT',
+      tankDiameterMmMilliunits:1940000, tankLengthMmMilliunits:5500000,
+      maxDipMmMilliunits:1940000, createdBy:'user-admin',
+      createdAt:now, updatedAt:now,
+    });
     await db.insert(schema.globalTankCalibrationTemplatePoints).values([
-      { id: 'quick-std-0', templateId: 'gtct-std-20kl', dipMillimetresMilliunits: 0, volumeMilliunits: 0, createdAt: now, createdBy: 'user-admin' },
-      { id: 'quick-std-1', templateId: 'gtct-std-20kl', dipMillimetresMilliunits: 2100000, volumeMilliunits: 21648300, createdAt: now, createdBy: 'user-admin' },
+      { id: 'quick-std-0', templateId: 'gtct-test-std-15kl', dipMillimetresMilliunits: 0, volumeMilliunits: 0, createdAt: now, createdBy: 'user-admin' },
+      { id: 'quick-std-1', templateId: 'gtct-test-std-15kl', dipMillimetresMilliunits: 1940000, volumeMilliunits: 16246300, createdAt: now, createdBy: 'user-admin' },
     ]);
     await db.insert(schema.globalTankCalibrationTemplates).values({
-      id: 'gtct-quick-alt', code: 'QUICK_ALT_20KL', name: 'Second 20KL reference',
-      nominalCapacityLitres: 20000, revisionNumber: 1, status: 'DRAFT',
-      tankDiameterMmMilliunits: 2100000, tankLengthMmMilliunits: 6250000,
-      maxDipMmMilliunits: 2100000, createdBy: 'user-admin', createdAt: now, updatedAt: now,
+      id: 'gtct-quick-alt', code: 'QUICK_ALT_15KL', name: 'Second 15KL reference',
+      nominalCapacityLitres: 15000, revisionNumber: 1, status: 'DRAFT',
+      tankDiameterMmMilliunits: 1940000, tankLengthMmMilliunits: 5500000,
+      maxDipMmMilliunits: 1940000, createdBy: 'user-admin', createdAt: now, updatedAt: now,
     });
     await db.insert(schema.globalTankCalibrationTemplatePoints).values([
       { id: 'quick-alt-0', templateId: 'gtct-quick-alt', dipMillimetresMilliunits: 0, volumeMilliunits: 0, createdAt: now, createdBy: 'user-admin' },
-      { id: 'quick-alt-1', templateId: 'gtct-quick-alt', dipMillimetresMilliunits: 2100000, volumeMilliunits: 21000000, createdAt: now, createdBy: 'user-admin' },
+      { id: 'quick-alt-1', templateId: 'gtct-quick-alt', dipMillimetresMilliunits: 1940000, volumeMilliunits: 16240000, createdAt: now, createdBy: 'user-admin' },
     ]);
   }
 
   it('requires a one-time default for two saved charts, registers by only name and capacity, and never invents a fuel grade', async () => {
     const db = getDb(localD1);
-    await createCalibratedTwentyKlVariants();
+    await createCalibratedFifteenKlVariants();
     const beforeTanks = await db.select().from(schema.tanks);
     const noDefault = await request('POST', '/outlets/ro-1001/tanks/quick-register',
-      { name: 'New MS Underground Tank', capacityLitres: 20000 });
+      { name: 'New MS Underground Tank', capacityLitres: 15000 });
     expect(noDefault.status).toBe(409);
     expect(((await noDefault.json()) as any).error.code).toBe('DEFAULT_CHART_REQUIRED');
 
-    const selectDefault = await request('PUT', '/global-tank-defaults/20000', { templateId: 'gtct-std-20kl' });
+    const selectDefault = await request('PUT', '/global-tank-defaults/15000', { templateId: 'gtct-test-std-15kl' });
     expect(selectDefault.status).toBe(200);
 
     const created = await request('POST', '/outlets/ro-1001/tanks/quick-register',
-      { name: 'New MS Underground Tank', capacityLitres: 20000 });
+      { name: 'New MS Underground Tank', capacityLitres: 15000 });
     expect(created.status).toBe(201);
     const createdJson = (await created.json()) as any;
-    expect(createdJson.data.templateId).toBe('gtct-std-20kl');
+    expect(createdJson.data.templateId).toBe('gtct-test-std-15kl');
     expect(createdJson.data.status).toBe('PENDING_FUEL');
     expect((await db.select().from(schema.tanks)).length).toBe(beforeTanks.length);
 
@@ -94,17 +102,17 @@ describe('Two-input global-calibration tank registration', () => {
     const tank = (await db.select().from(schema.tanks).where(eq(schema.tanks.id, mappedJson.data.id)))[0];
     expect(tank).toBeDefined();
     expect(tank.productId).toBe('prod-ms');
-    expect(tank.capacityLitres).toBe(20000);
-    expect(tank.safeFillCapacityLitres).toBe(18000);
+    expect(tank.capacityLitres).toBe(15000);
+    expect(tank.safeFillCapacityLitres).toBe(13500);
     const charts = await db.select().from(schema.tankCalibrationCharts)
       .where(eq(schema.tankCalibrationCharts.tankId, tank.id));
     expect(charts).toHaveLength(1);
     expect(charts[0].status).toBe('DRAFT');
-    expect(charts[0].sourceTemplateId).toBe('gtct-std-20kl');
+    expect(charts[0].sourceTemplateId).toBe('gtct-test-std-15kl');
     const points = await db.select().from(schema.tankCalibrationPoints)
       .where(eq(schema.tankCalibrationPoints.chartId, charts[0].id));
     expect(points).toHaveLength(2);
-    expect(points[1].volumeMilliunits).toBe(21648300);
+    expect(points[1].volumeMilliunits).toBe(16246300);
     const pendingAfter = await db.select().from(schema.pendingUndergroundTanks)
       .where(and(eq(schema.pendingUndergroundTanks.id, createdJson.data.id),
         eq(schema.pendingUndergroundTanks.status, 'FINALIZED')));
