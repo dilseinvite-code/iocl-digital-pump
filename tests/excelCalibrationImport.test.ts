@@ -192,10 +192,10 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(chart10?.points[194].dipMm).toBe(1940);
       expect(chart10?.points[194].volumeLitres).toBe(11073.41);
       expect(chart10?.eligibleForDraftImport).toBe(true);
-      expect(chart10?.requiresEngineeringReview).toBe(true);
-      expect(chart10?.status).toBe('DRAFT_ENGINEERING_REVIEW');
-      expect(chart10?.reviewStatusLabel).toBe('DRAFT / ENGINEERING REVIEW REQUIRED');
-      expect(chart10?.warnings.some(w => w.includes('ENGINEERING REVIEW REQUIRED') && w.includes('11073.41 L'))).toBe(true);
+      expect(chart10?.requiresEngineeringReview).toBe(false);
+      expect(chart10?.status).toBe('ELIGIBLE_DRAFT');
+      expect(chart10?.reviewStatusLabel).toBe('DRAFT / PENDING VERIFICATION');
+      expect(chart10?.warnings.some(w => w.includes('ENGINEERING REVIEW REQUIRED'))).toBe(false);
     });
 
     it('deduplicates duplicate sheets of the same chart in a workbook without creating duplicate template entries', async () => {
@@ -302,9 +302,9 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(tpl10Detail?.maxDipMm).toBe(1940);
       expect(tpl10Detail?.pointsCount).toBe(195);
       expect(tpl10Detail?.maxVolumeLitres).toBe(11073.41);
-      expect(tpl10Detail?.isOverCapacityCeiling).toBe(true);
-      expect(tpl10Detail?.requiresEngineeringReview).toBe(true);
-      expect(tpl10Detail?.reviewStatusLabel).toBe('DRAFT / ENGINEERING REVIEW REQUIRED');
+      expect(tpl10Detail?.isOverCapacityCeiling).toBe(false);
+      expect(tpl10Detail?.requiresEngineeringReview).toBe(false);
+      expect(tpl10Detail?.reviewStatusLabel).toBe('DRAFT / PENDING VERIFICATION');
 
       const pts10 = await pumpRepo.listGlobalTankCalibrationTemplatePoints(tpl10.id);
       expect(pts10.length).toBe(195);
@@ -344,7 +344,7 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       const badge10 = getGlobalTemplateStatusBadge(tpl10Detail?.status, tpl10Detail?.pointsCount, tpl10Detail);
       const badge15 = getGlobalTemplateStatusBadge(tpl15Detail?.status, tpl15Detail?.pointsCount, tpl15Detail);
       const badge20 = getGlobalTemplateStatusBadge(tpl20Detail?.status, tpl20Detail?.pointsCount, tpl20Detail);
-      expect(badge10.readinessLabel).toBe('10 KL — DRAFT / ENGINEERING REVIEW REQUIRED — 195 points');
+      expect(badge10.readinessLabel).toBe('10 KL — DRAFT / PENDING VERIFICATION — 195 points');
       expect(badge15.readinessLabel).toBe('15 KL — DRAFT / DIMENSION VERIFICATION REQUIRED — 195 points');
       expect(badge20.readinessLabel).toBe('20 KL — DRAFT / PENDING VERIFICATION — 211 points');
 
@@ -416,7 +416,7 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(pts15After[0].id).toBe(pts15Before[0].id);
     });
 
-    it('enforces normal +10% capacity validation for operational calibration while blocking approval and assignment of review-only 10 KL chart', async () => {
+    it('enforces the +15% global upload ceiling and still blocks operational approval without verification', async () => {
       const db = getDb(localD1);
       const pumpRepo = new PumpRepository(db);
       const buffer = fs.readFileSync(fixturePath);
@@ -435,20 +435,20 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       const tpl10 = await pumpRepo.findGlobalTankCalibrationTemplateByCode('EXCEL_10KL_REFERENCE');
       expect(tpl10).toBeDefined();
 
-      // 1. Normal operational CSV import (> +10% without engineering review flag) is still rejected
+      // 1. Even a draft global CSV above +15% is rejected, regardless of the review flag
       await expect(
         pumpRepo.importGlobalTankCalibrationTemplatePoints(
           tpl10.id,
           [
             { dipMillimetresMilliunits: 0, volumeMilliunits: 0 },
-            { dipMillimetresMilliunits: 1940000, volumeMilliunits: 11073410 },
+            { dipMillimetresMilliunits: 1940000, volumeMilliunits: 11500100 },
           ],
           adminUserId,
           { allowOverCapacity: true, status: 'DRAFT' }
         )
-      ).rejects.toThrow('exceeds the maximum permitted +10% over-capacity ceiling');
+      ).rejects.toThrow('exceeds the maximum permitted +15% over-capacity ceiling');
 
-      // 2. Approving EXCEL_10KL_REFERENCE via API is blocked with 400 OVER_CAPACITY_CEILING_EXCEEDED
+      // 2. Operational approval still requires a verified calibration record and Document Vault evidence
       const approveRes = await app.request(
         `/api/v1/calibration-templates/${encodeURIComponent(tpl10.id)}/status`,
         {
@@ -468,9 +468,9 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(approveRes.status).toBe(400);
       const approveJson = (await approveRes.json()) as any;
       expect(approveJson.success).toBe(false);
-      expect(approveJson.error.code).toBe('OVER_CAPACITY_CEILING_EXCEEDED');
+      expect(approveJson.error.code).toBe('ENGINEERING_VERIFICATION_REQUIRED');
 
-      // 3. Tank assignment preview for EXCEL_10KL_REFERENCE is blocked with ENGINEERING_REVIEW_REQUIRED
+      // 3. Assignment preview still rejects a physically mismatched or unverified tank
       const tanks = await db.select().from(schema.tanks);
       const previewRes = await app.request(
         `/api/v1/calibration-templates/${encodeURIComponent(tpl10.id)}/assign-preview`,
@@ -487,7 +487,7 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(previewRes.status).toBe(400);
       const previewJson = (await previewRes.json()) as any;
       expect(previewJson.success).toBe(false);
-      expect(previewJson.error.code).toBe('ENGINEERING_REVIEW_REQUIRED');
+      expect(['INCOMPATIBLE_TANK', 'UNVERIFIED_TANK_DIMENSIONS']).toContain(previewJson.error.code);
 
       // 4. Tank assignment for EXCEL_10KL_REFERENCE is blocked
       const assignRes = await app.request(
@@ -505,7 +505,7 @@ describe('IOCL Excel Calibration Importer Suite (All Three Tank Calibration Char
       expect(assignRes.status).toBe(400);
       const assignJson = (await assignRes.json()) as any;
       expect(assignJson.success).toBe(false);
-      expect(['ENGINEERING_REVIEW_REQUIRED', 'TEMPLATE_NOT_APPROVED']).toContain(
+      expect(['ENGINEERING_VERIFICATION_REQUIRED', 'TEMPLATE_NOT_APPROVED']).toContain(
         assignJson.error.code
       );
     });

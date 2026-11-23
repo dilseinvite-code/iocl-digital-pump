@@ -767,6 +767,7 @@ export interface CalibrationValidationResult {
 export interface CalibrationValidationOptions {
   tankCapacityLitres?: number;
   allowOverCapacity?: boolean;
+  maxOverCapacityRatio?: number;
   requireMinTwoPoints?: boolean;
   maxDipMm?: number;
   tankDiameterMm?: number;
@@ -863,7 +864,7 @@ export function validateCalibrationChartPoints(
 
     if (options?.tankCapacityLitres && options.tankCapacityLitres > 0) {
       const maxOverCapacityLitres =
-        Math.round(options.tankCapacityLitres * 1.1 * 1000) / 1000;
+        Math.round(options.tankCapacityLitres * (options.maxOverCapacityRatio ?? 1.1) * 1000) / 1000;
       if (!options.allowOverCapacity && volNum > options.tankCapacityLitres) {
         return {
           valid: false,
@@ -874,7 +875,7 @@ export function validateCalibrationChartPoints(
       if (options.allowOverCapacity && volNum > maxOverCapacityLitres) {
         return {
           valid: false,
-          error: `Row ${i + 1}: Volume ${volNum.toLocaleString()} L exceeds the maximum permitted +10% over-capacity ceiling of ${maxOverCapacityLitres.toLocaleString()} L (nominal ${options.tankCapacityLitres.toLocaleString()} L).`,
+          error: `Row ${i + 1}: Volume ${volNum.toLocaleString()} L exceeds the maximum permitted +${Math.round(((options.maxOverCapacityRatio ?? 1.1)-1)*100)}% over-capacity ceiling of ${maxOverCapacityLitres.toLocaleString()} L (nominal ${options.tankCapacityLitres.toLocaleString()} L).`,
           normalizedPoints: [],
         };
       }
@@ -1098,6 +1099,7 @@ export function parseBulkCalibrationText(
   return validateCalibrationChartPoints(rawPoints, {
     tankCapacityLitres: options?.tankCapacityLitres,
     allowOverCapacity: options?.allowOverCapacity,
+    maxOverCapacityRatio: options?.maxOverCapacityRatio,
     requireMinTwoPoints: true,
     maxDipMm: options?.maxDipMm,
     tankDiameterMm: options?.tankDiameterMm,
@@ -1701,11 +1703,11 @@ export function getGlobalTemplateStatusBadge(
           hasValidatedPoints,
         };
       }
-      if (templateMeta.requiresEngineeringReview || codeUpper === 'EXCEL_10KL_REFERENCE') {
+      if (templateMeta.requiresEngineeringReview) {
         return {
           label: 'DRAFT / ENGINEERING REVIEW REQUIRED',
           badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
-          readinessLabel: `10 KL — DRAFT / ENGINEERING REVIEW REQUIRED — ${count} points`,
+          readinessLabel: `${templateMeta.nominalCapacityLitres ? Math.round(templateMeta.nominalCapacityLitres / 1000)+' KL — ' : ''}DRAFT / ENGINEERING REVIEW REQUIRED — ${count} points`,
           isApproved: false,
           hasValidatedPoints,
         };
@@ -1719,11 +1721,11 @@ export function getGlobalTemplateStatusBadge(
           hasValidatedPoints,
         };
       }
-      if (codeUpper === 'EXCEL_20KL_REFERENCE') {
+      if (['EXCEL_10KL_REFERENCE', 'EXCEL_20KL_REFERENCE', 'EXCEL_50KL_REFERENCE'].includes(codeUpper)) {
         return {
           label: 'DRAFT / PENDING VERIFICATION',
           badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-          readinessLabel: `20 KL — DRAFT / PENDING VERIFICATION — ${count} points`,
+          readinessLabel: `${templateMeta.nominalCapacityLitres ? Math.round(templateMeta.nominalCapacityLitres / 1000)+' KL — ' : ''}DRAFT / PENDING VERIFICATION — ${count} points`,
           isApproved: false,
           hasValidatedPoints,
         };
@@ -1827,10 +1829,11 @@ export function buildGlobalTemplateImportPreview(
 ): GlobalTemplateImportPreviewResult {
   const expectedMaxDip = template.maxDipMm ?? template.tankDiameterMm ?? null;
   const maxOverCapacityCeilingLitres =
-    Math.round(template.nominalCapacityLitres * 1.1 * 1000) / 1000;
+    Math.round(template.nominalCapacityLitres * 1.15 * 1000) / 1000;
   const basePreview = buildCalibrationImportPreview(rawText, {
     tankCapacityLitres: template.nominalCapacityLitres,
     allowOverCapacity: options?.allowOverCapacity,
+    maxOverCapacityRatio: 1.15,
     maxDipMm: expectedMaxDip ?? undefined,
     tankDiameterMm: template.tankDiameterMm ?? undefined,
   });
@@ -1992,18 +1995,12 @@ export function canApproveGlobalTemplate(
           : null;
   }
 
-  const hasScopedPolicyException = Boolean(
-    codeUpper === 'EXCEL_10KL_REFERENCE' &&
-      template.engineeringVerification?.decision === 'VERIFIED' &&
-      template.engineeringVerification?.allowScopedPolicyException === true
-  );
-
   if (nominalCap != null && nominalCap > 0 && maxVol != null) {
-    const maxOverCapacityCeiling = Math.round(nominalCap * 1.1 * 1000) / 1000;
-    if (maxVol > maxOverCapacityCeiling && !hasScopedPolicyException) {
+    const maxOverCapacityCeiling = Math.round(nominalCap * 1.15 * 1000) / 1000;
+    if (maxVol > maxOverCapacityCeiling) {
       return {
         allowed: false,
-        reason: `Chart maximum volume (${maxVol.toLocaleString()} L) exceeds the maximum permitted +10% over-capacity ceiling (${maxOverCapacityCeiling.toLocaleString()} L).`,
+        reason: `Chart maximum volume (${maxVol.toLocaleString()} L) exceeds the maximum permitted +15% over-capacity ceiling (${maxOverCapacityCeiling.toLocaleString()} L).`,
         requiresOverCapacityConfirmation: true,
       };
     }

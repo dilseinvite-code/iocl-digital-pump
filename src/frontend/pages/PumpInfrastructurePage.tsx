@@ -10,6 +10,7 @@ import {
   TankCalibrationChart,
   TankCalibrationPoint,
   TankCalibrationDryRunReport,
+  GlobalTankCalibrationTemplate,
   Dispenser,
   Nozzle,
   NozzleDiagnosticItem,
@@ -69,6 +70,7 @@ import {
 } from '../components/pump/pumpInfrastructureUi';
 import { PERMISSIONS } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
+import { GLOBAL_TANK_CAPACITIES_LITRES, exceedsGlobalCalibrationLimit } from '../../shared/globalTankTypes';
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
@@ -162,6 +164,8 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [tankCapacity, setTankCapacity] = useState(20000);
   const [tankSafeFill, setTankSafeFill] = useState(19000);
   const [tankMinOperating, setTankMinOperating] = useState(1000);
+  const [globalTankTemplates,setGlobalTankTemplates] = useState<GlobalTankCalibrationTemplate[]>([]);
+  const [newTankTemplateId,setNewTankTemplateId] = useState('');
 
   // Edit Tank states
   const [editingTank, setEditingTank] = useState<Tank | null>(null);
@@ -334,7 +338,9 @@ export const PumpInfrastructurePage: React.FC = () => {
     setModalError(null);
 
     try {
-      const res = await apiFetch(`/api/v1/outlets/${selectedOutletId}/tanks`, {
+      const selectedTemplate=globalTankTemplates.find(t=>t.id===newTankTemplateId);
+      if(selectedTemplate && selectedTemplate.nominalCapacityLitres!==tankCapacity){setModalError('Select a tank chart matching the chosen tank capacity.');setModalSubmitting(false);return;}
+      const res = await apiFetch<{id:string}>(`/api/v1/outlets/${selectedOutletId}/tanks`, {
         method: 'POST',
         body: JSON.stringify({
           tankNumber: Number(tankNumber),
@@ -348,8 +354,17 @@ export const PumpInfrastructurePage: React.FC = () => {
       });
 
       if (res.success) {
+        let calibrationMessage='Underground tank created';
+        if(newTankTemplateId && res.data?.id){
+          try {
+            const linked=await apiFetch<{assignments:Array<{status:string}>}>(`/api/v1/calibration-templates/${encodeURIComponent(newTankTemplateId)}/assign`,{
+              method:'POST',body:JSON.stringify({tankIds:[res.data.id],draftOnlyFromAddTank:true})
+            });
+            calibrationMessage=linked.success ? 'Underground tank created with global calibration draft' : `Tank created, but calibration not attached: ${linked.error?.message||'Check the saved chart'}`;
+          } catch (err:any) {calibrationMessage='Tank created. Calibration draft not attached: '+(err.message||'Please retry from calibration charts');}
+        }
         setModalType(null);
-        setSuccessMsg('Underground tank created');
+        setSuccessMsg(calibrationMessage);
         setTimeout(() => setSuccessMsg(null), 3000);
         loadOutletData();
       } else {
@@ -1446,6 +1461,10 @@ export const PumpInfrastructurePage: React.FC = () => {
                     setSelectedProductId(outletProducts[0]?.productId || '');
                     setTankCapacity(20000);
                     setTankSafeFill(19000);
+                    setNewTankTemplateId('');
+                    apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates').then(result=>{
+                      setGlobalTankTemplates(result.success && result.data ? result.data : []);
+                    }).catch(()=>setGlobalTankTemplates([]));
                     setTankMinOperating(1000);
                     setModalError(null);
                     setModalType('addTank');
@@ -2111,13 +2130,30 @@ export const PumpInfrastructurePage: React.FC = () => {
                   className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-2 text-xs text-[#17365D]"
                 />
               </div>
+              <div>
+                <label className="block text-xs text-[#475569] mb-1">Global Tank Type</label>
+                <select value={tankCapacity} onChange={e=>{const capacity=Number(e.target.value);setTankCapacity(capacity);setTankSafeFill(Math.round(capacity*.95));setNewTankTemplateId('');}}
+                  className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-2 text-sm text-[#17365D]">
+                  {GLOBAL_TANK_CAPACITIES_LITRES.map(cap=><option key={cap} value={cap}>{cap/1000} KL — {cap.toLocaleString('en-IN')} litres</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-[#475569] mb-1">Saved Calibration Chart</label>
+                <select value={newTankTemplateId} onChange={e=>setNewTankTemplateId(e.target.value)}
+                  className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-3 py-2 text-sm text-[#17365D]">
+                  <option value="">No chart — add later</option>
+                  {globalTankTemplates.filter(t=>t.nominalCapacityLitres===tankCapacity && (t.pointsCount||0)>=2 && !exceedsGlobalCalibrationLimit(t.maxVolumeLitres||0,tankCapacity)).map(t=>
+                    <option key={t.id} value={t.id}>{t.name} · {t.status}</option>)}
+                </select>
+                <p className="mt-1 text-[11px] text-slate-500">Selected chart is attached as DRAFT. Active stock and safe-fill settings are not changed.</p>
+              </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="block text-[10px] text-[#64748B] mb-1">Total Cap (L)</label>
                   <input
                     type="number"
                     value={tankCapacity}
-                    onChange={(e) => setTankCapacity(Number(e.target.value))}
+                    readOnly
                     className="w-full bg-[#F1F5F9] border border-[#D7E0EA] rounded-xl px-2 py-1.5 text-xs text-[#17365D]"
                   />
                 </div>

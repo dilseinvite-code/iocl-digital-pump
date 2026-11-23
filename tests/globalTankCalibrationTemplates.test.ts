@@ -861,7 +861,7 @@ describe('Centralised Tank Calibration Master Suite (Migration 0034)', () => {
     });
   });
 
-  describe('8. Scanned IOCL 20 KL Chart (21,648.3 L Max Volume, 210 Printed Readings + Inferred 0 mm / 0 L) & +10% Ceiling Regression', () => {
+  describe('8. Scanned IOCL 20 KL Chart (21,648.3 L Max Volume, 210 Printed Readings + Inferred 0 mm / 0 L) & +15% Ceiling Regression', () => {
     function generateScanned20klPrintedReadingsCsv(
       maxPrintedVolumeLitres: number,
       includeExplicitZeroPoint: boolean
@@ -888,7 +888,7 @@ describe('Centralised Tank Calibration Master Suite (Migration 0034)', () => {
       return lines.join('\n');
     }
 
-    it('8.1 validates UI preview for 210 printed readings (21,648.3 L max + inferred 0 mm / 0 L) and rejects volumes above the +10% ceiling (22,000 L)', () => {
+    it('8.1 validates UI preview for 210 printed readings (21,648.3 L max + inferred 0 mm / 0 L) and rejects volumes above the +15% ceiling (23,000 L)', () => {
       const templateMeta = {
         code: 'STANDARD_20KL',
         nominalCapacityLitres: 20000,
@@ -917,20 +917,20 @@ describe('Centralised Tank Calibration Master Suite (Migration 0034)', () => {
       expect(previewWithOverCap.startsAtZero).toBe(true);
       expect(previewWithOverCap.reachesMaxDip).toBe(true);
       expect(previewWithOverCap.isOverNominalCapacity).toBe(true);
-      expect(previewWithOverCap.maxOverCapacityCeilingLitres).toBe(22000);
+      expect(previewWithOverCap.maxOverCapacityCeilingLitres).toBe(23000);
       expect(previewWithOverCap.diagnostics.pointsCount).toBe(211);
       expect(previewWithOverCap.diagnostics.minDipMm).toBe(0);
       expect(previewWithOverCap.diagnostics.maxDipMm).toBe(2100);
       expect(previewWithOverCap.diagnostics.maxVolumeLitres).toBe(21648.3);
       expect(previewWithOverCap.saveStatusDefault).toBe('DRAFT');
 
-      // 3. Rejected when volume exceeds the +10% ceiling (22,000.1 L > 22,000 L) even with allowOverCapacity: true
-      const csvAboveCeiling = generateScanned20klPrintedReadingsCsv(22000.1, true);
+      // 3. Rejected when volume exceeds the +15% ceiling (23,000.1 L > 23,000 L) even with allowOverCapacity: true
+      const csvAboveCeiling = generateScanned20klPrintedReadingsCsv(23000.1, true);
       const previewAboveCeiling = buildGlobalTemplateImportPreview(csvAboveCeiling, templateMeta, {
         allowOverCapacity: true,
       });
       expect(previewAboveCeiling.valid).toBe(false);
-      expect(previewAboveCeiling.error).toContain('+10% over-capacity ceiling of 22,000 L');
+      expect(previewAboveCeiling.error).toContain('+15% over-capacity ceiling of 23,000 L');
 
       // 4. Approval helper requires explicit confirmation when maxVolumeLitres > nominalCapacityLitres
       const draftOverCapTemplate = {
@@ -954,16 +954,16 @@ describe('Centralised Tank Calibration Master Suite (Migration 0034)', () => {
       const ceilingExceededCheck = canApproveGlobalTemplate(
         {
           ...draftOverCapTemplate,
-          maxVolumeLitres: 22000.1,
+          maxVolumeLitres: 23000.1,
         },
         true,
         { confirmOverCapacity: true }
       );
       expect(ceilingExceededCheck.allowed).toBe(false);
-      expect(ceilingExceededCheck.reason).toContain('+10% over-capacity ceiling');
+      expect(ceilingExceededCheck.reason).toContain('+15% over-capacity ceiling');
     });
 
-    it('8.2 imports STANDARD_20KL with 21,648.3 L maximum (210 printed readings + inferred 0 mm / 0 L) as DRAFT when allowOverCapacity is true, rejects > +10% ceiling, and requires explicit confirmation on approval', async () => {
+    it('8.2 imports STANDARD_20KL with 21,648.3 L maximum (210 printed readings + inferred 0 mm / 0 L) as DRAFT when allowOverCapacity is true, rejects > +15% ceiling, and requires explicit confirmation on approval', async () => {
       const csv210Printed21648 = generateScanned20klPrintedReadingsCsv(21648.3, false);
 
       // 1. Import without allowOverCapacity -> must fail with 400 CAPACITY_CONFLICT
@@ -988,8 +988,8 @@ describe('Centralised Tank Calibration Master Suite (Migration 0034)', () => {
       const rejectNoFlagJson = (await rejectNoFlagRes.json()) as any;
       expect(rejectNoFlagJson.error.code).toBe('CAPACITY_CONFLICT');
 
-      // 2. Import above +10% ceiling (22,000.1 L and 25,000 L) with allowOverCapacity: true -> must fail with OVER_CAPACITY_CEILING_EXCEEDED
-      const csv22000_1 = generateScanned20klPrintedReadingsCsv(22000.1, true);
+      // 2. Import above +15% ceiling (23,000.1 L and 25,000 L) with allowOverCapacity: true -> must fail with OVER_CAPACITY_CEILING_EXCEEDED
+      const csv23000_1 = generateScanned20klPrintedReadingsCsv(23000.1, true);
       const rejectCeilingRes = await app.request(
         '/api/v1/calibration-templates/STANDARD_20KL/import',
         {
@@ -999,7 +999,7 @@ describe('Centralised Tank Calibration Master Suite (Migration 0034)', () => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            csvText: csv22000_1,
+            csvText: csv23000_1,
             status: 'DRAFT',
             allowOverCapacity: true,
             sourceFileName: 'IOCL_20KL_OVER_CEILING.csv',
@@ -1141,7 +1141,7 @@ describe('Centralised Tank Calibration Master Suite (Migration 0034)', () => {
           -- 20 KL with dimensions but missing certification / reference document
           ('tcc-elig-20kl-uncert-r1', 'tank-elig-20kl-uncertified', 1, 'DRAFT', 'MM', 'LITRES', 2100000, 6250000, 2100000, 20000000, NULL, NULL, '2026-01-01', 'Uncertified 20 KL', 'user-admin', '${nowIso}', '${nowIso}', NULL, NULL),
           -- 25 KL with legacy NULL length (must never infer 2100x6250)
-          ('tcc-elig-25kl-r1', 'tank-elig-25kl', 1, 'ACTIVE', 'MM', 'LITRES', 2200000, NULL, 2200000, 25000000, 'legacy-d1-preserved', NULL, '2026-01-01', 'Legacy 25 KL', 'user-admin', '${nowIso}', '${nowIso}', 'user-admin', '${nowIso}'),
+          ('tcc-elig-25kl-r1', 'tank-elig-25kl', 1, 'ACTIVE', 'MM', 'LITRES', 2300000, NULL, 2300000, 25000000, 'legacy-d1-preserved', NULL, '2026-01-01', 'Legacy 25 KL', 'user-admin', '${nowIso}', '${nowIso}', 'user-admin', '${nowIso}'),
           -- 50 KL with verified 3000x7500x3000 mm & certification
           ('tcc-elig-50kl-ver-r1', 'tank-elig-50kl-verified', 1, 'ACTIVE', 'MM', 'LITRES', 3000000, 7500000, 3000000, 50000000, 'IOCL_50KL_VERIFIED.csv', 'CERT-50KL-D3000-L7500', '2026-01-01', 'Verified 50 KL', 'user-admin', '${nowIso}', '${nowIso}', 'user-admin', '${nowIso}'),
           -- 50 KL with missing dimensions (NULL length)

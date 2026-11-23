@@ -4,6 +4,7 @@ import {apiFetch, clearApiCache} from '../../services/api';
 import type {GlobalTankCalibrationTemplate} from '../../../shared/types';
 import {limitTenKlCalibrationCurve} from '../../../shared/tenKlCalibrationLimit';
 import {parseSimpleCalibrationCsv, type ParsedSimpleCalibrationCsv} from './simpleCalibrationCsv';
+import {GLOBAL_TANK_CAPACITIES_LITRES, exceedsGlobalCalibrationLimit, globalCalibrationMaxLitres} from '../../../shared/globalTankTypes';
 
 interface Props {
   selectedOutletId: string;
@@ -66,10 +67,11 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   },[chosen?.code,chartRows]);
   const previewCharts=preview?.charts||[];
   const pendingWarnings=previewCharts.filter(ch=>ch.warnings?.length ||
-    ch.maxVolumeLitres>ch.nominalCapacityLitres*1.1);
+    exceedsGlobalCalibrationLimit(ch.maxVolumeLitres,ch.nominalCapacityLitres));
   const selectedNominal=creatingCustom ? Number(newCapacity) : chosen?.nominalCapacityLitres;
+  const tankTypeOptions = GLOBAL_TANK_CAPACITIES_LITRES;
   const csvExcess=Boolean(csv&&selectedNominal&&selectedNominal>0&&
-    csv.maxVolumeLitres>selectedNominal*1.1);
+    exceedsGlobalCalibrationLimit(csv.maxVolumeLitres,selectedNominal));
   const plainWarning=(message:string)=>{
     if(/ENGINEERING REVIEW REQUIRED|authorised engineer/i.test(message))
       return 'Volume exceeds the usual capacity range. Check dip/volume numbers and units. Re-upload a corrected chart if necessary.';
@@ -79,8 +81,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   };
   const canReplaceExisting=Boolean(chosen&&chosen.status==='DRAFT' &&
     !(chosen.activeAssignedTanksCount||chosen.stagedDraftTanksCount));
-  const previewGood=mode==='excel'?Boolean(preview?.eligibleChartsCount):
-    Boolean(csv?.valid && (creatingCustom || canReplaceExisting));
+  const previewGood=mode==='excel'?Boolean(preview?.eligibleChartsCount && previewCharts.every(ch=>ch.eligibleForDraftImport && !exceedsGlobalCalibrationLimit(ch.maxVolumeLitres,ch.nominalCapacityLitres))):
+    Boolean(csv?.valid && !csvExcess && selectedNominal && (creatingCustom || canReplaceExisting));
 
   const choose=async(f:File|null)=>{
     setFile(f);setMode(null);setPreview(null);setCsv(null);setError('');setNotice('');setSavedExcel(false);
@@ -105,7 +107,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         const resp=await apiFetch<UploadPreview>('/api/v1/calibration-templates/excel-preview',{method:'POST',body});
         if(!resp.success||!resp.data)throw new Error(resp.error?.message||'Excel sheet could not be read.');
         setPreview(resp.data);setMode('excel');
-        if(!resp.data.charts.length)throw new Error('No 10, 15 or 20 KL sheet detected. For a custom chart, export its dip/volume table to CSV and upload that.');
+        if(!resp.data.charts.length)throw new Error('No 10, 15, 20 or 50 KL sheet detected. For a custom chart, export its dip/volume table to CSV and upload that.');
       }
     }catch(e:any){setError(e.message||'Unable to read file');}
     finally{setBusy(false);}
@@ -116,7 +118,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     setBusy(true);setError('');setNotice('');
     try{
       if(mode==='excel'){
-        if(!preview?.eligibleChartsCount)throw new Error('No valid calibration sheets found. Correct the workbook and re-upload.');
+        if(!preview?.eligibleChartsCount || previewCharts.some(ch=>exceedsGlobalCalibrationLimit(ch.maxVolumeLitres,ch.nominalCapacityLitres)))throw new Error('One or more charts exceed the maximum +15% limit or have invalid readings. Correct and re-upload.');
         const body=new FormData();body.append('file',file);body.append('confirmImport','true');
         const resp=await apiFetch<ImportResponse>('/api/v1/calibration-templates/excel-import',{method:'POST',body});
         if(!resp.success||!resp.data)throw new Error(resp.error?.message || 'Could not save workbook.');
@@ -126,10 +128,11 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         setSavedExcel(true);
       }else if(mode==='csv'){
         if(!csv?.valid)throw new Error(csv?.errors[0]||'CSV needs valid dip/volume rows.');
+        if(csvExcess)throw new Error('Chart exceeds the maximum +15% volume limit for this tank type. Correct the values and upload again.');
         let id=chosen?.id;
         if(creatingCustom){
           const nominal=Number(newCapacity);
-          if(!Number.isFinite(nominal)||nominal<=0||!newTitle.trim())throw new Error('Enter a chart name and nominal capacity.');
+          if(!tankTypeOptions.some(cap=>cap===nominal)||!newTitle.trim())throw new Error('Enter a chart name and a supported tank capacity (10, 15, 20 or 50 KL).');
           const code='CUSTOM_'+Date.now().toString(36).toUpperCase();
           const result=await apiFetch<GlobalTankCalibrationTemplate>('/api/v1/calibration-templates',{
             method:'POST',
@@ -171,7 +174,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
           onClick={()=>{setError('');loadTemplates().catch(e=>setError(e.message));}}><RefreshCw className="mr-1 inline h-4 w-4"/>Refresh</button>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        {['1. Upload','2. Check values','3. Save draft'].map((name,i)=>
+        {['1. Choose type / Upload','2. Review +15% limit','3. Save global chart'].map((name,i)=>
           <div key={name} className="rounded-xl bg-[#F4F7FB] p-3 text-sm font-semibold text-[#17365D]">
             <span className="mr-2 text-orange-600">{i+1}</span>{name.slice(3)}
           </div>)}
@@ -199,13 +202,13 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         <option value="__new__">Create a new custom chart</option>
       </select>
       {creatingCustom&&<div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <input aria-label="New chart name" placeholder="Chart name (e.g. Tank 7)" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"/>
-        <input aria-label="Nominal capacity in litres" placeholder="Nominal capacity (litres)" type="number" min="1" value={newCapacity} onChange={e=>setNewCapacity(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"/>
+        <input aria-label="New chart name" placeholder="Chart name (e.g. Global 50 KL)" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"/>
+        <input aria-label="Nominal capacity in litres" placeholder="Nominal capacity (litres: 10000 / 15000 / 20000 / 50000)" type="number" min="1" value={newCapacity} onChange={e=>setNewCapacity(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm"/>
       </div>}
       {csv.errors.length>0&&<div role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{csv.errors.slice(0,4).join(' · ')}</div>}
       {csv.warnings.length>0&&<div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{csv.warnings.join(' · ')}</div>}
       {csvExcess&&<div className="mt-3 flex gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900" data-testid="csv-over-capacity-warning">
-        <AlertTriangle className="h-4 w-4 shrink-0"/>Maximum {fmt(csv.maxVolumeLitres)} L exceeds the 110% check of {fmt((selectedNominal||0)*1.1)} L. Review the uploaded readings or re-upload a corrected chart. Saving as a draft does not authorise live use.
+        <AlertTriangle className="h-4 w-4 shrink-0"/>Maximum {fmt(csv.maxVolumeLitres)} L exceeds the permitted +15% limit of {fmt(globalCalibrationMaxLitres(selectedNominal||0))} L. Correct and re-upload.
       </div>}
       <details className="mt-3"><summary className="cursor-pointer text-sm font-semibold text-[#17365D]">Show uploaded readings</summary>
         <div className="mt-2 max-h-60 overflow-auto rounded border border-slate-200">
@@ -221,7 +224,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       <p className="mt-1 text-xs text-slate-500">{preview.workbookName} · {previewCharts.length} calibration charts detected</p>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         {previewCharts.map(ch=>{
-          const over=ch.maxVolumeLitres>ch.nominalCapacityLitres*1.1;
+          const over=exceedsGlobalCalibrationLimit(ch.maxVolumeLitres,ch.nominalCapacityLitres);
           return <div key={ch.sheetName} className="rounded-xl border border-slate-200 p-4" data-testid={'simple-chart-'+ch.templateCode}>
             <div className="flex items-start justify-between gap-3">
               <div><h4 className="font-bold text-[#17365D]">{ch.templateName}</h4><p className="text-xs text-slate-500">Sheet: {ch.sheetName}</p></div>
@@ -231,7 +234,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
             <p className="mt-2 text-sm text-slate-700">{fmt(ch.actualPointCount)} readings · Max {fmt(ch.maxVolumeLitres)} L · {fmt(ch.maxDipMm)} mm</p>
             {(over||ch.warnings?.length>0||ch.errors?.length>0)&&<div className="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-900" data-testid={'simple-warning-'+ch.templateCode}>
               <AlertTriangle className="mr-1 inline h-4 w-4"/>
-              {over&&<p>Max volume exceeds {fmt(ch.nominalCapacityLitres*1.1)} L check. Inspect the last readings or re-upload. Draft upload can still be saved when structurally valid.</p>}
+              {over&&<p>Max volume exceeds the maximum permitted {fmt(globalCalibrationMaxLitres(ch.nominalCapacityLitres))} L (+15%). Correct and re-upload to save.</p>}
               {(ch.errors||[]).concat(ch.warnings||[]).slice(0,3).map((w,i)=><p key={i}>{plainWarning(w)}</p>)}
             </div>}
             <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-[#17365D]">View dip / volume readings</summary>
@@ -256,7 +259,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
 
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="simple-saved-calibrations">
       <h3 className="font-bold text-[#17365D]">Saved calibration charts</h3>
-      <p className="mt-1 text-xs text-slate-500">Choose a chart to see its readings. Saved draft is not the same as an active tank chart.</p>
+      <p className="mt-1 text-xs text-slate-500">Choose a chart to see its readings. Validated global charts can be selected when registering a tank. An uploaded draft is not an active tank chart.</p>
       <div className="mt-3 flex flex-wrap gap-2">{templates.map(t=><button key={t.id} type="button" onClick={()=>{setSelectedCode(t.code);setShowReadings(false);}}
         className={'rounded-lg border px-3 py-2 text-sm '+(t.code===selectedCode?'border-orange-500 bg-orange-50 text-[#17365D] font-bold':'border-slate-200 text-slate-600')}>
         {Math.round(t.nominalCapacityLitres/1000)} KL · {t.name} ({t.pointsCount} pts)
@@ -270,8 +273,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         {capped10&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
           10 KL operating reference is limited to 11,000 L (cutoff dip {fmt(capped10.operationalMaximumDipMm)} mm). The complete original source is preserved.
         </p>}
-        {(chosen.maxVolumeLitres||0)>chosen.nominalCapacityLitres*1.1&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
-          Warning: Source maximum {fmt(chosen.maxVolumeLitres||0)} L exceeds {fmt(chosen.nominalCapacityLitres*1.1)} L. Check and correct/re-upload rather than silently changing volume readings.
+        {exceedsGlobalCalibrationLimit(chosen.maxVolumeLitres||0,chosen.nominalCapacityLitres)&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+          Warning: Source maximum {fmt(chosen.maxVolumeLitres||0)} L exceeds the permitted +15% limit of {fmt(globalCalibrationMaxLitres(chosen.nominalCapacityLitres))} L. Check and correct/re-upload rather than silently changing volume readings.
         </p>}
         {showReadings&&<div className="mt-3 max-h-72 overflow-auto rounded border border-slate-200 bg-white">
           <table className="w-full text-left text-xs"><thead className="sticky top-0 bg-[#E8EEF5]"><tr><th className="p-2">Dip (mm)</th><th className="p-2">Volume (L)</th></tr></thead>
