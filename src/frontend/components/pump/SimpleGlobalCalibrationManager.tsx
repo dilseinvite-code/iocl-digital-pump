@@ -67,7 +67,16 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const previewCharts=preview?.charts||[];
   const pendingWarnings=previewCharts.filter(ch=>ch.warnings?.length ||
     ch.maxVolumeLitres>ch.nominalCapacityLitres*1.1);
-  const csvExcess=csv&&chosen&&csv.maxVolumeLitres>chosen.nominalCapacityLitres*1.1;
+  const selectedNominal=creatingCustom ? Number(newCapacity) : chosen?.nominalCapacityLitres;
+  const csvExcess=Boolean(csv&&selectedNominal&&selectedNominal>0&&
+    csv.maxVolumeLitres>selectedNominal*1.1);
+  const plainWarning=(message:string)=>{
+    if(/ENGINEERING REVIEW REQUIRED|authorised engineer/i.test(message))
+      return 'Volume exceeds the usual capacity range. Check dip/volume numbers and units. Re-upload a corrected chart if necessary.';
+    if(/DIMENSION VERIFICATION REQUIRED|conflicting.*length/i.test(message))
+      return 'The worksheet has conflicting tank dimensions. Check the length and diameter, then re-upload if needed.';
+    return message;
+  };
   const canReplaceExisting=Boolean(chosen&&chosen.status==='DRAFT' &&
     !(chosen.activeAssignedTanksCount||chosen.stagedDraftTanksCount));
   const previewGood=mode==='excel'?Boolean(preview?.eligibleChartsCount):
@@ -195,8 +204,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       </div>}
       {csv.errors.length>0&&<div role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{csv.errors.slice(0,4).join(' · ')}</div>}
       {csv.warnings.length>0&&<div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{csv.warnings.join(' · ')}</div>}
-      {csvExcess&&!creatingCustom&&<div className="mt-3 flex gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900" data-testid="csv-over-capacity-warning">
-        <AlertTriangle className="h-4 w-4 shrink-0"/>Maximum {fmt(csv.maxVolumeLitres)} L exceeds the 110% check of {fmt(chosen!.nominalCapacityLitres*1.1)} L. Review the uploaded readings or re-upload a corrected chart. Saving as a draft does not authorise live use.
+      {csvExcess&&<div className="mt-3 flex gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900" data-testid="csv-over-capacity-warning">
+        <AlertTriangle className="h-4 w-4 shrink-0"/>Maximum {fmt(csv.maxVolumeLitres)} L exceeds the 110% check of {fmt((selectedNominal||0)*1.1)} L. Review the uploaded readings or re-upload a corrected chart. Saving as a draft does not authorise live use.
       </div>}
       <details className="mt-3"><summary className="cursor-pointer text-sm font-semibold text-[#17365D]">Show uploaded readings</summary>
         <div className="mt-2 max-h-60 overflow-auto rounded border border-slate-200">
@@ -223,7 +232,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
             {(over||ch.warnings?.length>0||ch.errors?.length>0)&&<div className="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-900" data-testid={'simple-warning-'+ch.templateCode}>
               <AlertTriangle className="mr-1 inline h-4 w-4"/>
               {over&&<p>Max volume exceeds {fmt(ch.nominalCapacityLitres*1.1)} L check. Inspect the last readings or re-upload. Draft upload can still be saved when structurally valid.</p>}
-              {(ch.errors||[]).concat(ch.warnings||[]).slice(0,3).map((w,i)=><p key={i}>{w}</p>)}
+              {(ch.errors||[]).concat(ch.warnings||[]).slice(0,3).map((w,i)=><p key={i}>{plainWarning(w)}</p>)}
             </div>}
             <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-[#17365D]">View dip / volume readings</summary>
               <div className="mt-1 max-h-48 overflow-auto text-xs">{(ch.points||[]).map((p,i)=><div key={i} className="flex justify-between border-b border-slate-100 p-1.5"><span>{fmt(p.dipMm)} mm</span><span>{fmt(p.volumeLitres)} L</span></div>)}</div>
