@@ -26,6 +26,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   selectedOutletName,canWriteTankCalibration,
 })=>{
   const [templates,setTemplates]=useState<GlobalTankCalibrationTemplate[]>([]);
+  const [detail,setDetail]=useState<GlobalTankCalibrationTemplate|null>(null);
   const [selectedCode,setSelectedCode]=useState('');
   const [file,setFile]=useState<File|null>(null);
   const [mode,setMode]=useState<'excel'|'csv'|null>(null);
@@ -49,7 +50,16 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   useEffect(()=>{loadTemplates().catch(e=>setError(e.message));},[]);
 
   const chosen=templates.find(t=>t.code===selectedCode);
-  const chartRows=chosen?.points || [];
+  useEffect(()=>{
+    if(!chosen?.id){setDetail(null);return;}
+    let cancelled=false;
+    setDetail(null);
+    apiFetch<GlobalTankCalibrationTemplate>('/api/v1/calibration-templates/'+encodeURIComponent(chosen.id))
+      .then(res=>{if(!cancelled&&res.success&&res.data)setDetail(res.data);})
+      .catch(()=>{});
+    return ()=>{cancelled=true;};
+  },[chosen?.id,chosen?.updatedAt]);
+  const chartRows=detail?.id===chosen?.id?(detail?.points||[]):[];
   const capped10=useMemo(()=>{
     if(chosen?.code!=='EXCEL_10KL_REFERENCE' || chartRows.length<2)return null;
     try{return limitTenKlCalibrationCurve(chartRows);}catch{return null;}
@@ -59,7 +69,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     ch.maxVolumeLitres>ch.nominalCapacityLitres*1.1);
   const csvExcess=csv&&chosen&&csv.maxVolumeLitres>chosen.nominalCapacityLitres*1.1;
   const canReplaceExisting=Boolean(chosen&&chosen.status==='DRAFT' &&
-    !(chosen.activeAssignedTanksCount||chosen.stagedDraftCount));
+    !(chosen.activeAssignedTanksCount||chosen.stagedDraftTanksCount));
   const previewGood=mode==='excel'?Boolean(preview?.eligibleChartsCount):
     Boolean(csv?.valid && (creatingCustom || canReplaceExisting));
 
@@ -251,8 +261,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         {capped10&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
           10 KL operating reference is limited to 11,000 L (cutoff dip {fmt(capped10.operationalMaximumDipMm)} mm). The complete original source is preserved.
         </p>}
-        {chosen.maxVolumeLitres>chosen.nominalCapacityLitres*1.1&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
-          Warning: Source maximum {fmt(chosen.maxVolumeLitres)} L exceeds {fmt(chosen.nominalCapacityLitres*1.1)} L. Check and correct/re-upload rather than silently changing volume readings.
+        {(chosen.maxVolumeLitres||0)>chosen.nominalCapacityLitres*1.1&&<p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+          Warning: Source maximum {fmt(chosen.maxVolumeLitres||0)} L exceeds {fmt(chosen.nominalCapacityLitres*1.1)} L. Check and correct/re-upload rather than silently changing volume readings.
         </p>}
         {showReadings&&<div className="mt-3 max-h-72 overflow-auto rounded border border-slate-200 bg-white">
           <table className="w-full text-left text-xs"><thead className="sticky top-0 bg-[#E8EEF5]"><tr><th className="p-2">Dip (mm)</th><th className="p-2">Volume (L)</th></tr></thead>
