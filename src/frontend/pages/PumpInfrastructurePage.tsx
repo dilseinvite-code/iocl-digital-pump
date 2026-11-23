@@ -3148,6 +3148,13 @@ export const PumpInfrastructurePage: React.FC = () => {
         const activePoints = tankCalibrationByTankId[calibratingTank.id] || [];
         const calPoints = calModalPoints.length > 0 || calSelectedChart ? calModalPoints : activePoints;
         const calStatus = getTankCalibrationStatus(calPoints.length, calSelectedChart?.status);
+        const linkedSuppliedReady = Boolean(
+          calSelectedChart?.status === 'DRAFT' &&
+          calSelectedChart.sourceTemplateId &&
+          calGlobalSource &&
+          isOperatorSuppliedReference(calGlobalSource, calGlobalSource.points || []) &&
+          reviewReusableGlobalChart(calSelectedChart, calPoints, calGlobalSource, calibratingTank.capacityLitres).ready
+        );
         const lastRecordedPoint = calPoints.reduce<TankCalibrationPoint | null>((last, point) =>
           !last || point.dipMillimetresMilliunits > last.dipMillimetresMilliunits ? point : last, null);
         const isLoadingPoints = loadingCalibrationTankId === calibratingTank.id;
@@ -3185,19 +3192,19 @@ export const PumpInfrastructurePage: React.FC = () => {
                       {calSelectedChart?.sourceTemplateId ? 'Linked Global Calibration' : 'Tank Calibration Chart'}
                     </h2>
                     <span
-                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 font-mono ${calStatus.badgeClass}`}
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 font-mono ${linkedSuppliedReady?'bg-emerald-50 text-emerald-800 border-emerald-300':calStatus.badgeClass}`}
                     >
-                      {calStatus.isConfigured ? (
+                      {(calStatus.isConfigured || linkedSuppliedReady) ? (
                         <CheckCircle className="w-3 h-3 shrink-0" />
                       ) : (
                         <AlertTriangle className="w-3 h-3 shrink-0" />
                       )}
-                      <span>Calibration: {calStatus.badgeLabel}</span>
+                      <span>Calibration: {linkedSuppliedReady?'READY TO USE':calStatus.badgeLabel}</span>
                     </span>
                     {calSelectedChart && (
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 font-mono ${
-                          calSelectedChart.status === 'ACTIVE'
+                          linkedSuppliedReady || calSelectedChart.status === 'ACTIVE'
                             ? 'bg-emerald-500/10 text-emerald-800 border-emerald-500/30'
                             : calSelectedChart.status === 'APPROVED'
                               ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
@@ -3206,7 +3213,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                                 : 'bg-[#F1F5F9] text-[#64748B] border-[#D7E0EA]'
                         }`}
                       >
-                        Rev #{calSelectedChart.revisionNumber} • {calSelectedChart.status}
+                        Rev #{calSelectedChart.revisionNumber} • {linkedSuppliedReady?'READY TO USE':calSelectedChart.status}
                       </span>
                     )}
                     {calSelectedChart && (
