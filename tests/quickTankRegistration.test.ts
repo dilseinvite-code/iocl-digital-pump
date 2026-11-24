@@ -474,4 +474,137 @@ describe('Two-input global-calibration tank registration', () => {
     expect(normalized(copied)).toEqual(normalized(expected));
   });
 
+  it('remaps an EXISTING 20 KL tank to a new PDF revision without changing its historical chart or stock reading',async()=>{
+    const db=getDb(localD1),source=operatorPdfSource(20000)!;
+    const [template]=await db.select().from(schema.globalShiftTemplates);
+    expect(template).toBeTruthy();
+    const oldChartId='tcc-legacy-tank-ro1-1-r1';
+    const originalPoints=await db.select().from(schema.tankCalibrationPoints)
+      .where(eq(schema.tankCalibrationPoints.chartId,oldChartId));
+    const now=new Date().toISOString();
+    const shiftId='shift-pdf-history-'+Math.random().toString(36).slice(2);
+    await db.insert(schema.operationalShifts).values({
+      id:shiftId,outletId:'ro-1001',shiftTemplateId:template.id,businessDate:'2024-02-14',
+      startedAt:'2024-02-14T08:00:00.000Z',closedAt:'2024-02-14T16:00:00.000Z',
+      status:'CLOSED',openedByUserId:'user-admin',closedByUserId:'user-admin',
+      createdAt:now,updatedAt:now,
+    });
+    await db.insert(schema.operationalShiftTanks).values({
+      id:'snap-pdf-historical-'+shiftId,operationalShiftId:shiftId,outletId:'ro-1001',
+      tankId:'tank-ro1-1',tankNumber:1,tankName:'Tank 1 - MS (20 KL)',
+      productId:'prod-ms',productCode:'MS',productName:'Motor Spirit',productUnit:'LITRE',
+      capacityMilliunits:20000000,safeFillCapacityMilliunits:19000000,
+      calibrationChartId:oldChartId,calibrationRevision:1,createdAt:now,
+    });
+    await db.insert(schema.tankStockReadings).values({
+      id:'reading-pdf-historical-'+shiftId,operationalShiftId:shiftId,outletId:'ro-1001',
+      tankId:'tank-ro1-1',productId:'prod-ms',readingType:'OPENING',source:'MANUAL',
+      productDipMmMilliunits:1000000,waterDipMmMilliunits:0,
+      grossObservedVolumeMilliunits:8500000,waterVolumeMilliunits:0,
+      netProductVolumeMilliunits:8500000,calibrationChartId:oldChartId,
+      calibrationRevision:1,recordedAt:now,recordedByUserId:'user-admin',
+      createdAt:now,updatedAt:now,
+    });
+    const installed=await request('POST','/calibration-templates',{
+      ...source,status:'APPROVED',allowOverCapacity:true,sourceFileName:'Calibration Chart.pdf',
+    });
+    expect(installed.status).toBe(201);
+    const record=(await installed.json() as any).data;
+    const preview=await request('GET','/tanks/tank-ro1-1/calibration/operator-pdf-remap');
+    expect(preview.status).toBe(200);
+    const p=(await preview.json() as any).data;
+    expect(p.ready).toBe(true);
+    expect(p.alreadyApplied).toBe(false);
+    expect(p.sourceTemplateId).toBe(record.id);
+    expect(p.previousActiveChartId).toBe(oldChartId);
+    expect(p.previousHistoricalReadings).toBe(1);
+    expect(p.sourceReadings).toBe(211);
+    const applied=await request('POST','/tanks/tank-ro1-1/calibration/operator-pdf-remap',{
+      expectedActiveChartId:p.previousActiveChartId,
+    });
+    expect(applied.status).toBe(200);
+    const changed=(await applied.json() as any).data;
+    expect(changed.alreadyApplied).toBe(false);
+    expect(changed.chart.revisionNumber).toBe(2);
+    expect(changed.chart.status).toBe('ACTIVE');
+    expect(changed.chart.sourceTemplateId).toBe(record.id);
+    const [old]=await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.id,oldChartId));
+    expect(old.status).toBe('SUPERSEDED');
+    const oldPoints=await db.select().from(schema.tankCalibrationPoints)
+      .where(eq(schema.tankCalibrationPoints.chartId,oldChartId));
+    expect(oldPoints).toEqual(originalPoints);
+    const [historical]=await db.select().from(schema.tankStockReadings)
+      .where(eq(schema.tankStockReadings.operationalShiftId,shiftId));
+    expect(historical.calibrationChartId).toBe(oldChartId);
+    expect(historical.calibrationRevision).toBe(1);
+    expect(historical.netProductVolumeMilliunits).toBe(8500000);
+    const [snapshot]=await db.select().from(schema.operationalShiftTanks)
+      .where(eq(schema.operationalShiftTanks.operationalShiftId,shiftId));
+    expect(snapshot.calibrationChartId).toBe(oldChartId);
+    const future=await db.select().from(schema.tankCalibrationPoints)
+      .where(eq(schema.tankCalibrationPoints.chartId,changed.chart.id));
+    expect(future).toHaveLength(211);
+    expect(future.find(x=>x.dipMillimetresMilliunits===2020000)?.volumeMilliunits).toBe(21359520);
+    const duplicate=await request('POST','/tanks/tank-ro1-1/calibration/operator-pdf-remap',{
+      expectedActiveChartId:oldChartId,
+    });
+    expect(duplicate.status).toBe(200);
+    expect((await duplicate.json() as any).data.alreadyApplied).toBe(true);
+    const revisions=await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId,'tank-ro1-1'));
+    expect(revisions).toHaveLength(2);
+  });
+
+  it('blocks calibration remap during an OPEN shift and for the seeded 25 KL Tank #2',async()=>{
+    const db=getDb(localD1);
+    const source=operatorPdfSource(20000)!;
+    expect((await request('POST','/calibration-templates',{
+      ...source,status:'APPROVED',allowOverCapacity:true,
+    })).status).toBe(201);
+    const wrong=await request('GET','/tanks/tank-ro1-2/calibration/operator-pdf-remap');
+    expect(wrong.status).toBe(200);
+    const wrongPreview=(await wrong.json() as any).data;
+    expect(wrongPreview.ready).toBe(false);
+    expect(wrongPreview.code).toBe('INVALID_TANK_CAPACITY');
+    const [shiftTemplate]=await db.select().from(schema.globalShiftTemplates);
+    const now=new Date().toISOString(),shiftId='shift-pdf-open-'+Math.random().toString(36).slice(2);
+    await db.insert(schema.operationalShifts).values({
+      id:shiftId,outletId:'ro-1001',shiftTemplateId:shiftTemplate.id,businessDate:'2024-05-22',
+      startedAt:now,status:'OPEN',openedByUserId:'user-admin',
+      createdAt:now,updatedAt:now,
+    });
+    const blocked=await request('GET','/tanks/tank-ro1-1/calibration/operator-pdf-remap');
+    expect(blocked.status).toBe(200);
+    const blockingPreview=(await blocked.json() as any).data;
+    expect(blockingPreview.ready).toBe(false);
+    expect(blockingPreview.code).toBe('SHIFT_OPEN_CALIBRATION_REMAP_BLOCKED');
+    const rejected=await request('POST','/tanks/tank-ro1-1/calibration/operator-pdf-remap',{
+      expectedActiveChartId:blockingPreview.previousActiveChartId,
+    });
+    expect(rejected.status).toBe(409);
+    expect(((await rejected.json()) as any).error.code).toBe('SHIFT_OPEN_CALIBRATION_REMAP_BLOCKED');
+    const [legacy]=await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.id,'tcc-legacy-tank-ro1-1-r1'));
+    expect(legacy.status).toBe('ACTIVE');
+    const charts=await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId,'tank-ro1-1'));
+    expect(charts).toHaveLength(1);
+  });
+
+  it('rejects stale existing-tank calibration previews instead of silently overwriting a newer chart',async()=>{
+    const source=operatorPdfSource(20000)!;
+    expect((await request('POST','/calibration-templates',{
+      ...source,status:'APPROVED',allowOverCapacity:true,
+    })).status).toBe(201);
+    const p=await request('GET','/tanks/tank-ro1-1/calibration/operator-pdf-remap');
+    const preview=(await p.json() as any).data;
+    expect(preview.ready).toBe(true);
+    const wrong=await request('POST','/tanks/tank-ro1-1/calibration/operator-pdf-remap',{
+      expectedActiveChartId:'not-the-current-active-revision',
+    });
+    expect(wrong.status).toBe(409);
+    expect(((await wrong.json()) as any).error.code).toBe('STALE_CALIBRATION_PREVIEW');
+  });
+
 });
