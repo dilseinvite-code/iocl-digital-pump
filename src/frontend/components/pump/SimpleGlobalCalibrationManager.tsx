@@ -14,7 +14,6 @@ interface Props {
   selectedOutletName?: string;
   canWriteTankCalibration: boolean;
   canApproveCalibrationChart: boolean;
-  canResetAllCalibration?: boolean;
   initialSelectedCode?: string;
   onCalibrationAssigned?: () => void;
 }
@@ -29,7 +28,7 @@ const fmt=(value:number)=>value.toLocaleString('en-IN',{maximumFractionDigits:3}
 const MAX_FILE_BYTES=8*1024*1024;
 
 export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
-  selectedOutletName,canWriteTankCalibration,canApproveCalibrationChart,canResetAllCalibration=false,initialSelectedCode,
+  selectedOutletName,canWriteTankCalibration,canApproveCalibrationChart,initialSelectedCode,
 })=>{
   const [templates,setTemplates]=useState<GlobalTankCalibrationTemplate[]>([]);
   const [defaultCharts,setDefaultCharts]=useState<Record<number,string>>({});
@@ -58,20 +57,6 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const [approving,setApproving]=useState(false);
   const [acknowledgedApproval,setAcknowledgedApproval]=useState(false);
   const [installingPdf,setInstallingPdf]=useState(false);
-  const [resetPreview,setResetPreview]=useState<{
-    oldGlobalSources:number;oldTankRevisions:number;
-    oldUnreferencedTankRevisions:number;protectedHistoricalRevisions:number;
-    activeTanksToInactivate:number;existingDefaultMappings:number;
-    openOrClosingShifts:number;replacement10klPoints:number;replacement20klPoints:number;
-    blockingShifts:Array<{
-      id:string;outletId:string;outletCode:string;outletName:string;businessDate:string;
-      status:'OPEN'|'CLOSING';shiftName:string;startedAt:string;
-    }>;
-  }|null>(null);
-  const [resetText,setResetText]=useState('');
-  const [resetBusy,setResetBusy]=useState(false);
-  const [showReset,setShowReset]=useState(false);
-
   const loadTemplates=async()=>{
     const result=await apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates');
     if(!result.success || !result.data)throw new Error(result.error?.message || 'Could not load calibration charts');
@@ -149,40 +134,6 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       setNotice(created.length?'Saved separate PDF-based '+created.join(' and ')+' chart versions. Existing tanks and history remain unchanged.':'Both PDF chart versions are already saved. No duplicates created.');
     }catch(e:any){setError(e.message||'Could not install operator PDF charts');}
     finally{setInstallingPdf(false);}
-  };
-  const showCalibrationReset=async()=>{
-    setError('');setNotice('');setResetText('');setShowReset(true);
-    try{
-      const res=await apiFetch<{
-        oldGlobalSources:number;oldTankRevisions:number;
-        oldUnreferencedTankRevisions:number;protectedHistoricalRevisions:number;
-        activeTanksToInactivate:number;existingDefaultMappings:number;
-        openOrClosingShifts:number;replacement10klPoints:number;replacement20klPoints:number;
-    blockingShifts:Array<{
-      id:string;outletId:string;outletCode:string;outletName:string;businessDate:string;
-      status:'OPEN'|'CLOSING';shiftName:string;startedAt:string;
-    }>;
-      }>('/api/v1/calibration-templates/replace-10-20-preview',{cache:'no-store'});
-      if(!res.success||!res.data)throw new Error(res.error?.message||'Cannot preview calibration reset.');
-      setResetPreview(res.data);
-    }catch(e:any){setError(e.message==='Global calibration template not found'
- ? 'Backend API is outdated. The 10/20 KL replacement route must be deployed to Cloudflare Worker before resetting.'
- : e.message||'Cannot preview calibration replacement');setResetPreview(null);}
-  };
-  const resetAllCalibration=async()=>{
-    if(resetBusy||resetText!=='REPLACE 10KL 20KL'||!canResetAllCalibration)return;
-    setResetBusy(true);setError('');
-    try{
-      const res=await apiFetch<{message:string}>('/api/v1/calibration-templates/replace-10-20',{
-        method:'POST',body:JSON.stringify({confirm:resetText})
-      });
-      if(!res.success)throw new Error(res.error?.message||'Could not reset calibration.');
-      clearApiCache();await Promise.all([loadTemplates(),loadDefaults()]);
-      setDetail(null);setShowReset(false);setResetPreview(null);setResetText('');
-      setShowAllCharts(false);setShowImport(true);setCreatingCustom(true);
-      setNotice('Old 10/20 KL readings removed from operational use. New PDF references (195/211 readings) are saved. Reactivate 10/20 KL tanks after linking their new chart; 15/50 KL unchanged.');
-    }catch(e:any){setError(e.message||'Reset failed.');}
-    finally{setResetBusy(false);}
   };
   const setDefault=async()=>{
     if(!chosen||!canSetAsDefault||settingDefault)return;
@@ -327,11 +278,6 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         </div>
         <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-[#17365D]"
           onClick={()=>{setError('');loadTemplates().catch(e=>setError(e.message));}}><RefreshCw className="mr-1 inline h-4 w-4"/>Refresh</button>
-        {canResetAllCalibration&&<button type="button" data-testid="reset-all-calibration-open"
-          onClick={()=>{void showCalibrationReset();}}
-          className="ml-2 rounded-lg border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-800">
-          Replace old 10 / 20 KL charts
-        </button>}
         <button type="button" onClick={()=>setShowImport(v=>!v)}
           className="ml-2 rounded-lg bg-[#17365D] px-4 py-2 text-sm font-semibold text-white">
           {showImport?'Close import':'Import / New Chart'}
@@ -345,64 +291,6 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       </div>
     </section>
 
-    {showReset&&canResetAllCalibration&&<section className="space-y-3 rounded-2xl border border-rose-300 bg-rose-50 p-5"
-      data-testid="confirm-calibration-reset">
-      <h3 className="text-base font-bold text-rose-900">Replace 10 KL and 20 KL calibration</h3>
-      <p className="text-sm text-rose-900">Only 10 KL and 20 KL charts are affected across outlets. Older global dip/volume values and unreferenced tank points are deleted;
-        historically referenced chart rows remain protected so past stock reports are not corrupted.
-        The attached PDF becomes the only current 10/20 KL source (195 and 211 readings).
-        Existing 10/20 KL tanks become INACTIVE until their new PDF chart is linked. 15 KL, 50 KL and other capacities remain unchanged.</p>
-      {resetPreview&&<div className="grid gap-2 sm:grid-cols-4 text-xs font-semibold text-rose-900">
-        <span>Old source charts: {resetPreview.oldGlobalSources}</span>
-        <span>Old tank revisions: {resetPreview.oldTankRevisions}</span>
-        <span>Unreferenced revisions cleared: {resetPreview.oldUnreferencedTankRevisions}</span>
-        <span>Historical revisions protected: {resetPreview.protectedHistoricalRevisions}</span>
-        <span>Active tanks temporarily inactivated: {resetPreview.activeTanksToInactivate}</span>
-        <span>New PDF readings: {resetPreview.replacement10klPoints + resetPreview.replacement20klPoints}</span>
-      </div>}
-      {resetPreview?.openOrClosingShifts?(
-        <div role="alert" data-testid="blocking-calibration-shifts" className="space-y-2 rounded-xl border border-rose-300 bg-white p-3">
-          <p className="text-sm font-bold text-rose-900">
-            Cannot replace calibration: {resetPreview.openOrClosingShifts} OPEN/CLOSING shift(s) across all outlets.
-          </p>
-          <p className="text-xs text-slate-700">
-            The Daily Operations page shows shifts only for the selected outlet and business date.
-            Find these exact records, complete their closing readings and close them before replacing calibration.
-            Do not open a new shift.
-          </p>
-          {(resetPreview.blockingShifts||[]).map(shift=>(
-            <div key={shift.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-              <div className="space-y-0.5">
-                <p className="font-bold text-[#17365D]">{shift.outletCode} — {shift.outletName}</p>
-                <p className="text-slate-700">
-                  Date: <strong>{shift.businessDate}</strong> · {shift.shiftName} ·
-                  <strong className="ml-1 text-rose-700">{shift.status}</strong>
-                </p>
-              </div>
-              <span className="text-slate-500">Shift ID: {shift.id}</span>
-            </div>
-          ))}
-          <button type="button" disabled={resetBusy} onClick={()=>{void showCalibrationReset();}}
-            className="rounded-lg border border-[#B9CFE6] bg-white px-3 py-2 text-xs font-semibold text-[#17365D]">
-            Recheck open shifts
-          </button>
-        </div>
-      ):null}
-      <label className="block text-xs font-bold text-rose-900">Type REPLACE 10KL 20KL to confirm</label>
-      <input type="text" value={resetText} onChange={e=>setResetText(e.target.value)}
-        placeholder="REPLACE 10KL 20KL" aria-label="Confirm reset all calibration"
-        className="w-full rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm"/>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" data-testid="submit-reset-all-calibration"
-          disabled={resetBusy||resetText!=='REPLACE 10KL 20KL'||!resetPreview||resetPreview.openOrClosingShifts>0}
-          onClick={()=>{void resetAllCalibration();}}
-          className="rounded-lg bg-rose-800 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
-          {resetBusy?'Clearing…':'Replace old 10 / 20 KL with PDF'}
-        </button>
-        <button type="button" onClick={()=>{setShowReset(false);setResetText('');}}
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm">Cancel</button>
-      </div>
-    </section>}
     {showImport&&<div className="space-y-5" data-testid="calibration-import-workspace">
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="simple-calibration-upload">
       <div className="flex items-center gap-2"><UploadCloud className="h-5 w-5 text-orange-600"/><h3 className="font-bold text-[#17365D]">Upload calibration file</h3></div>

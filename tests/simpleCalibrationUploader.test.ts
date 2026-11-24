@@ -67,6 +67,9 @@ describe('Simple calibration upload – no engineering forms in main flow',()=>{
    expect(simple).not.toContain('Record Engineering Verification');
    expect(simple).toContain('simple-calibration-file-input');
    expect(simple).toContain('simple-save-calibration');
+   expect(simple).not.toContain('Replace old 10 / 20 KL charts');
+   expect(simple).not.toContain('replace-10-20');
+   expect(page).not.toContain('canResetAllCalibration');
    expect(route).toContain('TEMPLATE_PROTECTED');
    expect(route).toContain("allowEngineeringReviewReference: body.simpleUpload === true");
  });
