@@ -23,6 +23,7 @@ export type CocoAuthoritativeSource =
   | 'UTILITY_BILLS_MODULE'
   | 'AGREEMENTS_REGISTER'
   | 'CLAIMS_REGISTER'
+  | 'ASSET_INSPECTIONS'
   | 'NONE';
 
 export interface StandardCocoCategoryDef {

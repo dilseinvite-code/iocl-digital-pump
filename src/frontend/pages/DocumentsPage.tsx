@@ -146,6 +146,7 @@ const SOURCE_LABELS: Record<CocoAuthoritativeSource, string> = {
   UTILITY_BILLS_MODULE: 'Utility Bills Module',
   AGREEMENTS_REGISTER: 'Agreements Register',
   CLAIMS_REGISTER: 'Claims Register',
+  ASSET_INSPECTIONS: 'Asset Inspections',
   NONE: 'Not Recorded',
 };
 

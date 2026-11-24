@@ -599,7 +599,7 @@ export class CocoComplianceService {
       (hasRecordOrModuleData ? params.defaultFrequency : null);
 
     let paymentStatus: CocoPaymentStatus =
-      linked?.paymentStatus ??
+      (linked?.source === 'ASSET_INSPECTIONS' ? undefined : linked?.paymentStatus) ??
       (manualRec?.paymentStatus as CocoPaymentStatus | undefined) ??
       'NOT_RECORDED';
 
@@ -616,7 +616,7 @@ export class CocoComplianceService {
 
     let statusYesNo: CocoStatusYesNo = (manualRec?.statusYesNo as CocoStatusYesNo) || 'NOT_RECORDED';
     if (linked) {
-      if (linked.statusYesNo !== undefined) {
+      if (linked.statusYesNo !== undefined && (linked.source !== 'ASSET_INSPECTIONS' || linked.statusYesNo === 'NO')) {
         statusYesNo = linked.statusYesNo;
       } else if (linked.paymentStatus === 'PAID') {
         statusYesNo = 'YES';
@@ -646,7 +646,7 @@ export class CocoComplianceService {
       .filter((x): x is CocoAttachmentInfo => Boolean(x));
 
     const evaluated = evaluateComplianceStatus({
-      hasRecordOrModuleData,
+      hasRecordOrModuleData: linked?.source === 'ASSET_INSPECTIONS' && !linked.actionRequired && !manualRec ? false : hasRecordOrModuleData,
       statusYesNo,
       validityDueDate,
       paymentStatus,

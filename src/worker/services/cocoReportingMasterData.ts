@@ -11,12 +11,14 @@ async function legacySafe<T>(promise: Promise<T>, fallback: T): Promise<T> {
   }
 }
 export async function loadCocoReportMasterData(db: DrizzleD1Database<typeof schema>, outletId: string) {
-  const [agreements, claims, settlements] = await Promise.all([
+  const [agreements, claims, settlements, assets, inspections] = await Promise.all([
     legacySafe(db.select().from(schema.cocoAgreementDetails).where(eq(schema.cocoAgreementDetails.outletId, outletId)).all(), []),
     legacySafe(db.select().from(schema.cocoExpenseClaims).where(eq(schema.cocoExpenseClaims.outletId, outletId)).all(), []),
     legacySafe(db.select().from(schema.cocoClaimSettlements).where(eq(schema.cocoClaimSettlements.outletId, outletId)).all(), []),
+    db.select().from(schema.equipmentAssets).where(eq(schema.equipmentAssets.outletId, outletId)).all(),
+    legacySafe(db.select().from(schema.cocoAssetInspections).where(eq(schema.cocoAssetInspections.outletId, outletId)).all(), []),
   ]);
-  return {agreements,claims,settlements};
+  return {agreements,claims,settlements,assets,inspections};
 }
 export type CocoReportMasterData = Awaited<ReturnType<typeof loadCocoReportMasterData>>;
 export function projectClaims(data: CocoReportMasterData, asOf: string) {
@@ -46,6 +48,30 @@ export function buildMasterSummaries(data: CocoReportMasterData, asOf: string): 
     const refs=claims.flatMap(c=>c.invoiceNumber?[c.invoiceNumber.trim()]:[]).filter(Boolean);
     const duplicates=[...new Set(refs.filter((r,i)=>refs.indexOf(r)!==i))];
     map.set('WAGES_INCENTIVES_MISC',{source:'CLAIMS_REGISTER',sourceLabel:'Claims & Settlements Register',recordCount:claims.length,referenceNumber:null,dueDate:dueDates[0]??null,amountPaise:approvalPaise+unpaidPaise,frequency:'As Recorded',paymentStatus:overdue?'OVERDUE':hasPending?'PENDING':approved.length?'PAID':'NOT_RECORDED',paidAt:null,statusYesNo:hasPending||rejected.length?'NO':'YES',reportStatusLabel:drafts.length&&!pending.length?'Pending Approval':pending.length?(overdue?'Overdue':'Payment Pending'):rejected.length?'Review Required':'Paid',actionRequired:duplicates.length?'Review repeated invoice reference(s): '+duplicates.join(', '):rejected.length?'Review rejected claims.':null,documentIds:[...claims.flatMap(c=>c.invoiceDocumentId?[c.invoiceDocumentId]:[]),...data.settlements.filter(p=>p.paymentDate<=asOf).map(p=>p.receiptDocumentId)],summaryText:claims.length+' claims | '+drafts.length+' pending approval: '+formatIndianCurrencyFromPaise(approvalPaise)+' | '+pending.length+' approved unpaid: '+formatIndianCurrencyFromPaise(unpaidPaise)+' | '+rejected.length+' rejected'});
+  }
+  const definitions: Array<[string, (a: CocoReportMasterData['assets'][number]) => boolean]> = [
+    ['WATER_COOLER_MAINTENANCE', a => /water[\s-]*cooler/i.test(a.name)],
+    ['POS_AUTOMATION', a => /\b(pos|automation|fcc)\b/i.test(a.name)],
+    ['GENERATOR_MAINTENANCE', a => a.equipmentType === 'DG_SET' || /\b(generator|dg set)\b/i.test(a.name)],
+    ['CCTV_HEALTH_STATUS', a => /\b(cctv|camera|dvr|nvr)\b/i.test(a.name)],
+  ];
+  for (const [code, matches] of definitions) {
+    const assets = data.assets.filter(matches);
+    if (!assets.length) continue;
+    const latest = assets.flatMap(a => {
+      const i = data.inspections.filter(i=>i.equipmentAssetId===a.id && i.inspectedOn<=asOf)
+        .sort((x,y)=>y.inspectedOn.localeCompare(x.inspectedOn)||y.createdAt.localeCompare(x.createdAt))[0];
+      return i ? [i] : [];
+    });
+    const bad = latest.filter(i=>i.condition!=='WORKING').length;
+    const missing = assets.length-latest.length;
+    const due = latest.flatMap(i=>i.nextServiceDate?[i.nextServiceDate]:[]).sort()[0]??null;
+    const overdue = due !== null && due < asOf;
+    const issue = bad ? 'Repair / replacement required.' : missing ? 'Operational inspection missing.' : overdue ? 'Recorded service due date has passed.' : null;
+    map.set(code,{source:'ASSET_INSPECTIONS',sourceLabel:'Asset Inspections',recordCount:assets.length,referenceNumber:null,dueDate:due,amountPaise:null,frequency:null,paymentStatus:'NOT_RECORDED',paidAt:null,
+      statusYesNo:issue?'NO':'NOT_RECORDED',actionRequired:issue,reportStatusLabel:issue?'Action Required':undefined,
+      documentIds:latest.flatMap(i=>i.evidenceDocumentId?[i.evidenceDocumentId]:[]),
+      summaryText:latest.length+'/'+assets.length+' assets inspected; '+bad+' not working / scrapped. Inspection alone is not proof of completed preventive maintenance.'});
   }
   return map;
 }

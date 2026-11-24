@@ -35,6 +35,7 @@ export interface CocoSectionWiseReport {
   generatedAt: string;
   generatedBy: string;
   sections: SectionWiseSection[];
+  missingRequirements?: string[];
 }
 export interface SectionWiseLease {
   id?: string;
@@ -99,9 +100,9 @@ const printable = (value: string, maxLength = 180) =>
   value.length > maxLength ? value.slice(0, maxLength - 25) + '... See source record' : value;
 const date = (v: string | null | undefined) => formatComplianceDateDisplay(v, NR);
 const fromItem = (item?: CocoComplianceMergedItem): string =>
-  item && item.complianceStatus !== 'NOT_RECORDED'
+  item?.linkedModuleData?.reportStatusLabel || (item && item.complianceStatus !== 'NOT_RECORDED'
     ? item.complianceStatus.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-    : NR;
+    : NR);
 const money = (item?: CocoComplianceMergedItem): string => {
   if (!item) return NR;
   const amount = item.amountPaise == null
@@ -327,7 +328,7 @@ export function buildSectionWiseSections(args: {
       if (records.length) {
         for (const claim of records) {
           const settled = claim.approvalStatus !== 'APPROVED' ? NR
-            : claim.paidPaise === claim.amountPaise ? 'Yes' : claim.paidPaise > 0 ? 'Partial' : 'No';
+            : claim.paidPaise >= claim.amountPaise ? 'Yes' : claim.paidPaise > 0 ? 'Partial' : 'No';
           const status = claim.approvalStatus === 'DRAFT' ? 'Pending Approval'
             : claim.approvalStatus === 'REJECTED' ? 'Rejected'
             : settled === 'Yes' ? 'Paid' : settled === 'Partial' ? 'Partially Paid'
@@ -361,12 +362,13 @@ export function buildSectionWiseSections(args: {
   for (const claim of expenseClaims.filter((i) => i.claimCategory === 'OTHER_CLAIM')) {
     claimRows.push([String(claimRows.length + 1), claim.title,
       claim.approvalStatus === 'APPROVED'
-        ? claim.paidPaise === claim.amountPaise ? 'Paid' : claim.paidPaise > 0 ? 'Partially Paid' : 'Pending'
-        : claim.approvalStatus, date(claim.periodStart),
+        ? claim.paidPaise >= claim.amountPaise ? 'Paid' : claim.paidPaise > 0 ? 'Partially Paid' : claim.dueDate && claim.dueDate < asOf ? 'Overdue' : 'Pending'
+        : claim.approvalStatus === 'DRAFT' ? 'Pending Approval' : 'Rejected',
+      claim.periodStart && claim.periodEnd ? date(claim.periodStart)+' - '+date(claim.periodEnd) : date(claim.periodStart || claim.periodEnd),
       formatIndianCurrencyFromPaise(claim.amountPaise, { asciiPrefix: true })
         + ' | Paid: ' + formatIndianCurrencyFromPaise(claim.paidPaise, { asciiPrefix: true }),
-      claim.approvalStatus === 'APPROVED' ? claim.paidPaise === claim.amountPaise ? 'Yes' : 'No' : NR,
-      printable(claim.remarks || EMPTY)]);
+      claim.approvalStatus === 'APPROVED' ? claim.paidPaise >= claim.amountPaise ? 'Yes' : claim.paidPaise > 0 ? 'Partial' : 'No' : NR,
+      [claim.invoiceNumber ? 'Invoice: '+claim.invoiceNumber : '', claim.remarks || '', claim.dueDate ? 'Due: '+date(claim.dueDate) : ''].filter(Boolean).join(' | ') || EMPTY]);
   }
 
   const pendingApprovalPaise=expenseClaims.filter(c=>c.approvalStatus==='DRAFT').reduce((n,c)=>n+c.amountPaise,0);
@@ -488,12 +490,10 @@ export class CocoSectionWiseReportService {
         throw err;
       }
     };
-    const [leases, vendors, equipment, actor, inspections, leaseTerms, contractDocs] = await Promise.all([
+    const [leases, vendors, actor, leaseTerms, contractDocs] = await Promise.all([
       this.db.select().from(nfrLeases).where(eq(nfrLeases.outletId, args.outletId)).all(),
       this.db.select().from(nfrVendors).where(eq(nfrVendors.outletId, args.outletId)).all(),
-      this.db.select().from(equipmentAssets).where(eq(equipmentAssets.outletId, args.outletId)).all(),
       this.db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, args.actorUserId)).get(),
-      legacySafe(this.db.select().from(cocoAssetInspections).where(eq(cocoAssetInspections.outletId, args.outletId)).all(), []),
       getCocoLeaseTerms(this.db,args.outletId),
       this.db.select({id:documents.id,name:documents.name}).from(documents).where(eq(documents.outletId,args.outletId)).all(),
     ]);
@@ -533,6 +533,7 @@ export class CocoSectionWiseReportService {
       reportDate: register.reportDate,
       generatedAt: new Date().toISOString(),
       generatedBy: actor ? actor.name + ' (' + actor.email + ')' : args.actorUserId,
+      missingRequirements: register.items.filter(i=>i.complianceStatus==='NOT_RECORDED').map(i=>i.categoryName),
       sections: buildSectionWiseSections({
         items: register.items,
         leases: leaseInfo,
@@ -552,12 +553,12 @@ export class CocoSectionWiseReportService {
           paidPaise: claim.paidPaise,
           remarks: claim.remarks,
         })),
-        inspections: inspections.map((i) => ({
+        inspections: masterData.inspections.map((i) => ({
           equipmentAssetId: i.equipmentAssetId, inspectedOn: i.inspectedOn,
           condition: i.condition, nextServiceDate: i.nextServiceDate,
           remarks: i.remarks, createdAt: i.createdAt,
         })),
-        assets: equipment.map((e) => ({
+        assets: masterData.assets.map((e) => ({
           id: e.id, equipmentType: e.equipmentType, name: e.name,
           manufacturer: e.manufacturer, status: e.status,
         })),
