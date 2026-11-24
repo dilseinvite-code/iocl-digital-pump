@@ -1,5 +1,5 @@
 import './adminModern.css';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { apiFetch, clearApiCache } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -57,6 +57,7 @@ import {
   filterTanksForEditNozzle,
   findTankProduct,
   getTankCalibrationStatus,
+  getTankCardCalibrationStatus,
   formatCalibrationDisplay,
   formatDummyCalibrationPresetText,
   validateSingleCalibrationPoint,
@@ -268,8 +269,11 @@ export const PumpInfrastructurePage: React.FC = () => {
   }, []);
 
   // Load outlet operational data whenever selected outlet changes
+  const outletLoadSequence = useRef(0);
   const loadOutletData = async () => {
+    const sequence = ++outletLoadSequence.current;
     if (!selectedOutletId) {
+      setLoadingData(false);
       setOutletProducts([]);
       setTanks([]);
       setPendingQuickTanks([]);
@@ -305,6 +309,7 @@ export const PumpInfrastructurePage: React.FC = () => {
       apiFetch<PendingQuickTank[]>(`/api/v1/outlets/${selectedOutletId}/pending-tanks`),
     ]);
 
+    if (sequence !== outletLoadSequence.current) return;
     const failures: string[] = [];
     if (pRes.success && pRes.data) setOutletProducts(pRes.data); else failures.push('products');
     if (tRes.success && tRes.data) {
@@ -314,13 +319,16 @@ export const PumpInfrastructurePage: React.FC = () => {
           const res = (await apiFetch<TankCalibrationPoint[]>(
             `/api/v1/tanks/${tank.id}/calibration`, { cache: 'no-store' }
           )) as any;
-          const pts: TankCalibrationPoint[] = res.success && Array.isArray(res.data) ? res.data : [];
+          if (!res.success || !Array.isArray(res.data)) return null;
+          const pts: TankCalibrationPoint[] = res.data;
           const chart: TankCalibrationChart | null = res.activeChart ?? res.selectedChart ?? res.charts?.[0] ?? null;
           return { id: tank.id, pts, status: chart?.status ?? null, count: chart?.pointsCount ?? pts.length };
         }));
+        if (sequence !== outletLoadSequence.current) return;
         const calMap: Record<string, TankCalibrationPoint[]> = {};
         const statusMap: Record<string, {status: TankCalibrationChart['status'] | null; pointsCount: number}> = {};
         for (const entry of calEntries) {
+          if (!entry) continue; // failed fetch is unknown, never confirmed missing
           calMap[entry.id] = entry.pts;
           statusMap[entry.id] = { status: entry.status, pointsCount: entry.count };
         }
@@ -345,7 +353,7 @@ export const PumpInfrastructurePage: React.FC = () => {
 
   useEffect(() => {
     loadOutletData();
-  }, [selectedOutletId]);
+  }, [selectedOutletId, canReadTankCalibration]);
 
   // Reset dependent fields when outlet changes
   useEffect(() => {
@@ -843,7 +851,11 @@ export const PumpInfrastructurePage: React.FC = () => {
         { cache: 'no-store' }
       )) as any;
 
-      const pts: TankCalibrationPoint[] = res.success && Array.isArray(res.data) ? res.data : [];
+      if (!res.success || !Array.isArray(res.data)) {
+        setModalError('Calibration status could not be loaded. Close and reopen the linked chart to retry.');
+        return [];
+      }
+      const pts: TankCalibrationPoint[] = res.data;
       const activeChart: TankCalibrationChart | null = res.activeChart ?? null;
       const selectedChart: TankCalibrationChart | null = res.selectedChart ?? activeChart ?? null;
       const charts: TankCalibrationChart[] = Array.isArray(res.charts) ? res.charts : [];
@@ -1709,9 +1721,8 @@ export const PumpInfrastructurePage: React.FC = () => {
             ))}
             {tanks.filter(t=>showRemovedTanks||t.status!=='DECOMMISSIONED').map(t => {
               const safeFillPercent = Math.min(100, Math.round((t.safeFillCapacityLitres / t.capacityLitres) * 100));
-              const calPoints = tankCalibrationByTankId[t.id] || [];
               const summary = tankChartStatusByTankId[t.id];
-              const calStatus = getTankCalibrationStatus(summary?.pointsCount ?? calPoints.length, summary?.status);
+              const calStatus = getTankCardCalibrationStatus(summary, loadingData, canReadTankCalibration);
 
               return (
                 <div key={t.id} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 space-y-3">
@@ -1764,8 +1775,12 @@ export const PumpInfrastructurePage: React.FC = () => {
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 ${calStatus.badgeClass}`}
                       >
-                        {calStatus.isConfigured ? (
+                        {!summary && canReadTankCalibration && loadingData ? (
+                          <RefreshCw className="w-3 h-3 shrink-0 animate-spin" />
+                        ) : calStatus.isConfigured ? (
                           <CheckCircle className="w-3 h-3 shrink-0" />
+                        ) : !summary ? (
+                          <Clock className="w-3 h-3 shrink-0" />
                         ) : (
                           <AlertTriangle className="w-3 h-3 shrink-0" />
                         )}

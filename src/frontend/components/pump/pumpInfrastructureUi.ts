@@ -695,6 +695,22 @@ export interface TankCalibrationStatusInfo {
   warningText: string | null;
 }
 
+// An absent summary means unverified, not a confirmed empty calibration.
+export function getTankCardCalibrationStatus(
+  summary: { pointsCount: number; status: 'DRAFT' | 'APPROVED' | 'ACTIVE' | 'SUPERSEDED' | 'ARCHIVED' | null } | undefined,
+  loading: boolean,
+  canRead: boolean
+): TankCalibrationStatusInfo {
+  if (summary) return getTankCalibrationStatus(summary.pointsCount, summary.status);
+  const label = !canRead ? 'Not verified' : loading ? 'Checking calibration…' : 'Unable to verify';
+  return {
+    isConfigured: false, isActive: false, pointsCount: 0,
+    badgeLabel: label, fullLabel: 'Calibration: ' + label,
+    badgeClass: 'bg-slate-100 text-slate-600 border-slate-200',
+    warningText: canRead && !loading ? 'Calibration status could not be loaded. Refresh to check again.' : null,
+  };
+}
+
 export function getTankCalibrationStatus(
   pointsCount?: number | null,
   chartStatus?: 'DRAFT' | 'APPROVED' | 'ACTIVE' | 'SUPERSEDED' | 'ARCHIVED' | null
