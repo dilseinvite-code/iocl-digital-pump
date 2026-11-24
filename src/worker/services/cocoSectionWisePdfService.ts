@@ -14,6 +14,8 @@ const BORDER = rgb(0.36, 0.37, 0.39);
 const PALE = rgb(0.91, 0.92, 0.94);
 const LIGHT = rgb(0.965, 0.97, 0.975);
 const GREY = rgb(0.35, 0.39, 0.43);
+const NAVY = rgb(0.10,0.20,0.34);
+const ORANGE = rgb(0.90,0.35,0.07);
 
 function fitted(value: string, font: PDFFont, size: number, width: number): string {
   let s = sanitizePdfText(value);
@@ -47,7 +49,8 @@ export class CocoSectionWisePdfService {
         x: LEFT, y: headerTop - 64, width: WIDTH, height: 64,
         color: PALE, borderColor: BORDER, borderWidth: 0.85,
       });
-      write(page, 'INDIAN OIL CORPORATION LIMITED', LEFT + 10, headerTop - 13, 8.5, true);
+      page.drawRectangle({x:LEFT,y:headerTop-3,width:WIDTH,height:3,color:ORANGE});
+      write(page, 'INDIAN OIL CORPORATION LIMITED', LEFT + 10, headerTop - 13, 8.5, true,NAVY);
       const outletText = report.outletName + ' - ' + report.roCode;
       write(page, fitted(outletText, bold, 12, WIDTH - 160),
         LEFT + 10, headerTop - 32, 12, true);
@@ -114,11 +117,11 @@ export class CocoSectionWisePdfService {
     };
 
     const drawTableRow = (page: PDFPage, y: number, table: SectionWiseTable,
-      values: string[], header: boolean, alternate = false, compact = false): number => {
+      values: string[], header: boolean, alternate = false, compact = false, prepared?: string[][]): number => {
       const widths = tableWidths(table);
       const f = header ? bold : font;
       const size = header ? 6.9 : 7.35;
-      const parsed = values.map((value, i) => wrapPdfText(value, i === 1 || header ? bold : f, size, widths[i] - 9));
+      const parsed = prepared ?? values.map((value, i) => wrapPdfText(value, i === 1 || header ? bold : f, size, widths[i] - 9));
       const height = rowHeight(parsed, header, compact);
       page.drawRectangle({
         x: LEFT, y: y - height, width: WIDTH, height,
@@ -129,6 +132,8 @@ export class CocoSectionWisePdfService {
       for (let i = 0; i < widths.length; i++) {
         if (i) line(page, x, y, x, y - height, 0.4);
         const cellFont = header || i === 1 ? bold : font;
+        const isStatus = !header && /^(status|condition|settled)$/i.test(table.headers[i]);
+        const statusColor = isStatus && /expired|overdue|not working|scrapped|rejected|action required/i.test(values[i]||'') ? rgb(0.64,0.12,0.12) : isStatus && /pending|expiring|partial|review/i.test(values[i]||'') ? rgb(0.57,0.32,0.05) : isStatus && /^(paid|valid|working|yes)$/i.test(values[i]||'') ? rgb(0.10,0.38,0.22) : INK;
         const cellLines = parsed[i] || [EMPTY_CELL];
         let textY = y - (height - cellLines.length * (header ? 8.2 : 9)) / 2 - 7.3;
         for (const text of cellLines) {
@@ -136,7 +141,7 @@ export class CocoSectionWisePdfService {
           const posX = centerFirst
             ? x + (widths[i] - cellFont.widthOfTextAtSize(text, size)) / 2
             : x + 4.5;
-          write(page, text, Math.max(x + 2, posX), textY, size, header || i === 1);
+          write(page, text, Math.max(x + 2, posX), textY, size, header || i === 1,statusColor);
           textY -= header ? 8.2 : 9;
         }
         x += widths[i];
@@ -156,44 +161,56 @@ export class CocoSectionWisePdfService {
       return y - height;
     };
 
-    for (const section of report.sections) {
-      const printableTables=printableSectionTables(section);
-      // The agreement section has three linked tables; tighten vertical padding only.
-      // Keep font sizes and wrapping unchanged, and allow continuation for larger registers.
-      const compact = section.title === 'Lease & Agreements';
-      // A new page is retained for every section, including completely empty
-      // ones. Blank sections show only the standard report header/section
-      // heading and the page footer; populated sections print their records.
-      const hasEntries = printableTables.length > 0;
-      let { page, y } = startPage(section, false, hasEntries);
-      if (!hasEntries) continue;
-      for (const table of printableTables) {
-        let index = 0;
-        const widths = tableWidths(table);
-        const headerHeight = rowHeight(table.headers.map((value, i) =>
-          wrapPdfText(value, bold, 6.9, widths[i] - 9)), true, compact);
-        const firstRowHeight = table.rows.length ? rowHeight(table.rows[0].map((value, i) =>
-          wrapPdfText(value, i === 1 ? bold : font, 7.35, widths[i] - 9)), false, compact) : 0;
-        if (y - (compact ? 23 : 27) - headerHeight - firstRowHeight < FOOTER_TOP + 35)
-          ({ page, y } = startPage(section, true, true));
-        y = drawTableTitle(page, y, table, compact);
-        y = drawTableRow(page, y, table, table.headers, true, false, compact);
-        while (index < table.rows.length) {
-          const row = table.rows[index];
-          const cellLines = row.map((value, i) =>
-            wrapPdfText(value, i === 1 ? bold : font, 7.35, widths[i] - 9));
-          const height = rowHeight(cellLines, false, compact);
-          if (y - height < FOOTER_TOP + 35) {
-            ({ page, y } = startPage(section, true, true));
-            y = drawTableTitle(page, y, table, compact);
-            y = drawTableRow(page, y, table, table.headers, true, false, compact);
-          }
-          y = drawTableRow(page, y, table, row, false, index % 2 === 1, compact);
-          index++;
-        }
-        y -= compact ? 8 : 16;
+    // Keep all logical sections, but flow their content over pages instead of
+    // generating a mostly empty page for each category.
+    const missing = [...new Set(report.missingRequirements ?? report.sections.flatMap(section =>
+      (section.tables[0]?.rows || []).filter(row=>row[2]==='Not Recorded').map(row=>row[1])))];
+    const pendingSection: SectionWiseSection = {
+      title:'Pending Compliance / Data Gaps',subtitle:'Missing entries are not evidence of compliance.',noteTitle:'',note:'',
+      tables:[{title:'Requirements to Review',source:'Compliance Register',headers:['Sr.','Requirement','Status'],widths:[28,300,181],
+        rows:missing.length?missing.map((label,i)=>[String(i+1),label,'Not Recorded']):[['1','No missing categories in this register','Review supporting evidence']]}]
+    };
+    const sections = [...report.sections,pendingSection];
+    let page: PDFPage | undefined;
+    let y = 0;
+    for (const section of sections) {
+      const tables = section===pendingSection ? section.tables : printableSectionTables(section);
+      if (!tables.length) continue;
+      const compact = true;
+      const first = tables[0];
+      const fw = tableWidths(first);
+      const firstHeader = rowHeight(first.headers.map((v,i)=>wrapPdfText(v,bold,6.9,fw[i]-9)),true,compact);
+      const firstRow = first.rows[0] ? Math.min(100,rowHeight(first.rows[0].map((v,i)=>wrapPdfText(v,i===1?bold:font,7.35,fw[i]-9)),false,compact)):0;
+      if (!page || y-34-23-firstHeader-firstRow < FOOTER_TOP+20) {
+        ({page,y}=startPage(section,false,true));
+      } else {
+        page.drawRectangle({x:LEFT,y:y-22,width:WIDTH,height:22,color:NAVY});
+        write(page,fitted(section.title,bold,9.4,WIDTH-18),LEFT+9,y-14,9.4,true,rgb(1,1,1));
+        y-=30;
       }
-      // The full policy/source notes stay in the on-screen preview, not the concise PDF.
+      for (const table of tables) {
+        const widths=tableWidths(table);
+        const headerHeight=rowHeight(table.headers.map((v,i)=>wrapPdfText(v,bold,6.9,widths[i]-9)),true,compact);
+        const chunks=table.rows.flatMap((row,index)=>{
+          const lines=row.map((v,i)=>wrapPdfText(v,i===1?bold:font,7.35,widths[i]-9));
+          const n=Math.max(...lines.map(c=>c.length),1);
+          return Array.from({length:Math.ceil(n/36)},(_,part)=>({row,index,lines:lines.map(c=>c.slice(part*36,(part+1)*36))}));
+        });
+        const startTable=()=>{
+          if (!page) throw new Error('Missing report page');
+          y=drawTableTitle(page,y,table,compact);
+          y=drawTableRow(page,y,table,table.headers,true,false,compact);
+        };
+        if (y-23-headerHeight-(chunks[0]?rowHeight(chunks[0].lines,false,compact):0)<FOOTER_TOP+20) ({page,y}=startPage(section,true,true));
+        startTable();
+        for (const chunk of chunks) {
+          const height=rowHeight(chunk.lines,false,compact);
+          if(y-height<FOOTER_TOP+20){({page,y}=startPage(section,true,true));startTable();}
+          y=drawTableRow(page!,y,table,chunk.row,false,chunk.index%2===1,compact,chunk.lines);
+        }
+        y-=10;
+      }
+      y-=8;
     }
 
     const pages = pdf.getPages();

@@ -21,6 +21,9 @@ export type CocoAuthoritativeSource =
   | 'MUNICIPAL_TAX_MODULE'
   | 'NFR_LEASE_RENT_MODULE'
   | 'UTILITY_BILLS_MODULE'
+  | 'AGREEMENTS_REGISTER'
+  | 'CLAIMS_REGISTER'
+  | 'ASSET_INSPECTIONS'
   | 'NONE';
 
 export interface StandardCocoCategoryDef {
@@ -201,6 +204,11 @@ export interface LinkedModuleSummary {
   paidAt: string | null;
   documentIds: string[];
   summaryText: string;
+  statusYesNo?: CocoStatusYesNo;
+  issueDate?: string | null;
+  reportStatusLabel?: string;
+  actionRequired?: string | null;
+  paymentDueDate?: string | null;
 }
 
 export interface CocoComplianceMergedItem {
@@ -340,7 +348,11 @@ export function evaluateDocumentValidityStatus(params: {
  * separate from payment status (an unpaid property tax / utility / lease record
  * shows PAYMENT_PENDING even if its assessment/agreement document exists and is not expired).
  */
+export const isRecurringPaymentCategory = (code?: string): boolean =>
+  ['PROPERTY_TAX','LEASE_RENT','ELECTRICITY_BILL','WATER_BILL','WAGES_INCENTIVES_MISC','OTHER_STATUTORY_CHARGES'].includes(code || '');
+
 export function evaluateComplianceStatus(params: {
+  categoryCode?: string;
   hasRecordOrModuleData: boolean;
   statusYesNo: CocoStatusYesNo;
   validityDueDate: string | null;
@@ -389,6 +401,11 @@ export function evaluateComplianceStatus(params: {
       documentValidityStatus,
       daysUntilDue,
     };
+  }
+
+  // A settled bill's due date is not a document expiry or the next billing cycle.
+  if (isRecurringPaymentCategory(params.categoryCode) && params.paymentStatus === 'PAID') {
+    return {complianceStatus: params.statusYesNo === 'NO' || params.manualComplianceOverride === 'ACTION_REQUIRED' || Boolean(params.actionRequired?.trim()) ? 'ACTION_REQUIRED' : 'VALID', documentValidityStatus: 'NOT_APPLICABLE', daysUntilDue: null};
   }
 
   // 2. Date-based expiration relative to selected reportDate
@@ -578,11 +595,21 @@ export function toCocoOnePagerRow(item: CocoComplianceMergedItem): CocoOnePagerR
     statusYesNoDisplay = 'Yes';
   }
 
+  if (item.linkedModuleData?.reportStatusLabel) statusYesNoDisplay = item.linkedModuleData.reportStatusLabel;
+  else if (isRecurringPaymentCategory(item.categoryCode)) {
+    const due = item.linkedModuleData ? item.linkedModuleData.paymentDueDate : item.validityDueDate;
+    if (item.paymentStatus === 'PAID') statusYesNoDisplay = due && item.paymentDate && item.paymentDate > due ? 'Paid Late' : 'Paid';
+    else if (item.paymentStatus === 'OVERDUE') statusYesNoDisplay = 'Overdue';
+    else if (item.paymentStatus === 'PENDING') statusYesNoDisplay = 'Payment Pending';
+  } else if (item.complianceStatus === 'EXPIRED') statusYesNoDisplay = 'Expired';
+  else if (item.complianceStatus === 'EXPIRING_SOON') statusYesNoDisplay = 'Expiring Soon';
+  else if (item.complianceStatus === 'ACTION_REQUIRED') statusYesNoDisplay = 'Action Required';
+
   const validityParts: string[] = [];
   if (item.validityDueDate) {
     validityParts.push(formatComplianceDateDisplay(item.validityDueDate));
   }
-  if (item.lastServiceDate) {
+  if (item.lastServiceDate && STANDARD_CATEGORY_MAP.get(item.categoryCode)?.supportsServiceDate !== false) {
     validityParts.push(`Last Svc: ${formatComplianceDateDisplay(item.lastServiceDate)}`);
   }
   const validityDueDateDisplay =

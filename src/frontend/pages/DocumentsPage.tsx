@@ -144,6 +144,9 @@ const SOURCE_LABELS: Record<CocoAuthoritativeSource, string> = {
   MUNICIPAL_TAX_MODULE: 'Municipal Tax Module',
   NFR_LEASE_RENT_MODULE: 'NFR Lease & Rent Module',
   UTILITY_BILLS_MODULE: 'Utility Bills Module',
+  AGREEMENTS_REGISTER: 'Agreements Register',
+  CLAIMS_REGISTER: 'Claims Register',
+  ASSET_INSPECTIONS: 'Asset Inspections',
   NONE: 'Not Recorded',
 };
 

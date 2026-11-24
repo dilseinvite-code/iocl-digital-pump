@@ -1,6 +1,7 @@
 import { DrizzleD1Database } from 'drizzle-orm/d1';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../../db/schema';
+import { loadCocoReportMasterData, buildMasterSummaries, type CocoReportMasterData } from './cocoReportingMasterData';
 import {
   cocoComplianceRecords,
   documents,
@@ -119,7 +120,8 @@ export class CocoComplianceService {
    */
   private async loadLinkedModuleSummaries(
     outletId: string,
-    reportDate: string
+    reportDate: string,
+    masterData?: CocoReportMasterData
   ): Promise<Map<string, LinkedModuleSummary>> {
     const map = new Map<string, LinkedModuleSummary>();
 
@@ -157,6 +159,7 @@ export class CocoComplianceService {
         recordCount: propertyTaxRows.length,
         referenceNumber: primaryRow.referenceNumber,
         dueDate: isPending ? primaryRow.dueDate : primaryRow.assessmentPeriodEnd || primaryRow.dueDate,
+        paymentDueDate: primaryRow.dueDate,
         amountPaise: isPending ? totalPendingPaise : primaryRow.amountPaise,
         frequency: primaryRow.assessmentFrequency === 'ANNUAL' ? 'Yearly' : 'Quarterly',
         paymentStatus,
@@ -195,6 +198,7 @@ export class CocoComplianceService {
         recordCount: waterTaxRows.length,
         referenceNumber: primaryWater.referenceNumber,
         dueDate: isPending ? primaryWater.dueDate : primaryWater.assessmentPeriodEnd || primaryWater.dueDate,
+        paymentDueDate: primaryWater.dueDate,
         amountPaise: isPending ? totalPendingPaise : primaryWater.amountPaise,
         frequency: primaryWater.assessmentFrequency === 'ANNUAL' ? 'Yearly' : 'Quarterly',
         paymentStatus: isOverdue ? 'OVERDUE' : isPending ? 'PENDING' : 'PAID',
@@ -277,7 +281,8 @@ export class CocoComplianceService {
           sourceLabel: 'NFR Lease & Rent Management',
           recordCount: rentDues.length,
           referenceNumber: primaryLease ? primaryLease.agreementNumber : latestDue.billingMonth,
-          dueDate: primaryLease ? primaryLease.leaseEndDate : latestDue.dueDate,
+          dueDate: latestDue.dueDate,
+          paymentDueDate: latestDue.dueDate,
           amountPaise: latestDue.monthlyRentPaiseSnapshot,
           frequency: 'Monthly',
           paymentStatus: 'PAID',
@@ -340,6 +345,7 @@ export class CocoComplianceService {
           primaryBill.paymentReference ||
           (account ? `Consumer #${account.consumerNumber}` : `${primaryBill.billingPeriodStart}..${primaryBill.billingPeriodEnd}`),
         dueDate: primaryBill.dueDate,
+        paymentDueDate: primaryBill.dueDate,
         amountPaise: isPending ? totalPendingPaise : primaryBill.billAmountPaise,
         frequency: account?.billingCycle || 'Monthly',
         paymentStatus: isOverdue ? 'OVERDUE' : isPending ? 'PENDING' : 'PAID',
@@ -351,6 +357,7 @@ export class CocoComplianceService {
       });
     }
 
+    for (const [code, summary] of buildMasterSummaries(masterData ?? await loadCocoReportMasterData(this.db, outletId), reportDate)) map.set(code, summary);
     return map;
   }
 
@@ -363,6 +370,7 @@ export class CocoComplianceService {
     reportDate?: string;
     search?: string;
     categoryFilter?: string;
+    masterData?: CocoReportMasterData;
   }): Promise<{
     outlet: { id: string; roCode: string; name: string; outletType: string };
     reportDate: string;
@@ -397,7 +405,7 @@ export class CocoComplianceService {
       .where(eq(cocoComplianceRecords.outletId, params.outletId))
       .all();
 
-    const linkedModules = await this.loadLinkedModuleSummaries(params.outletId, reportDate);
+    const linkedModules = await this.loadLinkedModuleSummaries(params.outletId, reportDate, params.masterData);
 
     const outletDocs = await this.db
       .select({
@@ -458,13 +466,16 @@ export class CocoComplianceService {
           isCustomCategory: true,
           defaultFrequency: customRec.frequency || 'As Required',
           manualRec: customRec,
-          linked: null,
+          linked: linkedModules.get(customRec.categoryCode) || null,
           docMap,
           reportDate,
         })
       );
     }
 
+    if (linkedModules.has('LAND_LEASE') && !mergedItems.some(i => i.categoryCode === 'LAND_LEASE')) {
+      mergedItems.push(this.mergeCategoryItem({outlet,srNo:nextSrNo++,categoryCode:'LAND_LEASE',categoryName:'Land Lease',isCustomCategory:true,defaultFrequency:'Tenure',manualRec:null,linked:linkedModules.get('LAND_LEASE')!,docMap,reportDate}));
+    }
     const dueDatesAndActions = buildDueDatesAndActionsSummary(mergedItems);
 
     const summary: CocoOnePagerReport['summary'] = {
@@ -579,15 +590,16 @@ export class CocoComplianceService {
       ? 'MANUAL'
       : 'NONE';
 
-    const validityDueDate = linked?.dueDate ?? manualRec?.validityDueDate ?? null;
-    const amountPaise = linked?.amountPaise ?? manualRec?.amountPaise ?? null;
+    const masterAuthoritative = linked?.source === 'AGREEMENTS_REGISTER' || linked?.source === 'CLAIMS_REGISTER';
+    const validityDueDate = masterAuthoritative ? linked!.dueDate : linked?.dueDate ?? manualRec?.validityDueDate ?? null;
+    const amountPaise = masterAuthoritative ? linked!.amountPaise : linked?.amountPaise ?? manualRec?.amountPaise ?? null;
     const frequency =
       linked?.frequency ??
       manualRec?.frequency ??
       (hasRecordOrModuleData ? params.defaultFrequency : null);
 
     let paymentStatus: CocoPaymentStatus =
-      linked?.paymentStatus ??
+      (linked?.source === 'ASSET_INSPECTIONS' ? undefined : linked?.paymentStatus) ??
       (manualRec?.paymentStatus as CocoPaymentStatus | undefined) ??
       'NOT_RECORDED';
 
@@ -596,7 +608,7 @@ export class CocoComplianceService {
       paymentStatus = 'OVERDUE';
     }
 
-    const paymentDate = linked?.paidAt ?? manualRec?.paymentDate ?? null;
+    const paymentDate = masterAuthoritative ? linked!.paidAt : linked?.paidAt ?? manualRec?.paymentDate ?? null;
     const referenceNumber = linked?.referenceNumber ?? manualRec?.referenceNumber ?? null;
     const documentTitle =
       manualRec?.documentTitle ??
@@ -604,7 +616,9 @@ export class CocoComplianceService {
 
     let statusYesNo: CocoStatusYesNo = (manualRec?.statusYesNo as CocoStatusYesNo) || 'NOT_RECORDED';
     if (linked) {
-      if (linked.paymentStatus === 'PAID') {
+      if (linked.statusYesNo !== undefined && (linked.source !== 'ASSET_INSPECTIONS' || linked.statusYesNo === 'NO')) {
+        statusYesNo = linked.statusYesNo;
+      } else if (linked.paymentStatus === 'PAID') {
         statusYesNo = 'YES';
       } else if (linked.paymentStatus === 'PENDING' || linked.paymentStatus === 'OVERDUE') {
         statusYesNo = 'NO';
@@ -620,7 +634,8 @@ export class CocoComplianceService {
     }
     const remarks = remarksParts.length > 0 ? remarksParts.join(' | ') : null;
 
-    const actionRequired = manualRec?.actionRequired ?? null;
+    const invalidServiceDate = Boolean(manualRec?.lastServiceDate && manualRec.lastServiceDate > reportDate);
+    const actionRequired = [linked?.actionRequired, manualRec?.actionRequired, invalidServiceDate ? 'Saved service date is after report date; verify source date.' : null].filter(Boolean).join(' | ') || null;
 
     const manualAttachmentIds = this.parseAttachmentIds(manualRec?.attachmentDocumentIdsJson);
     const combinedDocIds = Array.from(
@@ -631,11 +646,12 @@ export class CocoComplianceService {
       .filter((x): x is CocoAttachmentInfo => Boolean(x));
 
     const evaluated = evaluateComplianceStatus({
-      hasRecordOrModuleData,
+      hasRecordOrModuleData: linked?.source === 'ASSET_INSPECTIONS' && !linked.actionRequired && !manualRec ? false : hasRecordOrModuleData,
       statusYesNo,
       validityDueDate,
       paymentStatus,
-      manualComplianceOverride: (manualRec?.complianceStatus as CocoComplianceStatus | undefined) ?? null,
+      categoryCode,
+      manualComplianceOverride: masterAuthoritative ? null : (manualRec?.complianceStatus as CocoComplianceStatus | undefined) ?? null,
       actionRequired,
       reportDate,
     });
@@ -651,9 +667,9 @@ export class CocoComplianceService {
       isCustomCategory,
       documentTitle,
       referenceNumber,
-      issueDate: manualRec?.issueDate ?? null,
+      issueDate: linked?.issueDate ?? manualRec?.issueDate ?? null,
       validityDueDate,
-      lastServiceDate: manualRec?.lastServiceDate ?? null,
+      lastServiceDate: STANDARD_CATEGORY_MAP.get(categoryCode)?.supportsServiceDate === false || invalidServiceDate ? null : manualRec?.lastServiceDate ?? null,
       amountPaise,
       frequency,
       paymentStatus,
@@ -809,6 +825,7 @@ export class CocoComplianceService {
 
     const evaluated = evaluateComplianceStatus({
       hasRecordOrModuleData: true,
+      categoryCode: rawCategoryCode,
       statusYesNo,
       validityDueDate,
       paymentStatus,
