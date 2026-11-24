@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy PDF with blank empty sections
+    name: Verify and deploy unified COCO compliance reporting
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -28,11 +28,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
-      - name: Validate TypeScript, compact PDF tests and production build
+      - name: Validate TypeScript, full regression suite and production build
         run: |
           node --check scripts/release/activate-readonly-excel-pdf.mjs
           bun run typecheck
-          bun test tests/cocoSectionWisePdfCompact.test.ts tests/cocoSectionWiseReport.test.ts tests/dealerExcelReportSource.test.ts
+          bun test --timeout 15000
           bun run build
       - name: Check live D1 identity and deploy PDF Worker without migrations
         run: bun scripts/release/activate-readonly-excel-pdf.mjs

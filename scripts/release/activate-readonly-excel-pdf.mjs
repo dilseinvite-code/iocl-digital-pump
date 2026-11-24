@@ -57,22 +57,22 @@ try{
   console.log('[2/5] Verify existing 0039 draft storage and capture private metadata fingerprints.');
   const tabs=query(
     "SELECT name FROM sqlite_master WHERE type='table' AND name IN ("+
-    "'retail_outlets','coco_agreement_details','dealer_master_draft_uploads') ORDER BY name"
+    "'retail_outlets','coco_agreement_details','dealer_master_draft_uploads','coco_compliance_records','coco_expense_claims','coco_claim_settlements','coco_asset_inspections','equipment_assets') ORDER BY name"
   );
-  guard(tabs.length===3,'Read-only Excel source or required operational tables missing');
+  guard(tabs.length===8,'Required compliance reporting or Excel source tables missing');
   const outletSql='SELECT id,ro_code,name,status,city,pincode FROM retail_outlets ORDER BY id';
   const agreementSql='SELECT id,outlet_id,agreement_type,agreement_number,start_date,end_date FROM coco_agreement_details ORDER BY id';
   const draftSql='SELECT id,created_by,content_sha256,source_row_count FROM dealer_master_draft_uploads ORDER BY id';
   const before=[hash(query(outletSql)),hash(query(agreementSql)),hash(query(draftSql))];
 
   console.log('[3/5] Deploy reviewed Worker source only; do NOT execute migrations.');
-  run(['deploy','--config','wrangler.jsonc']);
+  console.log(run(['deploy','--config','wrangler.jsonc']));
 
   console.log('[4/5] Check no outlet, agreement or Excel-draft metadata changed during deployment.');
   const after=[hash(query(outletSql)),hash(query(agreementSql)),hash(query(draftSql))];
   guard(before.every((v,i)=>v===after[i]),'Data changed concurrently; investigate before further rollout');
 
-  console.log('[5/5] SUCCESS: read-only Excel source appendix available in Worker.');
+  console.log('[5/5] SUCCESS: unified COCO compliance reporting Worker deployed.');
   console.log('No D1 schema or record changes; signed agreement and rent records untouched.');
 }catch(e){
   console.error('STOPPED: '+(e instanceof Error?e.message:'Unknown failure'));
