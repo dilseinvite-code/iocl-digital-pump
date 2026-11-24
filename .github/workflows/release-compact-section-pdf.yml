@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy global calibration review loading fix (PR 121)
+    name: Verify and deploy calibration replacement UI removal (PR 122)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
