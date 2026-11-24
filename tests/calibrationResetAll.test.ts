@@ -136,6 +136,19 @@ describe('Replace ONLY 10KL and 20KL calibration with uploaded PDF values',()=>{
   expect(res.status).toBe(409);
   const j=await res.json() as any;
   expect(j.error.code).toBe('SHIFT_OPEN');
+  const preview=await request('GET','/calibration-templates/replace-10-20-preview');
+  expect(preview.status).toBe(200);
+  const details=(await preview.json() as any).data;
+  expect(details.openOrClosingShifts).toBe(1);
+  expect(details.blockingShifts).toHaveLength(1);
+  expect(details.blockingShifts[0]).toMatchObject({
+   id:'open-shift-blocks-10kl-20kl',
+   outletId:'ro-1001',
+   businessDate:'2026-11-24',
+   status:'OPEN',
+  });
+  expect(details.blockingShifts[0].outletCode).toBeTruthy();
+  expect(details.blockingShifts[0].shiftName).toBeTruthy();
   const [tank]=await db.select().from(schema.tanks)
    .where(eq(schema.tanks.id,'tank-ro1-1'));
   expect(tank.status).toBe('ACTIVE');

@@ -1644,7 +1644,19 @@ async function getReplacementPlan(db:ReturnType<typeof getDb>){
   db.select().from(schema.tankCalibrationCharts),
   db.select().from(schema.globalTankCapacityDefaults),
   db.select({id:schema.tanks.id,capacity:schema.tanks.capacityLitres,status:schema.tanks.status}).from(schema.tanks),
-  db.select({id:schema.operationalShifts.id}).from(schema.operationalShifts)
+  db.select({
+    id:schema.operationalShifts.id,
+    outletId:schema.operationalShifts.outletId,
+    businessDate:schema.operationalShifts.businessDate,
+    status:schema.operationalShifts.status,
+    startedAt:schema.operationalShifts.startedAt,
+    outletCode:schema.retailOutlets.roCode,
+    outletName:schema.retailOutlets.name,
+    shiftTemplateName:schema.globalShiftTemplates.name,
+  })
+   .from(schema.operationalShifts)
+   .leftJoin(schema.retailOutlets,eq(schema.operationalShifts.outletId,schema.retailOutlets.id))
+   .leftJoin(schema.globalShiftTemplates,eq(schema.operationalShifts.shiftTemplateId,schema.globalShiftTemplates.id))
    .where(inArray(schema.operationalShifts.status,['OPEN','CLOSING'])),
   db.select({id:schema.tankStockReadings.calibrationChartId}).from(schema.tankStockReadings),
   db.select({id:schema.operationalShiftTanks.calibrationChartId}).from(schema.operationalShiftTanks),
@@ -1661,7 +1673,13 @@ async function getReplacementPlan(db:ReturnType<typeof getDb>){
    protectedHistoricalRevisions:allCharts.filter(c=>historical.has(c.id)).length,
    activeTanksToInactivate:affected.filter(t=>t.status==='ACTIVE').length,
    existingDefaultMappings:defaults.filter(d=>REPLACED_CAPACITIES.includes(d.capacityLitres as 10000|20000)).length,
-   openOrClosingShifts:shifts.length,replacement10klPoints:195,replacement20klPoints:211,
+   openOrClosingShifts:shifts.length,
+   blockingShifts:shifts.map(s=>({
+    id:s.id,outletId:s.outletId,outletCode:s.outletCode??'Unknown code',
+    outletName:s.outletName??'Unknown outlet',businessDate:s.businessDate,
+    status:s.status,shiftName:s.shiftTemplateName??'Shift',startedAt:s.startedAt,
+   })).sort((a,b)=>a.businessDate.localeCompare(b.businessDate)||a.outletCode.localeCompare(b.outletCode)),
+   replacement10klPoints:195,replacement20klPoints:211,
    untouched:'15 KL, 50 KL and all other capacities'}};
 }
 tankCalibration.get('/calibration-templates/replace-10-20-preview',
