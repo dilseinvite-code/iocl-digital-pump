@@ -66,9 +66,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const loadTemplates=async()=>{
     const result=await apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates');
     if(!result.success || !result.data)throw new Error(result.error?.message || 'Could not load calibration charts');
-    setTemplates(result.data);
+    const latestTemplates=result.data;
+    setTemplates(latestTemplates);
     setSelectedCode(current=>{
-      const active=result.data.filter(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status));
+      const active=latestTemplates.filter(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status));
       return active.some(t=>t.code===current)?current:
         active.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code||active[0]?.code||'';
     });
