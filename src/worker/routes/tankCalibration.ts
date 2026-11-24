@@ -1719,11 +1719,14 @@ tankCalibration.post('/calibration-templates/replace-10-20',
    batch.push(db.delete(schema.globalTankCalibrationTemplatePoints).where(inArray(schema.globalTankCalibrationTemplatePoints.templateId,oldIds)));
   }
   if(p.allCharts.length){
-   const chartIds=p.allCharts.map(c=>c.id);
-   batch.push(db.update(schema.tankCalibrationCharts).set({status:'ARCHIVED',effectiveTo:now.slice(0,10),updatedBy:userId,updatedAt:now})
-    .where(inArray(schema.tankCalibrationCharts.id,chartIds)));
-   const safeToPurge=chartIds.filter(id=>!p.historical.has(id));
-   if(safeToPurge.length)batch.push(db.delete(schema.tankCalibrationPoints).where(inArray(schema.tankCalibrationPoints.chartId,safeToPurge)));
+   // Preserve SUPERSEDED/ARCHIVED status and original effective dates for history.
+   const currentIds=p.allCharts.filter(c=>['ACTIVE','APPROVED','DRAFT'].includes(c.status)).map(c=>c.id);
+   if(currentIds.length)batch.push(db.update(schema.tankCalibrationCharts).set({
+    status:'ARCHIVED',effectiveTo:now.slice(0,10),updatedBy:userId,updatedAt:now
+   }).where(inArray(schema.tankCalibrationCharts.id,currentIds)));
+   const safeToPurge=p.allCharts.filter(c=>!p.historical.has(c.id)).map(c=>c.id);
+   if(safeToPurge.length)batch.push(db.delete(schema.tankCalibrationPoints)
+    .where(inArray(schema.tankCalibrationPoints.chartId,safeToPurge)));
   }
   const affectedIds=p.affected.map(t=>t.id);
   if(affectedIds.length){
