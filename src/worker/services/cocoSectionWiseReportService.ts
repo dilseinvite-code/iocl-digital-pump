@@ -301,6 +301,7 @@ export function buildSectionWiseSections(args: {
     ['GENERATOR_MAINTENANCE', 'Generator'],
     ['CCTV_HEALTH_STATUS', 'CCTV Service / Inspection'],
     ['FIRE_EXTINGUISHER_REFILLING', 'Fire Extinguisher Refilling Service'],
+    ['BIOMETRIC_ATTENDANCE', 'Biometric Attendance'],
   ];
   const maintenanceRows = maintenanceDefs.map(([code, label], index) => {
     const i = item(code);
@@ -308,7 +309,6 @@ export function buildSectionWiseSections(args: {
       i ? date(i.lastServiceDate) : NR, i ? date(i.validityDueDate) : NR, notes(i)];
   });
 
-  const biometric = item('BIOMETRIC_ATTENDANCE');
   const claimDefs = [
     ['LEASE_RENT', 'NFR Rent'],
     ['WEIGHTS_MEASURES_STAMPING_CHARGES', 'Weights & Measures Stamping Charges'],
@@ -436,9 +436,6 @@ export function buildSectionWiseSections(args: {
         { title: '4B. Preventive Maintenance & Services', source: 'Compliance Register',
           headers: ['Sr.', 'Maintenance Activity', 'Status', 'Last Service', 'Next Due', 'Remarks / Action'],
           widths: [25, 162, 78, 72, 73, 99], rows: maintenanceRows },
-        { title: '4C. Biometric Attendance', source: 'Compliance Register',
-          headers:['Sr.','Particular','Status','Verification Date','Remarks / Action'], widths:[25,150,90,90,154],
-          rows:[['1','Biometric Attendance',fromItem(biometric),biometric ? date(biometric.issueDate) : NR,notes(biometric)]] },
       ],
       noteTitle: 'Operational Condition',
       note: 'Operational condition is based only on recorded asset inspections as of the selected report date. Asset lifecycle status alone is never treated as proof of working condition.',

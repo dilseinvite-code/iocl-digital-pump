@@ -2004,7 +2004,7 @@ export const DocumentsPage: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-[#475569] mb-1">
-                    {formCategoryCode === BIOMETRIC_ATTENDANCE_CODE ? 'Biometric Attendance — Presence' : 'Status (Yes / No / N/A)'}
+                    {formCategoryCode === BIOMETRIC_ATTENDANCE_CODE ? 'Working Biometric Attendance System?' : 'Status (Yes / No / N/A)'}
                   </label>
                   <select
                     value={formStatusYesNo}
@@ -2013,8 +2013,8 @@ export const DocumentsPage: React.FC = () => {
                   >
                     {formCategoryCode === BIOMETRIC_ATTENDANCE_CODE ? <>
                       <option value="NOT_RECORDED">Not Recorded</option>
-                      <option value="YES">Present</option>
-                      <option value="NO">Not Present</option>
+                      <option value="YES">Yes (Working)</option>
+                      <option value="NO">No (Absent / Not Working)</option>
                     </> : <>
                       <option value="YES">Yes (Available / Functional)</option>
                       <option value="NO">No (Pending / Defective)</option>

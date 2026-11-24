@@ -176,7 +176,7 @@ export const STANDARD_COCO_CATEGORIES: readonly StandardCocoCategoryDef[] = [
     linkedModule: 'MANUAL',
     supportsServiceDate: false,
     supportsAmount: false,
-    description: 'Presence of a biometric attendance system at the outlet; no employee biometric data is collected',
+    description: 'Whether the outlet has a working biometric attendance system (Yes / No); no employee biometric data is collected',
   },
 ] as const;
 
@@ -588,7 +588,7 @@ export function buildDueDatesAndActionsSummary(
 export function getCocoReportStatus(item: CocoComplianceMergedItem): string {
   if (item.complianceStatus === 'NOT_RECORDED') return 'Not Recorded';
   if (item.complianceStatus === 'NOT_APPLICABLE' || item.statusYesNo === 'NA') return 'N/A';
-  if (item.categoryCode === BIOMETRIC_ATTENDANCE_CODE) return item.statusYesNo === 'YES' ? 'Present' : item.statusYesNo === 'NO' ? 'Not Present' : 'Not Recorded';
+  if (item.categoryCode === BIOMETRIC_ATTENDANCE_CODE) return item.statusYesNo === 'YES' ? 'Yes' : item.statusYesNo === 'NO' ? 'No' : 'Not Recorded';
   if (item.linkedModuleData?.reportStatusLabel) return item.linkedModuleData.reportStatusLabel;
   if (isRecurringPaymentCategory(item.categoryCode)) {
     const due = item.linkedModuleData ? item.linkedModuleData.paymentDueDate : item.validityDueDate;

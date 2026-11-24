@@ -809,13 +809,15 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect((await save()).status).toBe(201);
     expect((await preview(OUTLET_3_ID)).statusYesNoDisplay).toBe('Not Recorded');
     expect((await save('NO')).status).toBe(200);
-    expect(await preview(OUTLET_3_ID)).toMatchObject({statusYesNoDisplay:'Not Present',complianceStatus:'ACTION_REQUIRED',paymentStatus:'NOT_APPLICABLE',amountInrDisplay:'-'});
+    expect(await preview(OUTLET_3_ID)).toMatchObject({statusYesNoDisplay:'No',complianceStatus:'ACTION_REQUIRED',paymentStatus:'NOT_APPLICABLE',amountInrDisplay:'-'});
     const detail=await app.request('/api/v1/documents/compliance/section-wise?outletId='+OUTLET_3_ID,{headers},env);
     expect(detail.status).toBe(200);
     const data=((await detail.json()) as any).data;
-    expect(data.sections.flatMap((s:any)=>s.tables).find((t:any)=>t.title==='4C. Biometric Attendance').rows[0][2]).toBe('Not Present');
+    const tables=data.sections.flatMap((s:any)=>s.tables);
+    expect(tables.some((t:any)=>t.title==='4C. Biometric Attendance')).toBe(false);
+    expect(tables.find((t:any)=>t.title==='4B. Preventive Maintenance & Services').rows.find((row:any)=>row[1]==='Biometric Attendance')[2]).toBe('No');
     expect((await save('YES')).status).toBe(200);
-    expect(await preview(OUTLET_3_ID)).toMatchObject({statusYesNoDisplay:'Present',complianceStatus:'VALID'});
+    expect(await preview(OUTLET_3_ID)).toMatchObject({statusYesNoDisplay:'Yes',complianceStatus:'VALID'});
     expect((await preview(OUTLET_1_ID)).statusYesNoDisplay).toBe('Not Recorded');
     expect((await save('NA')).status).toBe(400);
   });
