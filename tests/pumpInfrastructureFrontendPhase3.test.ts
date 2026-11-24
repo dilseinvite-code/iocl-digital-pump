@@ -11,6 +11,7 @@ import {
   getProductCategoryBadgeClass,
   getTankCalibrationStatus,
   getTankCardCalibrationStatus,
+  getCalibrationModalPhase,
   buildDummyCalibrationPreset,
   formatDummyCalibrationPresetText,
   validateCalibrationChartPoints,
@@ -397,6 +398,13 @@ describe('Phase 3 Pump Infrastructure Pure Frontend Helpers Suite', () => {
   // 10. Tank Calibration Chart Management Helpers
   // =========================================================================
   describe('Tank Calibration Chart Management Helpers', () => {
+    it('only exposes linked chart details for the current successfully loaded tank', () => {
+      expect(getCalibrationModalPhase('tank-1','tank-1',null)).toBe('loading');
+      expect(getCalibrationModalPhase('tank-1',null,null)).toBe('unverified');
+      expect(getCalibrationModalPhase('tank-2',null,'tank-1')).toBe('unverified');
+      expect(getCalibrationModalPhase('tank-1','tank-1','tank-1')).toBe('loading');
+      expect(getCalibrationModalPhase('tank-1',null,'tank-1')).toBe('ready');
+    });
     it('never flashes missing while a calibration request is pending or failed', () => {
       const loading = getTankCardCalibrationStatus(undefined, true, true);
       expect(loading.badgeLabel).toBe('Checking calibration…');

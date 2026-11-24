@@ -695,6 +695,12 @@ export interface TankCalibrationStatusInfo {
   warningText: string | null;
 }
 
+// Never expose the chart editor until the selected tank's authoritative request completes.
+export function getCalibrationModalPhase(tankId: string, loadingTankId: string | null, loadedTankId: string | null): 'loading' | 'unverified' | 'ready' {
+  if (loadingTankId === tankId) return 'loading';
+  return loadedTankId === tankId ? 'ready' : 'unverified';
+}
+
 // An absent summary means unverified, not a confirmed empty calibration.
 export function getTankCardCalibrationStatus(
   summary: { pointsCount: number; status: 'DRAFT' | 'APPROVED' | 'ACTIVE' | 'SUPERSEDED' | 'ARCHIVED' | null } | undefined,
