@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy linked calibration modal fix (PR 120)
+    name: Verify and deploy global calibration review loading fix (PR 121)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
