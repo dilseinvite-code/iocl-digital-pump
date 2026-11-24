@@ -19,6 +19,8 @@ import {
   formatComplianceDateDisplay,
   formatIndianCurrencyFromPaise,
   STANDARD_COCO_CATEGORIES,
+  BIOMETRIC_ATTENDANCE_CODE,
+  getCocoReportStatus,
 } from '../../shared/cocoComplianceUtils';
 import {
   FileText,
@@ -445,7 +447,7 @@ export const DocumentsPage: React.FC = () => {
         item.complianceStatus === 'NOT_RECORDED' ? 'VALID' : item.complianceStatus
       );
       setFormStatusYesNo(
-        item.statusYesNo === 'NOT_RECORDED' ? 'YES' : item.statusYesNo
+        item.categoryCode === BIOMETRIC_ATTENDANCE_CODE ? item.statusYesNo : item.statusYesNo === 'NOT_RECORDED' ? 'YES' : item.statusYesNo
       );
       setFormResponsiblePerson(item.responsiblePerson || '');
       setFormRemarks(item.remarks || '');
@@ -501,7 +503,7 @@ export const DocumentsPage: React.FC = () => {
       );
       setFormPaymentDate(firstUnrecorded?.paymentDate || '');
       setFormComplianceStatus('VALID');
-      setFormStatusYesNo('YES');
+      setFormStatusYesNo(code === BIOMETRIC_ATTENDANCE_CODE ? firstUnrecorded?.statusYesNo ?? 'NOT_RECORDED' : 'YES');
       setFormResponsiblePerson(firstUnrecorded?.responsiblePerson || '');
       setFormRemarks(firstUnrecorded?.remarks || '');
       setFormActionRequired(firstUnrecorded?.actionRequired || '');
@@ -556,7 +558,7 @@ export const DocumentsPage: React.FC = () => {
 
     try {
       let amountPaise: number | null = null;
-      if (formAmountRupees.trim() !== '') {
+      if (formCategoryCode !== BIOMETRIC_ATTENDANCE_CODE && formAmountRupees.trim() !== '') {
         const parsedRupees = Number(formAmountRupees.trim());
         if (Number.isNaN(parsedRupees) || parsedRupees < 0) {
           setBannerError('Please enter a valid non-negative amount in INR.');
@@ -590,7 +592,7 @@ export const DocumentsPage: React.FC = () => {
         frequency: formFrequency.trim() || null,
         paymentStatus: formPaymentStatus,
         paymentDate: formPaymentDate.trim() || null,
-        complianceStatus: formComplianceStatus,
+        complianceStatus: categoryCodeToSend === BIOMETRIC_ATTENDANCE_CODE ? undefined : formComplianceStatus,
         statusYesNo: formStatusYesNo,
         responsiblePerson: formResponsiblePerson.trim() || null,
         remarks: formRemarks.trim() || null,
@@ -1165,14 +1167,12 @@ export const DocumentsPage: React.FC = () => {
                             <span
                               className={`inline-flex items-center px-2.5 py-0.5 rounded text-[11px] font-semibold border ${statusStyle.className}`}
                             >
-                              {statusStyle.label}
+                              {item.categoryCode === BIOMETRIC_ATTENDANCE_CODE ? getCocoReportStatus(item) : statusStyle.label}
                             </span>
                             <div className="text-[11px] text-[#64748B] mt-1">
                               Status (Yes/No):{' '}
                               <span className="font-semibold text-[#334155]">
-                                {item.statusYesNo === 'NOT_RECORDED'
-                                  ? 'Not Recorded'
-                                  : item.statusYesNo}
+                                {item.categoryCode === BIOMETRIC_ATTENDANCE_CODE ? getCocoReportStatus(item) : item.statusYesNo === 'NOT_RECORDED' ? 'Not Recorded' : item.statusYesNo}
                               </span>
                             </div>
                             {item.documentValidityStatus !== item.complianceStatus &&
@@ -2004,22 +2004,28 @@ export const DocumentsPage: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-[#475569] mb-1">
-                    Status (Yes / No / N/A)
+                    {formCategoryCode === BIOMETRIC_ATTENDANCE_CODE ? 'Working Biometric Attendance System?' : 'Status (Yes / No / N/A)'}
                   </label>
                   <select
                     value={formStatusYesNo}
                     onChange={(e) => setFormStatusYesNo(e.target.value as CocoStatusYesNo)}
                     className="w-full px-3 py-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg text-sm text-[#17365D]"
                   >
-                    <option value="YES">Yes (Available / Functional)</option>
-                    <option value="NO">No (Pending / Defective)</option>
-                    <option value="NA">Not Applicable (N/A)</option>
+                    {formCategoryCode === BIOMETRIC_ATTENDANCE_CODE ? <>
+                      <option value="NOT_RECORDED">Not Recorded</option>
+                      <option value="YES">Yes (Working)</option>
+                      <option value="NO">No (Absent / Not Working)</option>
+                    </> : <>
+                      <option value="YES">Yes (Available / Functional)</option>
+                      <option value="NO">No (Pending / Defective)</option>
+                      <option value="NA">Not Applicable (N/A)</option>
+                    </>}
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-[#475569] mb-1">
-                    Issue Date
+                    {formCategoryCode === BIOMETRIC_ATTENDANCE_CODE ? 'Verification Date (Optional)' : 'Issue Date'}
                   </label>
                   <input
                     type="date"
@@ -2035,6 +2041,7 @@ export const DocumentsPage: React.FC = () => {
                   </label>
                   <input
                     type="date"
+                    disabled={formCategoryCode === BIOMETRIC_ATTENDANCE_CODE}
                     value={formValidityDueDate}
                     onChange={(e) => setFormValidityDueDate(e.target.value)}
                     className="w-full px-3 py-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg text-sm text-[#17365D]"
@@ -2049,6 +2056,7 @@ export const DocumentsPage: React.FC = () => {
                   </label>
                   <input
                     type="date"
+                    disabled={formCategoryCode === BIOMETRIC_ATTENDANCE_CODE}
                     value={formLastServiceDate}
                     onChange={(e) => setFormLastServiceDate(e.target.value)}
                     className="w-full px-3 py-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg text-sm text-[#17365D]"
@@ -2063,6 +2071,7 @@ export const DocumentsPage: React.FC = () => {
                     type="number"
                     step="0.01"
                     min="0"
+                    disabled={formCategoryCode === BIOMETRIC_ATTENDANCE_CODE}
                     value={formAmountRupees}
                     onChange={(e) => setFormAmountRupees(e.target.value)}
                     placeholder="e.g., 24500"
@@ -2076,6 +2085,7 @@ export const DocumentsPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
+                    disabled={formCategoryCode === BIOMETRIC_ATTENDANCE_CODE}
                     value={formFrequency}
                     onChange={(e) => setFormFrequency(e.target.value)}
                     placeholder="Monthly / Quarterly / Yearly"
@@ -2090,6 +2100,7 @@ export const DocumentsPage: React.FC = () => {
                     Payment Status
                   </label>
                   <select
+                    disabled={formCategoryCode === BIOMETRIC_ATTENDANCE_CODE}
                     value={formPaymentStatus}
                     onChange={(e) => setFormPaymentStatus(e.target.value as CocoPaymentStatus)}
                     className="w-full px-3 py-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg text-sm text-[#17365D]"
@@ -2108,6 +2119,7 @@ export const DocumentsPage: React.FC = () => {
                   </label>
                   <input
                     type="date"
+                    disabled={formCategoryCode === BIOMETRIC_ATTENDANCE_CODE}
                     value={formPaymentDate}
                     onChange={(e) => setFormPaymentDate(e.target.value)}
                     className="w-full px-3 py-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg text-sm text-[#17365D]"

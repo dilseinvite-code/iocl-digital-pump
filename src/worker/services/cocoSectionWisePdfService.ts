@@ -133,7 +133,7 @@ export class CocoSectionWisePdfService {
         if (i) line(page, x, y, x, y - height, 0.4);
         const cellFont = header || i === 1 ? bold : font;
         const isStatus = !header && /^(status|condition|settled)$/i.test(table.headers[i]);
-        const statusColor = isStatus && /expired|overdue|not working|scrapped|rejected|action required/i.test(values[i]||'') ? rgb(0.64,0.12,0.12) : isStatus && /pending|expiring|partial|review|paid late|service dates missing/i.test(values[i]||'') ? rgb(0.57,0.32,0.05) : isStatus && /^(paid|valid|working|yes)$/i.test(values[i]||'') ? rgb(0.10,0.38,0.22) : INK;
+        const statusColor = isStatus && /expired|overdue|not working|scrapped|rejected|action required|^no$/i.test(values[i]||'') ? rgb(0.64,0.12,0.12) : isStatus && /pending|expiring|partial|review|paid late|service dates missing/i.test(values[i]||'') ? rgb(0.57,0.32,0.05) : isStatus && /^(paid|valid|working|yes)$/i.test(values[i]||'') ? rgb(0.10,0.38,0.22) : INK;
         const cellLines = parsed[i] || [EMPTY_CELL];
         let textY = y - (height - cellLines.length * (header ? 8.2 : 9)) / 2 - 7.3;
         for (const text of cellLines) {

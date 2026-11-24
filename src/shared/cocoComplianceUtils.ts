@@ -168,7 +168,19 @@ export const STANDARD_COCO_CATEGORIES: readonly StandardCocoCategoryDef[] = [
     supportsAmount: true,
     description: 'Staff wages, PF/ESIC statutory compliance, incentives, and miscellaneous bills',
   },
+  {
+    srNo: 14,
+    code: 'BIOMETRIC_ATTENDANCE',
+    particular: 'Biometric Attendance',
+    defaultFrequency: 'On Verification',
+    linkedModule: 'MANUAL',
+    supportsServiceDate: false,
+    supportsAmount: false,
+    description: 'Whether the outlet has a working biometric attendance system (Yes / No); no employee biometric data is collected',
+  },
 ] as const;
+
+export const BIOMETRIC_ATTENDANCE_CODE = 'BIOMETRIC_ATTENDANCE';
 
 // Legacy category is retained in storage for audit purposes, not in active reporting.
 export const isRetiredCocoCategory = (code: string): boolean => code.trim().toUpperCase() === 'PPL_LICENCE';
@@ -359,6 +371,13 @@ export function evaluateComplianceStatus(params: {
   documentValidityStatus: 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' | 'NOT_RECORDED' | 'NOT_APPLICABLE';
   daysUntilDue: number | null;
 } {
+  if (params.categoryCode === BIOMETRIC_ATTENDANCE_CODE) {
+    const complianceStatus: CocoComplianceStatus = !params.hasRecordOrModuleData || params.statusYesNo === 'NOT_RECORDED' ? 'NOT_RECORDED'
+      : params.statusYesNo === 'NO' ? 'ACTION_REQUIRED'
+      : params.statusYesNo === 'YES' ? (params.actionRequired?.trim() ? 'ACTION_REQUIRED' : 'VALID')
+      : 'NOT_APPLICABLE';
+    return {complianceStatus,documentValidityStatus:complianceStatus === 'NOT_RECORDED' ? 'NOT_RECORDED' : 'NOT_APPLICABLE',daysUntilDue:null};
+  }
   const daysUntilDue = computeDaysBetweenDates(params.reportDate, params.validityDueDate);
   const documentValidityStatus = evaluateDocumentValidityStatus({
     hasRecordOrModuleData: params.hasRecordOrModuleData,
@@ -569,6 +588,7 @@ export function buildDueDatesAndActionsSummary(
 export function getCocoReportStatus(item: CocoComplianceMergedItem): string {
   if (item.complianceStatus === 'NOT_RECORDED') return 'Not Recorded';
   if (item.complianceStatus === 'NOT_APPLICABLE' || item.statusYesNo === 'NA') return 'N/A';
+  if (item.categoryCode === BIOMETRIC_ATTENDANCE_CODE) return item.statusYesNo === 'YES' ? 'Yes' : item.statusYesNo === 'NO' ? 'No' : 'Not Recorded';
   if (item.linkedModuleData?.reportStatusLabel) return item.linkedModuleData.reportStatusLabel;
   if (isRecurringPaymentCategory(item.categoryCode)) {
     const due = item.linkedModuleData ? item.linkedModuleData.paymentDueDate : item.validityDueDate;

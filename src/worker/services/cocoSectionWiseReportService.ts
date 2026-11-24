@@ -301,6 +301,7 @@ export function buildSectionWiseSections(args: {
     ['GENERATOR_MAINTENANCE', 'Generator'],
     ['CCTV_HEALTH_STATUS', 'CCTV Service / Inspection'],
     ['FIRE_EXTINGUISHER_REFILLING', 'Fire Extinguisher Refilling Service'],
+    ['BIOMETRIC_ATTENDANCE', 'Biometric Attendance'],
   ];
   const maintenanceRows = maintenanceDefs.map(([code, label], index) => {
     const i = item(code);

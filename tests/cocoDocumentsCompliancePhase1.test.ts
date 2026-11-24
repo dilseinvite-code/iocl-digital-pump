@@ -124,7 +124,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     return new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
   }
 
-  it('1. preconfigures all 13 standard categories in exact order and supports custom categories without modifying predefined ones', async () => {
+  it('1. preconfigures all 14 standard categories in exact order and supports custom categories without modifying predefined ones', async () => {
     const adminCookie = await loginAs('admin@iocl.in');
 
     // Verify categories endpoint
@@ -136,7 +136,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect(catRes.status).toBe(200);
     const catBody = (await catRes.json()) as any;
     expect(catBody.success).toBe(true);
-    expect(catBody.data).toHaveLength(13);
+    expect(catBody.data).toHaveLength(14);
     expect(catBody.data.map((c: any) => c.particular)).toEqual([
       'PESO Licence',
       'Property Tax',
@@ -151,6 +151,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
       'CCTV Health Status',
       'Service Provider Contract Agreement',
       'Wages, Incentives & Miscellaneous Bills',
+      'Biometric Attendance',
     ]);
 
     // Add a custom category record for OUTLET_1_ID
@@ -185,7 +186,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     );
     expect(createCustomRes.status).toBe(201);
 
-    // Fetch register and verify 13 standard categories remain untouched in 1..13 order + custom category at #14
+    // Fetch register and verify 14 standard categories remain untouched in 1..14 order + custom category at #15
     const regRes = await app.request(
       `/api/v1/documents/compliance/register?outletId=${OUTLET_1_ID}&reportDate=2026-04-15`,
       { headers: { Cookie: adminCookie } },
@@ -193,13 +194,13 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     );
     expect(regRes.status).toBe(200);
     const regBody = (await regRes.json()) as any;
-    expect(regBody.data.items).toHaveLength(14);
-    expect(regBody.data.items.slice(0, 13).map((i: any) => i.categoryName)).toEqual(
+    expect(regBody.data.items).toHaveLength(15);
+    expect(regBody.data.items.slice(0, 14).map((i: any) => i.categoryName)).toEqual(
       STANDARD_COCO_CATEGORIES.map((c) => c.particular)
     );
-    expect(regBody.data.items[13].categoryName).toBe('Pollution Control Board Consent (CTO)');
-    expect(regBody.data.items[13].isCustomCategory).toBe(true);
-    expect(regBody.data.items[13].complianceStatus).toBe('VALID');
+    expect(regBody.data.items[14].categoryName).toBe('Pollution Control Board Consent (CTO)');
+    expect(regBody.data.items[14].isCustomCategory).toBe(true);
+    expect(regBody.data.items[14].complianceStatus).toBe('VALID');
   });
 
   it('2. never treats missing records as valid, paid, or verified (defaults to NOT_RECORDED)', async () => {
@@ -214,15 +215,15 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect(regRes.status).toBe(200);
     const regBody = (await regRes.json()) as any;
 
-    expect(regBody.data.items).toHaveLength(13);
+    expect(regBody.data.items).toHaveLength(14);
     for (const item of regBody.data.items) {
       expect(item.complianceStatus).toBe('NOT_RECORDED');
       expect(item.paymentStatus).toBe('NOT_RECORDED');
       expect(item.documentValidityStatus).toBe('NOT_RECORDED');
     }
-    expect(regBody.data.summary.notRecordedCount).toBe(13);
+    expect(regBody.data.summary.notRecordedCount).toBe(14);
     expect(regBody.data.summary.validCount).toBe(0);
-    expect(regBody.data.dueDatesAndActions.notRecorded).toHaveLength(13);
+    expect(regBody.data.dueDatesAndActions.notRecorded).toHaveLength(14);
   });
 
   it('hides stored retired PPL records without deleting them or allowing new writes', async () => {
@@ -241,8 +242,8 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect(response.status).toBe(200);
     const data=((await response.json()) as any).data;
     expect(data.items.some((i:any)=>i.categoryCode==='PPL_LICENCE')).toBe(false);
-    expect(data.items).toHaveLength(13);
-    expect(data.items.map((i:any)=>i.srNo)).toEqual(Array.from({length:13},(_,i)=>i+1));
+    expect(data.items).toHaveLength(14);
+    expect(data.items.map((i:any)=>i.srNo)).toEqual(Array.from({length:14},(_,i)=>i+1));
     const preview=await app.request('/api/v1/documents/compliance/one-pager?outletId='+OUTLET_3_ID,
       {headers:{Cookie:adminCookie}},env);
     const report=((await preview.json()) as any).data;
@@ -723,7 +724,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect(waterBill.complianceStatus).toBe('VALID');
   });
 
-  it('7. generates a valid printable A4 Portrait One-Pager PDF with all 13 standard rows and annex overflow support', async () => {
+  it('7. generates a valid printable A4 Portrait One-Pager PDF with all 14 standard rows and annex overflow support', async () => {
     const adminCookie = await loginAs('admin@iocl.in');
 
     // Rename OUTLET_1_ID to COCO IT Park — 373196 for exact reference alignment
@@ -769,7 +770,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     const previewData = ((await previewRes.json()) as any).data;
     expect(previewData.outletName).toBe('COCO IT Park');
     expect(previewData.roCode).toBe('373196');
-    expect(previewData.rows).toHaveLength(13);
+    expect(previewData.rows).toHaveLength(14);
     expect(previewData.rows[0].particular).toBe('PESO Licence');
     expect(previewData.rows[0].statusYesNoDisplay).toBe('Valid');
     expect(previewData.rows[0].amountInrDisplay).toContain('20,000');
@@ -797,6 +798,28 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     const { width, height } = page1.getSize();
     expect(width).toBeCloseTo(595.28, 1);
     expect(height).toBeCloseTo(841.89, 1);
+  });
+
+  it('records biometric presence explicitly and independently per outlet without financial fields', async () => {
+    const cookie=await loginAs('admin@iocl.in');
+    const headers={Cookie:cookie,'Content-Type':'application/json',Origin:'http://localhost:3000'};
+    const save=async(statusYesNo?:string)=>app.request('/api/v1/documents/compliance/records',{method:'POST',headers,body:JSON.stringify({outletId:OUTLET_3_ID,categoryCode:'BIOMETRIC_ATTENDANCE',statusYesNo,paymentStatus:'PENDING',amountPaise:9999,validityDueDate:'2020-01-01'})},env);
+    const preview=async(outletId:string)=>{const res=await app.request('/api/v1/documents/compliance/one-pager?outletId='+outletId,{headers},env);expect(res.status).toBe(200);return ((await res.json()) as any).data.rows.find((r:any)=>r.categoryCode==='BIOMETRIC_ATTENDANCE');};
+    expect((await preview(OUTLET_3_ID)).statusYesNoDisplay).toBe('Not Recorded');
+    expect((await save()).status).toBe(201);
+    expect((await preview(OUTLET_3_ID)).statusYesNoDisplay).toBe('Not Recorded');
+    expect((await save('NO')).status).toBe(200);
+    expect(await preview(OUTLET_3_ID)).toMatchObject({statusYesNoDisplay:'No',complianceStatus:'ACTION_REQUIRED',paymentStatus:'NOT_APPLICABLE',amountInrDisplay:'-'});
+    const detail=await app.request('/api/v1/documents/compliance/section-wise?outletId='+OUTLET_3_ID,{headers},env);
+    expect(detail.status).toBe(200);
+    const data=((await detail.json()) as any).data;
+    const tables=data.sections.flatMap((s:any)=>s.tables);
+    expect(tables.some((t:any)=>t.title==='4C. Biometric Attendance')).toBe(false);
+    expect(tables.find((t:any)=>t.title==='4B. Preventive Maintenance & Services').rows.find((row:any)=>row[1]==='Biometric Attendance')[2]).toBe('No');
+    expect((await save('YES')).status).toBe(200);
+    expect(await preview(OUTLET_3_ID)).toMatchObject({statusYesNoDisplay:'Yes',complianceStatus:'VALID'});
+    expect((await preview(OUTLET_1_ID)).statusYesNoDisplay).toBe('Not Recorded');
+    expect((await save('NA')).status).toBe(400);
   });
 
   it('8. preserves all existing tanks, calibration charts, operational shifts, and R2 documents', async () => {
