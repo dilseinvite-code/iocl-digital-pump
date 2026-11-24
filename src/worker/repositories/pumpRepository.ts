@@ -3257,7 +3257,7 @@ export class PumpRepository {
     await this.ensureInitialCalibrationChartForLegacyPoints(tankId,actorUserId);
     const charts=await this.listCalibrationCharts(tankId);
     const oldActive=charts.find(c=>c.status==='ACTIVE')||null;
-    if(oldActive?.sourceTemplateId===source.id){
+    if(oldActive && oldActive.sourceTemplateId===source.id){
       const oldRows=await this.listCalibrationPoints(tankId,{chartId:oldActive.id});
       if(matchesExactOperatorPdfRows(tank.capacityLitres,oldRows)){
         return {chart:oldActive,previousActiveChartId:oldActive.id,alreadyApplied:true};
