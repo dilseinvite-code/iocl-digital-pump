@@ -28,6 +28,7 @@ import {
   formatIndianCurrencyFromPaise,
   LinkedModuleSummary,
   STANDARD_CATEGORY_MAP,
+  isRetiredCocoCategory,
   STANDARD_COCO_CATEGORIES,
   toCocoOnePagerRow,
 } from '../../shared/cocoComplianceUtils';
@@ -362,7 +363,7 @@ export class CocoComplianceService {
   }
 
   /**
-   * Builds the full list of merged compliance records (all 14 standard categories in predefined order
+   * Builds the full list of merged compliance records (all 13 standard categories in predefined order
    * plus any custom categories for the outlet), integrating authoritative linked modules and flagging discrepancies.
    */
   async getOutletComplianceRegister(params: {
@@ -429,7 +430,7 @@ export class CocoComplianceService {
 
     const mergedItems: CocoComplianceMergedItem[] = [];
 
-    // 1. Process all 14 predefined categories in exact order (1..14)
+    // 1. Process all predefined categories in exact order
     for (const stdCat of STANDARD_COCO_CATEGORIES) {
       const manualRec = recordByCategoryCode.get(stdCat.code) || null;
       const linked = linkedModules.get(stdCat.code) || null;
@@ -452,7 +453,7 @@ export class CocoComplianceService {
 
     // 2. Process any custom categories for this outlet
     const customRecs = dbRecords
-      .filter((r) => !STANDARD_CATEGORY_MAP.has(r.categoryCode))
+      .filter((r) => !STANDARD_CATEGORY_MAP.has(r.categoryCode) && !isRetiredCocoCategory(r.categoryCode))
       .sort((a, b) => a.displayOrder - b.displayOrder || a.categoryName.localeCompare(b.categoryName));
 
     let nextSrNo = STANDARD_COCO_CATEGORIES.length + 1;
@@ -762,6 +763,9 @@ export class CocoComplianceService {
       throw new CocoComplianceError('INVALID_CATEGORY', 'Category code is required.', 400);
     }
 
+    if (isRetiredCocoCategory(rawCategoryCode)) {
+      throw new CocoComplianceError('RETIRED_CATEGORY', 'This compliance category is no longer available in the active register.', 400);
+    }
     const stdDef = STANDARD_CATEGORY_MAP.get(rawCategoryCode);
     const isCustomCategory = !stdDef;
     const categoryName = stdDef

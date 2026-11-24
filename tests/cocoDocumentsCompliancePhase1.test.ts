@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm';
 import { PDFDocument } from 'pdf-lib';
 import {
   auditLogs,
+  cocoComplianceRecords,
   documents,
   municipalTaxDues,
   nfrLeases,
@@ -123,7 +124,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     return new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
   }
 
-  it('1. preconfigures all 14 standard categories in exact order and supports custom categories without modifying predefined ones', async () => {
+  it('1. preconfigures all 13 standard categories in exact order and supports custom categories without modifying predefined ones', async () => {
     const adminCookie = await loginAs('admin@iocl.in');
 
     // Verify categories endpoint
@@ -135,20 +136,19 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect(catRes.status).toBe(200);
     const catBody = (await catRes.json()) as any;
     expect(catBody.success).toBe(true);
-    expect(catBody.data).toHaveLength(14);
+    expect(catBody.data).toHaveLength(13);
     expect(catBody.data.map((c: any) => c.particular)).toEqual([
       'PESO Licence',
       'Property Tax',
       'Lease Rent',
       'Electricity Bill',
       'Water Bill',
-      'Water Cooler Maintenance',
+      'Water Cooler',
       'Weights & Measures Stamping',
       'Fire Extinguisher Refilling',
       'POS / Automation',
-      'Generator Maintenance',
+      'Generator',
       'CCTV Health Status',
-      'Public Performance Licence (PPL)',
       'Service Provider Contract Agreement',
       'Wages, Incentives & Miscellaneous Bills',
     ]);
@@ -185,7 +185,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     );
     expect(createCustomRes.status).toBe(201);
 
-    // Fetch register and verify 14 standard categories remain untouched in 1..14 order + custom category at #15
+    // Fetch register and verify 13 standard categories remain untouched in 1..13 order + custom category at #14
     const regRes = await app.request(
       `/api/v1/documents/compliance/register?outletId=${OUTLET_1_ID}&reportDate=2026-04-15`,
       { headers: { Cookie: adminCookie } },
@@ -193,13 +193,13 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     );
     expect(regRes.status).toBe(200);
     const regBody = (await regRes.json()) as any;
-    expect(regBody.data.items).toHaveLength(15);
-    expect(regBody.data.items.slice(0, 14).map((i: any) => i.categoryName)).toEqual(
+    expect(regBody.data.items).toHaveLength(14);
+    expect(regBody.data.items.slice(0, 13).map((i: any) => i.categoryName)).toEqual(
       STANDARD_COCO_CATEGORIES.map((c) => c.particular)
     );
-    expect(regBody.data.items[14].categoryName).toBe('Pollution Control Board Consent (CTO)');
-    expect(regBody.data.items[14].isCustomCategory).toBe(true);
-    expect(regBody.data.items[14].complianceStatus).toBe('VALID');
+    expect(regBody.data.items[13].categoryName).toBe('Pollution Control Board Consent (CTO)');
+    expect(regBody.data.items[13].isCustomCategory).toBe(true);
+    expect(regBody.data.items[13].complianceStatus).toBe('VALID');
   });
 
   it('2. never treats missing records as valid, paid, or verified (defaults to NOT_RECORDED)', async () => {
@@ -214,15 +214,45 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect(regRes.status).toBe(200);
     const regBody = (await regRes.json()) as any;
 
-    expect(regBody.data.items).toHaveLength(14);
+    expect(regBody.data.items).toHaveLength(13);
     for (const item of regBody.data.items) {
       expect(item.complianceStatus).toBe('NOT_RECORDED');
       expect(item.paymentStatus).toBe('NOT_RECORDED');
       expect(item.documentValidityStatus).toBe('NOT_RECORDED');
     }
-    expect(regBody.data.summary.notRecordedCount).toBe(14);
+    expect(regBody.data.summary.notRecordedCount).toBe(13);
     expect(regBody.data.summary.validCount).toBe(0);
-    expect(regBody.data.dueDatesAndActions.notRecorded).toHaveLength(14);
+    expect(regBody.data.dueDatesAndActions.notRecorded).toHaveLength(13);
+  });
+
+  it('hides stored retired PPL records without deleting them or allowing new writes', async () => {
+    const adminCookie = await loginAs('admin@iocl.in');
+    const db = getDb(localD1);
+    const now = new Date().toISOString();
+    await db.insert(cocoComplianceRecords).values({
+      id:'legacy-ppl', outletId:OUTLET_3_ID, roCodeSnapshot:'legacy',
+      categoryCode:'PPL_LICENCE', categoryName:'Public Performance Licence (PPL)',
+      displayOrder:12, isCustomCategory:0, paymentStatus:'NOT_RECORDED',
+      complianceStatus:'NOT_RECORDED', statusYesNo:'NOT_RECORDED',
+      attachmentDocumentIdsJson:'[]', createdBy:'user-admin', updatedBy:'user-admin', createdAt:now, updatedAt:now,
+    });
+    const response = await app.request('/api/v1/documents/compliance/register?outletId='+OUTLET_3_ID,
+      {headers:{Cookie:adminCookie}},env);
+    expect(response.status).toBe(200);
+    const data=((await response.json()) as any).data;
+    expect(data.items.some((i:any)=>i.categoryCode==='PPL_LICENCE')).toBe(false);
+    expect(data.items).toHaveLength(13);
+    expect(data.items.map((i:any)=>i.srNo)).toEqual(Array.from({length:13},(_,i)=>i+1));
+    const preview=await app.request('/api/v1/documents/compliance/one-pager?outletId='+OUTLET_3_ID,
+      {headers:{Cookie:adminCookie}},env);
+    const report=((await preview.json()) as any).data;
+    expect([...report.rows,...report.customRows].some((i:any)=>i.categoryCode==='PPL_LICENCE')).toBe(false);
+    const write=await app.request('/api/v1/documents/compliance/records',{
+      method:'POST',headers:{Cookie:adminCookie,'Content-Type':'application/json',Origin:'http://localhost:3000'},
+      body:JSON.stringify({outletId:OUTLET_3_ID,categoryCode:'PPL_LICENCE',categoryName:'PPL'})
+    },env);
+    expect(write.status).toBe(400);
+    expect(await db.select().from(cocoComplianceRecords).where(eq(cocoComplianceRecords.id,'legacy-ppl')).get()).toBeTruthy();
   });
 
   it('3. creates and updates compliance records across categories and writes audit logs', async () => {
@@ -693,7 +723,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect(waterBill.complianceStatus).toBe('VALID');
   });
 
-  it('7. generates a valid printable A4 Portrait One-Pager PDF with all 14 standard rows and annex overflow support', async () => {
+  it('7. generates a valid printable A4 Portrait One-Pager PDF with all 13 standard rows and annex overflow support', async () => {
     const adminCookie = await loginAs('admin@iocl.in');
 
     // Rename OUTLET_1_ID to COCO IT Park — 373196 for exact reference alignment
@@ -739,7 +769,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     const previewData = ((await previewRes.json()) as any).data;
     expect(previewData.outletName).toBe('COCO IT Park');
     expect(previewData.roCode).toBe('373196');
-    expect(previewData.rows).toHaveLength(14);
+    expect(previewData.rows).toHaveLength(13);
     expect(previewData.rows[0].particular).toBe('PESO Licence');
     expect(previewData.rows[0].statusYesNoDisplay).toBe('Yes');
     expect(previewData.rows[0].amountInrDisplay).toContain('20,000');

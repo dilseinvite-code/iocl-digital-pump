@@ -206,7 +206,7 @@ export class CocoCompliancePdfService {
     cursorY -= summaryHeight + 6;
 
     // =========================================================================
-    // 3. 14-CATEGORY TABLE HEADER
+    // 3. COMPLIANCE TABLE HEADER
     // =========================================================================
     const drawTableHeader = (page: PDFPage, topY: number): number => {
       const thHeight = 24;
@@ -264,7 +264,7 @@ export class CocoCompliancePdfService {
     cursorY = drawTableHeader(page1, cursorY);
 
     // =========================================================================
-    // 4. 14 STANDARD ROWS (Guaranteed to fit on Page 1 without clipping)
+    // 4. STANDARD ROWS (Guaranteed to fit on Page 1 without clipping)
     // =========================================================================
     const footerReserveHeight = 42;
     const availableTableHeight = cursorY - (MARGIN_BOTTOM + footerReserveHeight);
@@ -272,7 +272,7 @@ export class CocoCompliancePdfService {
     const lineHeight = 9.2;
     const cellPaddingY = 4.5;
 
-    // Pre-wrap all 14 rows; if total height exceeds availableTableHeight, cap remarks on Page 1 to 3 lines
+    // Pre-wrap all standard rows; if total height exceeds availableTableHeight, cap remarks on Page 1 to 3 lines
     // and place full extended remarks in an Annex page so no text is ever clipped!
     const annexItems: Array<{ srNo: number; particular: string; fullRemarks: string }> = [];
 

@@ -194,7 +194,7 @@ export const DocumentsPage: React.FC = () => {
       notRecorded: [],
     });
   const EMPTY_SUMMARY: CocoOnePagerReport['summary'] = {
-    totalCategories: 14,
+    totalCategories: STANDARD_COCO_CATEGORIES.length,
     validCount: 0,
     expiringSoonCount: 0,
     expiredCount: 0,
@@ -1447,7 +1447,7 @@ export const DocumentsPage: React.FC = () => {
             </button>
           </div>
 
-          {/* 14-Category Printable Preview Table */}
+          {/* Compliance Printable Preview Table */}
           <div className="bg-white border border-[#E2E8F0] rounded-xl overflow-hidden">
             <div className="admin-table-scroll overflow-x-auto" role="region" aria-label="Scrollable administration table" tabIndex={0}>
               <table className="w-full text-left border-collapse">

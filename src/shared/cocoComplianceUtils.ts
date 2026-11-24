@@ -91,7 +91,7 @@ export const STANDARD_COCO_CATEGORIES: readonly StandardCocoCategoryDef[] = [
   {
     srNo: 6,
     code: 'WATER_COOLER_MAINTENANCE',
-    particular: 'Water Cooler Maintenance',
+    particular: 'Water Cooler',
     defaultFrequency: 'Quarterly / Half-Yearly',
     linkedModule: 'MANUAL',
     supportsServiceDate: true,
@@ -131,7 +131,7 @@ export const STANDARD_COCO_CATEGORIES: readonly StandardCocoCategoryDef[] = [
   {
     srNo: 10,
     code: 'GENERATOR_MAINTENANCE',
-    particular: 'Generator Maintenance',
+    particular: 'Generator',
     defaultFrequency: 'Half-Yearly / Yearly',
     linkedModule: 'MANUAL',
     supportsServiceDate: true,
@@ -150,16 +150,6 @@ export const STANDARD_COCO_CATEGORIES: readonly StandardCocoCategoryDef[] = [
   },
   {
     srNo: 12,
-    code: 'PPL_LICENCE',
-    particular: 'Public Performance Licence (PPL)',
-    defaultFrequency: 'Yearly',
-    linkedModule: 'MANUAL',
-    supportsServiceDate: false,
-    supportsAmount: true,
-    description: 'Public Performance Licence or Not-Applicable declaration',
-  },
-  {
-    srNo: 13,
     code: 'SERVICE_PROVIDER_CONTRACT',
     particular: 'Service Provider Contract Agreement',
     defaultFrequency: 'Tenure / Yearly',
@@ -169,7 +159,7 @@ export const STANDARD_COCO_CATEGORIES: readonly StandardCocoCategoryDef[] = [
     description: 'COCO operator / M&H contractor agreement validity and renewal status',
   },
   {
-    srNo: 14,
+    srNo: 13,
     code: 'WAGES_INCENTIVES_MISC',
     particular: 'Wages, Incentives & Miscellaneous Bills',
     defaultFrequency: 'Monthly',
@@ -179,6 +169,9 @@ export const STANDARD_COCO_CATEGORIES: readonly StandardCocoCategoryDef[] = [
     description: 'Staff wages, PF/ESIC statutory compliance, incentives, and miscellaneous bills',
   },
 ] as const;
+
+// Legacy category is retained in storage for audit purposes, not in active reporting.
+export const isRetiredCocoCategory = (code: string): boolean => code.trim().toUpperCase() === 'PPL_LICENCE';
 
 export const STANDARD_CATEGORY_MAP = new Map<string, StandardCocoCategoryDef>(
   STANDARD_COCO_CATEGORIES.map((cat) => [cat.code, cat])

@@ -302,9 +302,9 @@ export function buildSectionWiseSections(args: {
       manufacturers.length ? manufacturers.join(', ') : NR, date(last), remarks];
   });
   const maintenanceDefs = [
-    ['WATER_COOLER_MAINTENANCE', 'Water Cooler Maintenance'],
+    ['WATER_COOLER_MAINTENANCE', 'Water Cooler'],
     ['POS_AUTOMATION', 'POS / Automation Maintenance'],
-    ['GENERATOR_MAINTENANCE', 'Generator Maintenance'],
+    ['GENERATOR_MAINTENANCE', 'Generator'],
     ['CCTV_HEALTH_STATUS', 'CCTV Service / Inspection'],
     ['FIRE_EXTINGUISHER_REFILLING', 'Fire Extinguisher Refilling Service'],
   ];
@@ -429,7 +429,7 @@ export function buildSectionWiseSections(args: {
           ] },
       ],
       noteTitle: 'Source / Missing Data',
-      note: 'Public Performance Licence (PPL) is intentionally excluded from this section-wise export. The existing 14-category compliance register remains unchanged.',
+      note: 'Certificate status reflects recorded validity and supporting evidence.',
     },
     {
       title: 'Maintenance & Assets',
