@@ -156,4 +156,36 @@ describe('Admin fresh start: archive all old calibration, preserve historic stoc
    expect(points).toHaveLength(195);
  });
 
+ it('does not resurrect orphan legacy calibration points after the all-chart reset',async()=>{
+   const db=getDb(localD1),now=new Date().toISOString(),id='legacy-only-reset-tank';
+   await db.insert(schema.tanks).values({
+     id,outletId:'ro-1001',tankNumber:99,name:'Old unversioned 10KL tank',
+     productId:'prod-ms',capacityLitres:10000,safeFillCapacityLitres:9000,
+     minimumOperatingLevelLitres:0,status:'ACTIVE',createdAt:now,updatedAt:now,
+     createdBy:'user-admin'
+   });
+   await db.insert(schema.tankCalibrationPoints).values([
+     {id:'legacy-unlinked-zero',chartId:null,tankId:id,dipMillimetresMilliunits:0,
+       volumeMilliunits:0,createdAt:now,createdBy:'user-admin'},
+     {id:'legacy-unlinked-ten',chartId:null,tankId:id,dipMillimetresMilliunits:10000,
+       volumeMilliunits:6900,createdAt:now,createdBy:'user-admin'},
+   ]);
+   const reset=await request('POST','/calibration-templates/reset-all',{
+     confirm:'CLEAR ALL CALIBRATION'
+   });
+   expect(reset.status).toBe(200);
+   const view=await request('GET','/tanks/'+id+'/calibration');
+   expect(view.status).toBe(200);
+   const body=(await view.json() as any);
+   expect(body.data).toHaveLength(0);
+   expect(body.activeChart).toBeNull();
+   const charts=await db.select().from(schema.tankCalibrationCharts)
+     .where(eq(schema.tankCalibrationCharts.tankId,id));
+   expect(charts).toHaveLength(0);
+   const oldPoints=await db.select().from(schema.tankCalibrationPoints)
+     .where(eq(schema.tankCalibrationPoints.tankId,id));
+   expect(oldPoints).toHaveLength(2);
+   expect(oldPoints.every(p=>p.chartId===null)).toBe(true);
+ });
+
 });
