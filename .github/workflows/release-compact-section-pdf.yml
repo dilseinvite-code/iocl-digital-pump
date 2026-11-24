@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy single Biometric Attendance compliance row (PR 118)
+    name: Verify and deploy tank calibration loading-state fix (PR 119)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
