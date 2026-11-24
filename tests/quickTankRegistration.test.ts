@@ -8,6 +8,7 @@ import { seedDatabase } from '../src/db/seed';
 import {parseSimpleCalibrationCsv} from '../src/frontend/components/pump/simpleCalibrationCsv';
 import {join} from 'node:path';
 import {SCANNED_CALIBRATION_REFERENCES} from '../src/shared/scannedCalibrationReference';
+import {operatorPdfSource} from '../src/shared/operatorPdfSourceData';
 import { and, eq } from 'drizzle-orm';
 
 const requirePdfCsv=(kl:10|20)=>{
@@ -411,6 +412,66 @@ describe('Two-input global-calibration tank registration', () => {
     expect(tank.status).toBe('ACTIVE');
     expect((await db.select().from(schema.tankCalibrationPoints)
       .where(eq(schema.tankCalibrationPoints.chartId,linkedChart.id))).length).toBe(spec.expectedPoints);
+  });
+
+  it.each([10,20] as const)('creates a separate immutable %iKL PDF source through the API and reuses it for a new tank',async kl=>{
+    const source=operatorPdfSource(kl*1000)!;
+    const imported=await request('POST','/calibration-templates',{
+      ...source,status:'APPROVED',allowOverCapacity:true,
+      sourceFileName:'Calibration Chart.pdf',
+      notes:'Operator-supplied scanned chart revision, user confirmed 202cm 20KL reading.',
+    });
+    expect(imported.status).toBe(201);
+    const record=(await imported.json() as any).data;
+    expect(record.code).toBe(source.code);
+    expect(record.status).toBe('APPROVED');
+    expect(record.pointsCount).toBe(source.points.length);
+    expect(record.maxVolumeLitres).toBe(source.maxVolumeLitres);
+    const db=getDb(localD1);
+    const original=await db.select().from(schema.globalTankCalibrationTemplatePoints)
+      .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,record.id));
+    expect(original.length).toBe(source.points.length);
+    const normalized=(rows:ReadonlyArray<{dipMillimetresMilliunits:number;volumeMilliunits:number}>)=>
+      rows.map(p=>[p.dipMillimetresMilliunits,p.volumeMilliunits]).sort((a,b)=>a[0]-b[0]);
+    const expected=source.points.map(p=>({
+      dipMillimetresMilliunits:p.dipMm*1000,volumeMilliunits:Math.round(p.volumeLitres*1000)
+    }));
+    expect(normalized(original)).toEqual(normalized(expected));
+    if(kl===20){
+      expect(original.find(p=>p.dipMillimetresMilliunits===2020000)?.volumeMilliunits).toBe(21359520);
+    }
+    const duplicate=await request('POST','/calibration-templates',{
+      ...source,status:'APPROVED',allowOverCapacity:true,
+    });
+    expect(duplicate.status).toBe(409);
+    const tampered={...source,points:source.points.map((p,i)=>i===202?{
+      ...p,volumeLitres:p.volumeLitres+10,
+    }:p)};
+    if(kl===20){
+      const invalid=await request('POST','/calibration-templates',{
+        ...tampered,status:'APPROVED',allowOverCapacity:true,
+      });
+      expect(invalid.status).toBe(409);
+      expect(((await invalid.json()) as any).error.code).toBe('PDF_SOURCE_ROWS_MISMATCH');
+    }
+    const pending=await request('POST','/outlets/ro-1001/tanks/quick-register',{
+      name:'PDF '+kl+' KL reference tank',capacityLitres:kl*1000,
+    });
+    expect(pending.status).toBe(201);
+    const registration=(await pending.json() as any).data;
+    expect(registration.templateId).toBe(record.id);
+    const finalized=await request('POST','/outlets/ro-1001/pending-tanks/'+registration.id+'/finalize',{productId:'prod-ms'});
+    expect(finalized.status).toBe(201);
+    const tank=(await finalized.json() as any).data;
+    expect(tank.status).toBe('INACTIVE');
+    expect(tank.calibrationStatus).toBe('ACTIVE');
+    expect(tank.pointsCount).toBe(source.points.length);
+    const [linked]=await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId,tank.id));
+    expect(linked.sourceTemplateId).toBe(record.id);
+    const copied=await db.select().from(schema.tankCalibrationPoints)
+      .where(eq(schema.tankCalibrationPoints.chartId,linked.id));
+    expect(normalized(copied)).toEqual(normalized(expected));
   });
 
 });
