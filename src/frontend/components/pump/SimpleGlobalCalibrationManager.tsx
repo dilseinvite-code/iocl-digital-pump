@@ -56,8 +56,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const [acknowledgedApproval,setAcknowledgedApproval]=useState(false);
   const [installingPdf,setInstallingPdf]=useState(false);
   const [resetPreview,setResetPreview]=useState<{
-    globalSourcesToArchive:number;tankChartsToArchive:number;defaultChartMappingsToClear:number;
-    activeTanksToInactivate:number;openOrClosingShifts:number;
+    oldGlobalSources:number;oldTankRevisions:number;
+    oldUnreferencedTankRevisions:number;protectedHistoricalRevisions:number;
+    activeTanksToInactivate:number;existingDefaultMappings:number;
+    openOrClosingShifts:number;replacement10klPoints:number;replacement20klPoints:number;
   }|null>(null);
   const [resetText,setResetText]=useState('');
   const [resetBusy,setResetBusy]=useState(false);
@@ -159,25 +161,29 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     setError('');setNotice('');setResetText('');setShowReset(true);
     try{
       const res=await apiFetch<{
-        globalSourcesToArchive:number;tankChartsToArchive:number;
-        defaultChartMappingsToClear:number;activeTanksToInactivate:number;openOrClosingShifts:number;
-      }>('/api/v1/calibration-templates/reset-all-preview',{cache:'no-store'});
+        oldGlobalSources:number;oldTankRevisions:number;
+        oldUnreferencedTankRevisions:number;protectedHistoricalRevisions:number;
+        activeTanksToInactivate:number;existingDefaultMappings:number;
+        openOrClosingShifts:number;replacement10klPoints:number;replacement20klPoints:number;
+      }>('/api/v1/calibration-templates/replace-10-20-preview',{cache:'no-store'});
       if(!res.success||!res.data)throw new Error(res.error?.message||'Cannot preview calibration reset.');
       setResetPreview(res.data);
-    }catch(e:any){setError(e.message||'Cannot preview reset');setResetPreview(null);}
+    }catch(e:any){setError(e.message==='Global calibration template not found'
+ ? 'Backend API is outdated. The 10/20 KL replacement route must be deployed to Cloudflare Worker before resetting.'
+ : e.message||'Cannot preview calibration replacement');setResetPreview(null);}
   };
   const resetAllCalibration=async()=>{
-    if(resetBusy||resetText!=='CLEAR ALL CALIBRATION'||!canResetAllCalibration)return;
+    if(resetBusy||resetText!=='REPLACE 10KL 20KL'||!canResetAllCalibration)return;
     setResetBusy(true);setError('');
     try{
-      const res=await apiFetch<{message:string}>('/api/v1/calibration-templates/reset-all',{
+      const res=await apiFetch<{message:string}>('/api/v1/calibration-templates/replace-10-20',{
         method:'POST',body:JSON.stringify({confirm:resetText})
       });
       if(!res.success)throw new Error(res.error?.message||'Could not reset calibration.');
       clearApiCache();await Promise.all([loadTemplates(),loadDefaults()]);
       setDetail(null);setShowReset(false);setResetPreview(null);setResetText('');
       setShowAllCharts(false);setShowImport(true);setCreatingCustom(true);
-      setNotice('All previous calibration sources and active tank charts have been archived. Historical stock is preserved. Upload your new calibration readings.');
+      setNotice('Old 10/20 KL readings removed from operational use. New PDF references (195/211 readings) are saved. Reactivate 10/20 KL tanks after linking their new chart; 15/50 KL unchanged.');
     }catch(e:any){setError(e.message||'Reset failed.');}
     finally{setResetBusy(false);}
   };
@@ -322,7 +328,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         {canResetAllCalibration&&<button type="button" data-testid="reset-all-calibration-open"
           onClick={()=>{void showCalibrationReset();}}
           className="ml-2 rounded-lg border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-800">
-          Clear all previous calibrations
+          Replace old 10 / 20 KL charts
         </button>}
         <button type="button" onClick={()=>setShowImport(v=>!v)}
           className="ml-2 rounded-lg bg-[#17365D] px-4 py-2 text-sm font-semibold text-white">
@@ -339,29 +345,32 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
 
     {showReset&&canResetAllCalibration&&<section className="space-y-3 rounded-2xl border border-rose-300 bg-rose-50 p-5"
       data-testid="confirm-calibration-reset">
-      <h3 className="text-base font-bold text-rose-900">Start calibration from zero</h3>
-      <p className="text-sm text-rose-900">This affects all outlets: all current charts are archived, defaults cleared and active tanks made INACTIVE.
-        Historical calibration rows, stock readings, shift snapshots and audit records remain stored.
-        No calibration will be active until you upload fresh readings and reactivate each tank.</p>
+      <h3 className="text-base font-bold text-rose-900">Replace 10 KL and 20 KL calibration</h3>
+      <p className="text-sm text-rose-900">Only 10 KL and 20 KL charts are affected across outlets. Older global dip/volume values and unreferenced tank points are deleted;
+        historically referenced chart rows remain protected so past stock reports are not corrupted.
+        The attached PDF becomes the only current 10/20 KL source (195 and 211 readings).
+        Existing 10/20 KL tanks become INACTIVE until their new PDF chart is linked. 15 KL, 50 KL and other capacities remain unchanged.</p>
       {resetPreview&&<div className="grid gap-2 sm:grid-cols-4 text-xs font-semibold text-rose-900">
-        <span>Global sources: {resetPreview.globalSourcesToArchive}</span>
-        <span>Tank charts: {resetPreview.tankChartsToArchive}</span>
-        <span>Defaults: {resetPreview.defaultChartMappingsToClear}</span>
-        <span>Active tanks: {resetPreview.activeTanksToInactivate}</span>
+        <span>Old source charts: {resetPreview.oldGlobalSources}</span>
+        <span>Old tank revisions: {resetPreview.oldTankRevisions}</span>
+        <span>Unreferenced revisions cleared: {resetPreview.oldUnreferencedTankRevisions}</span>
+        <span>Historical revisions protected: {resetPreview.protectedHistoricalRevisions}</span>
+        <span>Active tanks temporarily inactivated: {resetPreview.activeTanksToInactivate}</span>
+        <span>New PDF readings: {resetPreview.replacement10klPoints + resetPreview.replacement20klPoints}</span>
       </div>}
       {resetPreview?.openOrClosingShifts?(
         <p role="alert" className="text-sm font-bold text-rose-900">Cannot clear while {resetPreview.openOrClosingShifts} shift(s) are OPEN or CLOSING.</p>
       ):null}
-      <label className="block text-xs font-bold text-rose-900">Type CLEAR ALL CALIBRATION to confirm</label>
+      <label className="block text-xs font-bold text-rose-900">Type REPLACE 10KL 20KL to confirm</label>
       <input type="text" value={resetText} onChange={e=>setResetText(e.target.value)}
-        placeholder="CLEAR ALL CALIBRATION" aria-label="Confirm reset all calibration"
+        placeholder="REPLACE 10KL 20KL" aria-label="Confirm reset all calibration"
         className="w-full rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm"/>
       <div className="flex flex-wrap gap-2">
         <button type="button" data-testid="submit-reset-all-calibration"
-          disabled={resetBusy||resetText!=='CLEAR ALL CALIBRATION'||!resetPreview||resetPreview.openOrClosingShifts>0}
+          disabled={resetBusy||resetText!=='REPLACE 10KL 20KL'||!resetPreview||resetPreview.openOrClosingShifts>0}
           onClick={()=>{void resetAllCalibration();}}
           className="rounded-lg bg-rose-800 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
-          {resetBusy?'Clearing…':'Archive old charts and clear calibration'}
+          {resetBusy?'Clearing…':'Replace old 10 / 20 KL with PDF'}
         </button>
         <button type="button" onClick={()=>{setShowReset(false);setResetText('');}}
           className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm">Cancel</button>
@@ -466,7 +475,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       <button type="button" className="mt-3 text-xs font-semibold text-[#17365D] underline"
         onClick={()=>setShowAllCharts(v=>!v)}>{showAllCharts?'Hide previous charts':'Show previous / alternate charts'}</button>
       {showAllCharts&&<div className="mt-2 flex flex-wrap gap-2" data-testid="previous-calibration-charts">
-        {templates.map(t=><button key={t.id} type="button" onClick={()=>{setSelectedCode(t.code);setShowReadings(false);}}
+        {templates.filter(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status)).map(t=><button key={t.id} type="button" onClick={()=>{setSelectedCode(t.code);setShowReadings(false);}}
           className={'rounded-lg border px-3 py-2 text-xs '+(t.code===selectedCode?'border-orange-500 bg-orange-50':'border-slate-200 text-slate-600')}>
           {t.nominalCapacityLitres/1000} KL · {t.name} · {isOperatorSuppliedSourceMetadata(t)?'SUPPLIED SOURCE':t.status}
         </button>)}
