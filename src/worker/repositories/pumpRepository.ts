@@ -41,6 +41,7 @@ import {
 } from '../../shared/types';
 import { parseMilliunits, formatMilliunits, MILLIUNIT_SCALE } from '../../shared/precision';
 import { mapDatabaseUniqueError } from '../services/duplicateErrorMapper';
+import {matchesExactOperatorPdfRows} from '../../shared/operatorPdfSourceData';
 
 export const SNAPSHOT_INSERT_CHUNK_SIZE = 5;
 
@@ -3223,6 +3224,88 @@ export class PumpRepository {
    * Transitions a calibration chart revision (`DRAFT -> APPROVED`, `DRAFT/APPROVED -> ACTIVE`, or `ARCHIVED`).
    * Activating a revision atomically marks any previous ACTIVE revision for the tank as `SUPERSEDED`.
    */
+
+  /**
+   * Atomically starts a NEW chart revision from an already installed, exact
+   * operator-PDF reference. Historic chart rows and stock snapshots are never
+   * overwritten. Open/CLOSING shifts must not straddle the chart transition.
+   *
+   * The caller must also check outlet authority and calibration write roles.
+   */
+  async activateOperatorPdfRevisionForTank(
+    tankId:string, sourceTemplateId:string,
+    sourcePoints:Array<{dipMillimetresMilliunits:number;volumeMilliunits:number}>,
+    actorUserId:string,expectedActiveChartId:string|null
+  ):Promise<{chart:TankCalibrationChart;previousActiveChartId:string|null;alreadyApplied:boolean}>{
+    const tank=await this.findTankById(tankId);
+    if(!tank||![10000,20000].includes(tank.capacityLitres)){
+      const err=new Error('Selected tank must be a real 10 KL or 20 KL underground tank.');
+      (err as any).code='INVALID_TANK_CAPACITY';throw err;
+    }
+    const source=await this.findGlobalTankCalibrationTemplateById(sourceTemplateId);
+    if(!source||source.nominalCapacityLitres!==tank.capacityLitres||
+       !['APPROVED','ACTIVE'].includes(source.status)||
+       !matchesExactOperatorPdfRows(tank.capacityLitres,sourcePoints)){
+      const err=new Error('The supplied PDF chart is missing, altered, or has the wrong capacity. Install the saved 10 / 20 KL PDF reference first.');
+      (err as any).code='INVALID_PDF_CALIBRATION_SOURCE';throw err;
+    }
+    const openShift=await this.findActiveOperationalShift(tank.outletId);
+    if(openShift){
+      const err=new Error('Close the open/closing shift before switching tank calibration. Existing shift stock snapshots must stay on the old chart.');
+      (err as any).code='SHIFT_OPEN_CALIBRATION_REMAP_BLOCKED';throw err;
+    }
+    await this.ensureInitialCalibrationChartForLegacyPoints(tankId,actorUserId);
+    const charts=await this.listCalibrationCharts(tankId);
+    const oldActive=charts.find(c=>c.status==='ACTIVE')||null;
+    if(oldActive?.sourceTemplateId===source.id){
+      const oldRows=await this.listCalibrationPoints(tankId,{chartId:oldActive.id});
+      if(matchesExactOperatorPdfRows(tank.capacityLitres,oldRows)){
+        return {chart:oldActive,previousActiveChartId:oldActive.id,alreadyApplied:true};
+      }
+    }
+    if((oldActive?.id||null)!==expectedActiveChartId){
+      const err=new Error('The active calibration changed since this screen loaded. Refresh the tank and retry.');
+      (err as any).code='STALE_CALIBRATION_PREVIEW';throw err;
+    }
+    const nowIso=new Date().toISOString(),effectiveFrom=nowIso.slice(0,10);
+    const revisionNumber=charts.reduce((n,c)=>Math.max(n,c.revisionNumber),0)+1;
+    const chartId='tcc-'+tankId+'-r'+revisionNumber+'-'+crypto.randomUUID().slice(0,8);
+    const batch:any[]=[];
+    if(oldActive){
+      batch.push(this.db.update(schema.tankCalibrationCharts).set({
+        status:'SUPERSEDED',effectiveTo:effectiveFrom,updatedAt:nowIso,updatedBy:actorUserId
+      }).where(and(eq(schema.tankCalibrationCharts.tankId,tankId),
+        eq(schema.tankCalibrationCharts.id,oldActive.id),
+        eq(schema.tankCalibrationCharts.status,'ACTIVE'))));
+    }
+    batch.push(this.db.insert(schema.tankCalibrationCharts).values({
+      id:chartId,tankId,sourceTemplateId:source.id,revisionNumber,
+      status:'ACTIVE',chartUnitDip:'MM',chartUnitVolume:'LITRES',
+      tankDiameterMmMilliunits:source.tankDiameterMmMilliunits,
+      tankLengthMmMilliunits:source.tankLengthMmMilliunits,
+      maxDipMmMilliunits:source.maxDipMmMilliunits,
+      chartCapacityMilliunits:sourcePoints[sourcePoints.length-1].volumeMilliunits,
+      sourceFileName:source.sourceFileName||'Calibration Chart.pdf',
+      referenceDocument:source.code,
+      notes:'Operator supplied PDF chart; previous tank chart retained for historical readings. 20 KL 2020 mm = 21,359.52 L.',
+      effectiveFrom,effectiveTo:null,approvedBy:actorUserId,approvedAt:nowIso,
+      createdAt:nowIso,createdBy:actorUserId,updatedAt:nowIso,updatedBy:actorUserId,
+    }));
+    const points=sourcePoints.map((p,index)=>({
+      id:'tcp-pdf-'+crypto.randomUUID(),chartId,tankId,
+      dipMillimetresMilliunits:p.dipMillimetresMilliunits,
+      volumeMilliunits:p.volumeMilliunits,createdAt:nowIso,createdBy:actorUserId,
+    }));
+    for(const part of chunkArray(points,SNAPSHOT_INSERT_CHUNK_SIZE)){
+      batch.push(this.db.insert(schema.tankCalibrationPoints).values(part));
+    }
+    // All chart status changes and 195/211 point inserts succeed or fail together.
+    await (this.db as any).batch(batch);
+    const saved=await this.findCalibrationChartById(chartId);
+    if(!saved)throw new Error('New calibration revision was not found after save.');
+    return {chart:saved,previousActiveChartId:oldActive?.id||null,alreadyApplied:false};
+  }
+
   async updateCalibrationChartStatus(
     tankId: string,
     chartId: string,

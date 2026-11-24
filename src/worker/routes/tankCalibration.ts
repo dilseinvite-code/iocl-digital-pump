@@ -20,7 +20,7 @@ import { PERMISSIONS, ROLES } from '../../shared/constants';
 import { parseMilliunits, formatMilliunits } from '../../shared/precision';
 import {TEN_KL_TEMPLATE_CODE,limitTenKlCalibrationCurve} from '../../shared/tenKlCalibrationLimit';
 import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
-import {isOperatorPdfSourceCode} from '../../shared/operatorPdfSourceData';
+import {isOperatorPdfSourceCode,operatorPdfCodeForCapacity,matchesExactOperatorPdfRows} from '../../shared/operatorPdfSourceData';
 
 export const tankCalibration = new Hono<{ Bindings: EnvBindings }>();
 
@@ -139,6 +139,135 @@ tankCalibration.get('/tanks/:tankId/calibration/charts', requirePermission(PERMI
     },
     error: null,
   });
+});
+
+
+/**
+ * Simplified existing-tank PDF remap: check readiness, then a single explicit
+ * use-chart action. No extra engineer/administrator approval form; actor,
+ * exact source rows, permissions, shift safety and history are still enforced.
+ */
+async function operatorPdfRemapReadiness(repo:PumpRepository,tank:any){
+  const pdfCode=operatorPdfCodeForCapacity(tank.capacityLitres);
+  const [oldActive,openShift]=await Promise.all([
+    repo.findActiveCalibrationChart(tank.id),
+    repo.findActiveOperationalShift(tank.outletId),
+  ]);
+  let source:any=null,points:any[]=[];
+  if(pdfCode){
+    source=await repo.findGlobalTankCalibrationTemplateByCode(pdfCode);
+    if(source)points=await repo.listGlobalTankCalibrationTemplatePoints(source.id);
+  }
+  const alreadyApplied=Boolean(oldActive&&source&&oldActive.sourceTemplateId===source.id &&
+    matchesExactOperatorPdfRows(tank.capacityLitres,await repo.listCalibrationPoints(tank.id,{chartId:oldActive.id})));
+  let code:string|null=null,message:string|null=null;
+  if(!pdfCode){
+    code='INVALID_TANK_CAPACITY';
+    message='Only 10 KL and 20 KL PDF sources are available. This tank has a different capacity.';
+  }else if(tank.status==='DECOMMISSIONED'){
+    code='TANK_REMOVED';message='Restore the tank before remapping its calibration.';
+  }else if(!Number.isFinite(tank.safeFillCapacityLitres)||tank.safeFillCapacityLitres<=0||
+      tank.safeFillCapacityLitres>tank.capacityLitres){
+    code='TANK_OPERATING_LIMITS_INVALID';
+    message='Check this tank’s saved physical safe-fill limit before remapping.';
+  }else if(!source){
+    code='PDF_SOURCE_NOT_INSTALLED';
+    message='Open Tank Calibration and select Use supplied 10 / 20 KL PDF charts once.';
+  }else if(!['APPROVED','ACTIVE'].includes(source.status)||
+      !matchesExactOperatorPdfRows(tank.capacityLitres,points)){
+    code='PDF_SOURCE_ROWS_MISMATCH';
+    message='The saved PDF source is incomplete or differs from the confirmed reference.';
+  }else if(openShift){
+    code='SHIFT_OPEN_CALIBRATION_REMAP_BLOCKED';
+    message='Close the current shift first, so its historical stock remains on the previous chart.';
+  }
+  return {
+    ready:code===null,code,message,alreadyApplied,
+    tankId:tank.id,tankNumber:tank.tankNumber,capacityLitres:tank.capacityLitres,
+    safeFillCapacityLitres:tank.safeFillCapacityLitres,
+    sourceCode:pdfCode,sourceTemplateId:source?.id??null,
+    sourceReadings:points.length,
+    sourceMaxVolumeLitres:source?.maxVolumeLitres??null,
+    previousActiveChartId:oldActive?.id??null,
+    previousActiveRevisionNumber:oldActive?.revisionNumber??null,
+    previousHistoricalReadings:oldActive?.referencedReadingsCount??0,
+    openShiftPresent:Boolean(openShift),
+  };
+}
+tankCalibration.get('/tanks/:tankId/calibration/operator-pdf-remap',
+  requirePermission(PERMISSIONS.TANK_CALIBRATION_READ) as any,async(c:AppContext)=>{
+    const tankId=c.req.param('tankId')||'';
+    const db=getDb(c.env.DB),repo=new PumpRepository(db),outlets=new OutletRepository(db);
+    const tank=await repo.findTankById(tankId);
+    if(!tank)return c.json({success:false,data:null,error:{code:'NOT_FOUND',message:'Tank not found'}},404);
+    if(!await verifyOutletAuthority(c,tank.outletId,outlets)){
+      return c.json({success:false,data:null,error:{code:'FORBIDDEN',message:'Outlet access denied'}},403);
+    }
+    const preview=await operatorPdfRemapReadiness(repo,tank);
+    return c.json({success:true,data:preview,error:null});
+});
+tankCalibration.post('/tanks/:tankId/calibration/operator-pdf-remap',
+  requirePermission(PERMISSIONS.TANK_CALIBRATION_WRITE) as any,async(c:AppContext)=>{
+    if(!canAuthorizeCalibrationActivation(c)){
+      return c.json({success:false,data:null,error:{
+        code:'FORBIDDEN',message:'Only tank calibration and tank management users can change the active chart.'
+      }},403);
+    }
+    const tankId=c.req.param('tankId')||'';
+    const db=getDb(c.env.DB),repo=new PumpRepository(db),outlets=new OutletRepository(db),
+      audit=new AuditRepository(db);
+    const tank=await repo.findTankById(tankId);
+    if(!tank)return c.json({success:false,data:null,error:{code:'NOT_FOUND',message:'Tank not found'}},404);
+    if(!await verifyOutletAuthority(c,tank.outletId,outlets)){
+      return c.json({success:false,data:null,error:{code:'FORBIDDEN',message:'Outlet access denied'}},403);
+    }
+    const body=await c.req.json().catch(()=>null);
+    if(!body||typeof body!=='object'||!Object.prototype.hasOwnProperty.call(body,'expectedActiveChartId')||
+       !(body.expectedActiveChartId===null||
+         (typeof body.expectedActiveChartId==='string'&&body.expectedActiveChartId.length>0))){
+      return c.json({success:false,data:null,error:{
+        code:'PREVIEW_REQUIRED',message:'Refresh the tank calibration preview before applying the new chart.'
+      }},400);
+    }
+    const ready=await operatorPdfRemapReadiness(repo,tank);
+    if(!ready.ready){
+      return c.json({success:false,data:ready,error:{code:ready.code,message:ready.message}},409);
+    }
+    if(!ready.alreadyApplied&&ready.previousActiveChartId!==body.expectedActiveChartId){
+      return c.json({success:false,data:ready,error:{
+        code:'STALE_CALIBRATION_PREVIEW',message:'The active chart changed; refresh the tank before continuing.'
+      }},409);
+    }
+    const source=await repo.findGlobalTankCalibrationTemplateById(ready.sourceTemplateId!);
+    if(!source)return c.json({success:false,data:null,error:{code:'PDF_SOURCE_NOT_INSTALLED',message:'PDF source not found'}},409);
+    const rows=await repo.listGlobalTankCalibrationTemplatePoints(source.id);
+    try{
+      const applied=await repo.activateOperatorPdfRevisionForTank(
+        tankId,source.id,rows,c.var.user!.user.id,body.expectedActiveChartId
+      );
+      if(!applied.alreadyApplied){
+        await audit.logAction({
+          id:'aud-'+crypto.randomUUID(),userId:c.var.user!.user.id,
+          action:'TANK_CALIBRATION_OPERATOR_PDF_REMAP',
+          entityType:'TANK_CALIBRATION',entityId:applied.chart.id,
+          oldValue:{chartId:applied.previousActiveChartId},
+          newValue:{chartId:applied.chart.id,sourceTemplateId:source.id,
+            capacityLitres:tank.capacityLitres,pointsCount:rows.length,
+            revisionNumber:applied.chart.revisionNumber,effectiveFrom:applied.chart.effectiveFrom},
+          ipAddress:c.req.header('cf-connecting-ip')||null,
+          userAgent:c.req.header('user-agent')||null,createdAt:new Date().toISOString(),
+        });
+      }
+      return c.json({success:true,data:{
+        ...applied,pointsCount:rows.length,tankStatus:tank.status,
+        message:applied.alreadyApplied?'This exact PDF chart is already active. No new revision created.':
+          'PDF chart is now the active calibration for future shifts. Previous chart and all historical readings remain unchanged.',
+      },error:null});
+    }catch(err:any){
+      const code=err.code||'PDF_REMAP_FAILED';
+      return c.json({success:false,data:null,error:{code,message:err.message||'Could not remap calibration.'}},
+        code==='STALE_CALIBRATION_PREVIEW'||code==='SHIFT_OPEN_CALIBRATION_REMAP_BLOCKED'?409:400);
+    }
 });
 
 // POST /api/v1/tanks/:tankId/calibration - Create a single calibration point
