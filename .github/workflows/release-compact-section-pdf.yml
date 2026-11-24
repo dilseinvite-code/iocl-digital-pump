@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy tank calibration loading-state fix (PR 119)
+    name: Verify and deploy linked calibration modal fix (PR 120)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
