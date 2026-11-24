@@ -1,9 +1,29 @@
 import {describe,it,expect} from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import {reviewLoadedGlobalCalibration} from '../src/frontend/components/pump/globalCalibrationReview';
+import {operatorPdfSource} from '../src/shared/operatorPdfSourceData';
+import type {GlobalTankCalibrationTemplate} from '../src/shared/types';
 import {parseSimpleCalibrationCsv} from '../src/frontend/components/pump/simpleCalibrationCsv';
 
 describe('Simple calibration upload – no engineering forms in main flow',()=>{
+ it('does not compare unloaded or stale chart details, and verifies exact 10/20 KL digital sources',()=>{
+   for(const capacity of [10000,20000]){
+     const source=operatorPdfSource(capacity)!;
+     const chosen={...source,id:'source-'+capacity,status:'APPROVED',updatedAt:'current',pointsCount:source.points.length,points:undefined} as unknown as GlobalTankCalibrationTemplate;
+     const detail={...chosen,points:source.points.map(p=>({dipMillimetresMilliunits:p.dipMm*1000,volumeMilliunits:Math.round(p.volumeLitres*1000)}))} as GlobalTankCalibrationTemplate;
+     const pending=reviewLoadedGlobalCalibration(chosen,null);
+     expect(pending.detailReady).toBe(false);
+     expect(pending.scannedReview).toBeNull();
+     expect(reviewLoadedGlobalCalibration(chosen,{...detail,updatedAt:'old'}).detailReady).toBe(false);
+     const ready=reviewLoadedGlobalCalibration(chosen,detail);
+     expect(ready.suppliedReady).toBe(true);
+     expect(ready.scannedReview).toBeNull();
+     const bad={...detail,points:detail.points!.map((p,i)=>i===12?{...p,volumeMilliunits:p.volumeMilliunits+1}:p)};
+     expect(reviewLoadedGlobalCalibration(chosen,bad).suppliedReady).toBe(false);
+     expect(reviewLoadedGlobalCalibration(chosen,{...detail,points:[]}).suppliedReady).toBe(false);
+   }
+ });
  it('loads increasing dip-volume CSV and normalizes it without modifying the readings',()=>{
    const raw='dip_mm,volume_litres\n0,0\n10,6.9\n20,20.1\n30,41.03';
    const p=parseSimpleCalibrationCsv(raw);
