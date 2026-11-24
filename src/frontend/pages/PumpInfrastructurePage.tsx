@@ -58,6 +58,7 @@ import {
   findTankProduct,
   getTankCalibrationStatus,
   getTankCardCalibrationStatus,
+  getCalibrationModalPhase,
   formatCalibrationDisplay,
   formatDummyCalibrationPresetText,
   validateSingleCalibrationPoint,
@@ -166,6 +167,8 @@ export const PumpInfrastructurePage: React.FC = () => {
   >({});
   const [calibratingTank, setCalibratingTank] = useState<Tank | null>(null);
   const [loadingCalibrationTankId, setLoadingCalibrationTankId] = useState<string | null>(null);
+  const [loadedCalibrationTankId, setLoadedCalibrationTankId] = useState<string | null>(null);
+  const chartRequestSequence = useRef(0);
   const [calCharts, setCalCharts] = useState<TankCalibrationChart[]>([]);
   const [calActiveChart, setCalActiveChart] = useState<TankCalibrationChart | null>(null);
   const [calSelectedChart, setCalSelectedChart] = useState<TankCalibrationChart | null>(null);
@@ -843,7 +846,9 @@ export const PumpInfrastructurePage: React.FC = () => {
     tankId: string,
     chartId?: string | null
   ): Promise<TankCalibrationPoint[]> => {
+    const requestSequence = ++chartRequestSequence.current;
     setLoadingCalibrationTankId(tankId);
+    setLoadedCalibrationTankId(null);
     try {
       const query = chartId ? `?chartId=${encodeURIComponent(chartId)}` : '';
       const res = (await apiFetch<TankCalibrationPoint[]>(
@@ -851,6 +856,7 @@ export const PumpInfrastructurePage: React.FC = () => {
         { cache: 'no-store' }
       )) as any;
 
+      if (requestSequence !== chartRequestSequence.current) return [];
       if (!res.success || !Array.isArray(res.data)) {
         setModalError('Calibration status could not be loaded. Close and reopen the linked chart to retry.');
         return [];
@@ -869,6 +875,7 @@ export const PumpInfrastructurePage: React.FC = () => {
           '/api/v1/calibration-templates/' + encodeURIComponent(selectedChart.sourceTemplateId),
           { cache: 'no-store' }
         );
+        if (requestSequence !== chartRequestSequence.current) return [];
         setCalGlobalSource(globalResult.success ? globalResult.data ?? null : null);
       } else {
         setCalGlobalSource(null);
@@ -892,6 +899,7 @@ export const PumpInfrastructurePage: React.FC = () => {
           `/api/v1/tanks/${tankId}/calibration`,
           { cache: 'no-store' }
         );
+        if (requestSequence !== chartRequestSequence.current) return [];
         if (activeRes.success && Array.isArray(activeRes.data)) {
           setTankCalibrationByTankId(prev => ({
             ...prev,
@@ -909,9 +917,10 @@ export const PumpInfrastructurePage: React.FC = () => {
         setCalNotes(selectedChart.notes || '');
       }
 
+      setLoadedCalibrationTankId(tankId);
       return pts;
     } finally {
-      setLoadingCalibrationTankId(null);
+      if (requestSequence === chartRequestSequence.current) setLoadingCalibrationTankId(null);
     }
   };
 
@@ -958,6 +967,7 @@ export const PumpInfrastructurePage: React.FC = () => {
   };
   const openCalibrationModal = async (t: Tank) => {
     setCalibratingTank(t);
+    setLoadedCalibrationTankId(null);
     setCalCharts([]);
     setCalActiveChart(null);
     setCalSelectedChart(null);
@@ -3234,11 +3244,14 @@ export const PumpInfrastructurePage: React.FC = () => {
 
       {/* Tank Calibration Chart Modal */}
       {modalType === 'tankCalibration' && calibratingTank && (() => {
-        const activePoints = tankCalibrationByTankId[calibratingTank.id] || [];
-        const calPoints = calModalPoints.length > 0 || calSelectedChart ? calModalPoints : activePoints;
-        const calStatus = getTankCalibrationStatus(calPoints.length, calSelectedChart?.status);
+        const modalPhase = getCalibrationModalPhase(calibratingTank.id, loadingCalibrationTankId, loadedCalibrationTankId);
+        const modalReady = modalPhase === 'ready';
+        const calPoints = modalReady ? calModalPoints : [];
+        const calStatus = modalReady
+          ? getTankCalibrationStatus(calPoints.length, calSelectedChart?.status)
+          : getTankCardCalibrationStatus(undefined, modalPhase === 'loading', canReadTankCalibration);
         const linkedSuppliedReady = Boolean(
-          calSelectedChart?.status === 'DRAFT' &&
+          modalReady && calSelectedChart?.status === 'DRAFT' &&
           calSelectedChart.sourceTemplateId &&
           calGlobalSource &&
           isOperatorSuppliedReference(calGlobalSource, calGlobalSource.points || []) &&
@@ -3278,25 +3291,27 @@ export const PumpInfrastructurePage: React.FC = () => {
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-lg font-bold text-[#17365D]">
-                      {calSelectedChart?.sourceTemplateId ? 'Linked Global Calibration' : 'Tank Calibration Chart'}
+                      {modalReady && calSelectedChart?.sourceTemplateId ? 'Linked Global Calibration' : 'Tank Calibration Chart'}
                     </h2>
                     <span
                       className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 font-mono ${linkedSuppliedReady?'bg-emerald-50 text-emerald-800 border-emerald-300':calStatus.badgeClass}`}
                     >
-                      {(calStatus.isConfigured || linkedSuppliedReady) ? (
+                      {modalPhase === 'loading' ? (
+                        <RefreshCw className="w-3 h-3 shrink-0 animate-spin" />
+                      ) : (calStatus.isConfigured || linkedSuppliedReady) ? (
                         <CheckCircle className="w-3 h-3 shrink-0" />
                       ) : (
                         <AlertTriangle className="w-3 h-3 shrink-0" />
                       )}
                       <span>Calibration: {linkedSuppliedReady?'READY TO USE':calStatus.badgeLabel}</span>
                     </span>
-                    {calSelectedChart && (
+                    {modalReady && calSelectedChart && (
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 font-mono ${
                           linkedSuppliedReady || calSelectedChart.status === 'ACTIVE'
                             ? 'bg-emerald-500/10 text-emerald-800 border-emerald-500/30'
                             : calSelectedChart.status === 'APPROVED'
-                              ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
+                              ? 'bg-cyan-500/10 text-cyan-800 border-cyan-500/30'
                               : calSelectedChart.status === 'DRAFT'
                                 ? 'bg-amber-500/10 text-amber-800 border-amber-500/30'
                                 : 'bg-[#F1F5F9] text-[#64748B] border-[#D7E0EA]'
@@ -3305,7 +3320,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                         Rev #{calSelectedChart.revisionNumber} • {linkedSuppliedReady?'READY TO USE':calSelectedChart.status}
                       </span>
                     )}
-                    {calSelectedChart && (
+                    {modalReady && calSelectedChart && (
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 font-mono ${
                           isChartLocked
@@ -3360,6 +3375,18 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </button>
               </div>
 
+              {!modalReady ? (
+                <section className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-sm text-slate-700" role="status" data-testid="linked-calibration-loading-state">
+                  {modalPhase === 'loading' ? (
+                    <div className="flex items-center gap-3"><RefreshCw className="h-5 w-5 animate-spin text-[#17365D]" /> Checking saved calibration and chart status…</div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p>{modalError || 'Unable to verify calibration. Please retry.'}</p>
+                      <button type="button" className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white" onClick={()=>{setModalError(null);void refreshTankCalibration(calibratingTank.id);}}>Retry calibration check</button>
+                    </div>
+                  )}
+                </section>
+              ) : (<>
               {(calibratingTank.capacityLitres===10000||calibratingTank.capacityLitres===20000) && canReadTankCalibration && (
                 <section data-testid="existing-tank-pdf-remap"
                   className="rounded-xl border border-[#B8D5C7] bg-[#F4FAF7] p-4 space-y-3">
@@ -3458,7 +3485,7 @@ export const PumpInfrastructurePage: React.FC = () => {
               {!calSelectedChart?.sourceTemplateId && (<>
               {/* Revision Selector & Lifecycle Controls */}
               {calCharts.length > 0 && (
-                <div className="p-3.5 bg-slate-950/60 border border-[#E2E8F0] rounded-xl space-y-3">
+                <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="text-[11px] font-mono text-[#64748B] uppercase font-bold">
@@ -3486,7 +3513,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                             type="button"
                             disabled={modalSubmitting || calPoints.length < 2}
                             onClick={() => handleUpdateCalibrationChartStatus(calSelectedChart.id, 'APPROVED')}
-                            className="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 disabled:opacity-50 text-cyan-300 border border-cyan-500/30 text-[11px] font-mono font-semibold"
+                            className="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 disabled:opacity-50 text-cyan-800 border border-cyan-500/30 text-[11px] font-mono font-semibold"
                           >
                             Approve Revision
                           </button>
@@ -3528,7 +3555,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                     <p className="text-xs text-emerald-100">Calibration ACTIVE. Tank operational status is managed separately under Edit Tank.</p>
                   )}
                   {/* Selected Revision Metadata */}
-                  {calSelectedChart && (
+                  {modalReady && calSelectedChart && (
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2 border-t border-[#E2E8F0]/80 text-[11px] font-mono">
                       <div>
                         <span className="text-[#64748B] block text-[10px]">DIMENSIONS (D × L)</span>
@@ -3667,7 +3694,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="overflow-x-auto bg-slate-950/60 border border-[#E2E8F0] rounded-xl max-h-60">
+                <div className="overflow-x-auto bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl max-h-60">
                   <table className="w-full text-left text-xs font-mono">
                     <thead className="bg-[#F1F5F9]/80 text-[#64748B] uppercase text-[10px] border-b border-[#E2E8F0] sticky top-0">
                       <tr>
@@ -3738,22 +3765,22 @@ export const PumpInfrastructurePage: React.FC = () => {
 
               {/* Dry-Run Comparison Against Original Printed IOCL Chart */}
               {calShowDryRun && (
-                <div className="bg-slate-950/60 border border-cyan-500/30 rounded-xl p-4 space-y-3">
+                <div className="bg-[#F8FAFC] border border-cyan-500/30 rounded-xl p-4 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h4 className="text-xs font-bold text-cyan-300 font-mono uppercase flex items-center gap-1.5">
+                      <h4 className="text-xs font-bold text-cyan-800 font-mono uppercase flex items-center gap-1.5">
                         <FlaskConical className="w-3.5 h-3.5 text-cyan-400" />
                         <span>Dry-Run Comparison vs Printed IOCL Chart</span>
                       </h4>
                       <p className="text-[11px] text-[#64748B] mt-0.5">
-                        Paste or upload reference checkpoints (<code className="text-cyan-300">dip_mm, printed_volume_litres</code>) from the scanned IOCL chart to verify exact and interpolated volume conversions before or after activation.
+                        Paste or upload reference checkpoints (<code className="text-cyan-800">dip_mm, printed_volume_litres</code>) from the scanned IOCL chart to verify exact and interpolated volume conversions before or after activation.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={handleLoadSampleDryRunCheckpoints}
-                        className="px-2.5 py-1 rounded-lg bg-[#F1F5F9] hover:bg-[#E8EEF5] text-cyan-300 border border-[#D7E0EA] text-[11px] font-mono font-semibold"
+                        className="px-2.5 py-1 rounded-lg bg-[#F1F5F9] hover:bg-[#E8EEF5] text-cyan-800 border border-[#D7E0EA] text-[11px] font-mono font-semibold"
                       >
                         Load Sample Checkpoints
                       </button>
@@ -3879,7 +3906,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                                       r.matchType === 'EXACT_POINT'
                                         ? 'bg-emerald-500/15 text-emerald-800'
                                         : r.matchType === 'INTERPOLATED'
-                                          ? 'bg-cyan-500/15 text-cyan-300'
+                                          ? 'bg-cyan-500/15 text-cyan-800'
                                           : 'bg-rose-500/15 text-rose-800'
                                     }`}
                                   >
@@ -4162,19 +4189,19 @@ export const PumpInfrastructurePage: React.FC = () => {
                           {csvPreview.valid && (
                             <>
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                                <div className="p-2 bg-slate-950/60 rounded border border-[#E2E8F0]">
+                                <div className="p-2 bg-[#F8FAFC] rounded border border-[#E2E8F0]">
                                   <span className="text-[#64748B] block text-[10px]">DIP RANGE</span>
                                   <span className="text-[#B8530D] font-bold">
                                     {formatCalibrationDisplay(csvPreview.diagnostics.minDipMm)} – {formatCalibrationDisplay(csvPreview.diagnostics.maxDipMm)} mm
                                   </span>
                                 </div>
-                                <div className="p-2 bg-slate-950/60 rounded border border-[#E2E8F0]">
+                                <div className="p-2 bg-[#F8FAFC] rounded border border-[#E2E8F0]">
                                   <span className="text-[#64748B] block text-[10px]">VOLUME RANGE</span>
                                   <span className="text-[#17365D] font-bold">
                                     {formatCalibrationDisplay(csvPreview.diagnostics.minVolumeLitres)} – {formatCalibrationDisplay(csvPreview.diagnostics.maxVolumeLitres)} L
                                   </span>
                                 </div>
-                                <div className="p-2 bg-slate-950/60 rounded border border-[#E2E8F0]">
+                                <div className="p-2 bg-[#F8FAFC] rounded border border-[#E2E8F0]">
                                   <span className="text-[#64748B] block text-[10px]">DOMINANT STEP</span>
                                   <span className="text-[#334155]">
                                     {csvPreview.diagnostics.dominantStepMm
@@ -4183,9 +4210,9 @@ export const PumpInfrastructurePage: React.FC = () => {
                                     {csvPreview.diagnostics.isUniformStep ? ' (Uniform)' : ' (Variable)'}
                                   </span>
                                 </div>
-                                <div className="p-2 bg-slate-950/60 rounded border border-[#E2E8F0]">
+                                <div className="p-2 bg-[#F8FAFC] rounded border border-[#E2E8F0]">
                                   <span className="text-[#64748B] block text-[10px]">CURVE GEOMETRY</span>
-                                  <span className="text-cyan-300">
+                                  <span className="text-cyan-800">
                                     {csvPreview.diagnostics.isNonLinear ? 'Non-Linear Table' : 'Linear Table'}
                                   </span>
                                 </div>
@@ -4249,7 +4276,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setCalShowPreview(prev => !prev)}
-                            className="px-3 py-1.5 bg-[#F1F5F9] hover:bg-[#E8EEF5] rounded-xl text-xs text-cyan-300 font-mono font-semibold"
+                            className="px-3 py-1.5 bg-[#F1F5F9] hover:bg-[#E8EEF5] rounded-xl text-xs text-cyan-800 font-mono font-semibold"
                           >
                             {calShowPreview ? 'Hide Preview' : 'Preview CSV'}
                           </button>
@@ -4287,6 +4314,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </div>
               )}
 
+              </>)}
               </>)}
               <div className="flex justify-end pt-2 border-t border-[#E2E8F0]">
                 <button
