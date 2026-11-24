@@ -12,6 +12,7 @@ import { PERMISSIONS } from '../../shared/constants';
 import { globalCalibrationMaxLitres, isGlobalTankCapacity } from '../../shared/globalTankTypes';
 import { scannedReferenceSpec, reviewScannedCalibrationCandidate } from '../../shared/scannedCalibrationReference';
 import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../shared/operatorSuppliedCalibration';
+import {operatorPdfCodeForCapacity} from '../../shared/operatorPdfSourceData';
 
 export const quickTankRegistrationRoutes = new Hono<{ Bindings: EnvBindings }>();
 quickTankRegistrationRoutes.use('*', requireAuth as any);
@@ -157,7 +158,9 @@ quickTankRegistrationRoutes.post(
     let selected;
     const suppliedCode=capacityLitres===10000?'EXCEL_10KL_REFERENCE':
       capacityLitres===20000?'EXCEL_20KL_REFERENCE':null;
-    const suppliedTemplate=suppliedCode?allTemplates.find(t=>t.code===suppliedCode):null;
+    const pdfCode=operatorPdfCodeForCapacity(capacityLitres);
+    const suppliedTemplate=(pdfCode?allTemplates.find(t=>t.code===pdfCode):null) ||
+      (suppliedCode?allTemplates.find(t=>t.code===suppliedCode):null);
     // Prefer the operator's actual 10/20 KL reference when present, not a different standard.
     if(suppliedTemplate){
       selected=await validatedReference(db,suppliedTemplate.id);

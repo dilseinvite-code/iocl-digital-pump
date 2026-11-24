@@ -1,4 +1,5 @@
 import {scannedReferenceSpec,reviewScannedCalibrationCandidate} from './scannedCalibrationReference';
+import {isOperatorPdfSourceCode,matchesExactOperatorPdfRows} from './operatorPdfSourceData';
 /** Operator supplied 10/20 KL numeric source. Completeness is checked without changing any readings.
  * This does not claim full scanned PDF equivalence or engineer certification. */
 export type SuppliedPoint={dipMillimetresMilliunits:number;volumeMilliunits:number};
@@ -8,7 +9,7 @@ export type SuppliedTemplate={code:string;nominalCapacityLitres:number;
 export function isOperatorSuppliedSourceMetadata(source:SuppliedTemplate|null|undefined):boolean{
  if(!source)return false;
  const spec=scannedReferenceSpec(source.nominalCapacityLitres);
- if(!spec||source.code!==spec.code||
+ if(!spec||(source.code!==spec.code&&!isOperatorPdfSourceCode(source.code,source.nominalCapacityLitres))||
    source.tankDiameterMm!==spec.tankDiameterMm||
    source.tankLengthMm!==spec.tankLengthMm||
    source.maxDipMm!==spec.maxDipMm)return false;
@@ -34,6 +35,9 @@ export function isOperatorSuppliedReference(source:SuppliedTemplate|null|undefin
  if(last.dipMillimetresMilliunits!==spec.maxDipMm*1000||
     Math.abs(last.volumeMilliunits/1000-spec.maxVolumeLitres)>0.02||
     last.volumeMilliunits/1000>spec.nominalCapacityLitres*1.15+0.001)return false;
+ if(isOperatorPdfSourceCode(source.code,source.nominalCapacityLitres)){
+   return matchesExactOperatorPdfRows(source.nominalCapacityLitres,sorted);
+ }
  return reviewScannedCalibrationCandidate({
     code:source.code,nominalCapacityLitres:source.nominalCapacityLitres,
     tankDiameterMm:source.tankDiameterMm,tankLengthMm:source.tankLengthMm,

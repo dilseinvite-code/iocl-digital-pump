@@ -5,6 +5,7 @@ import type {GlobalTankCalibrationTemplate} from '../../../shared/types';
 import {limitTenKlCalibrationCurve} from '../../../shared/tenKlCalibrationLimit';
 import {scannedReferenceSpec, reviewScannedCalibrationCandidate} from '../../../shared/scannedCalibrationReference';
 import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../../shared/operatorSuppliedCalibration';
+import {operatorPdfSource,isOperatorPdfSourceCode} from '../../../shared/operatorPdfSourceData';
 import {parseSimpleCalibrationCsv, type ParsedSimpleCalibrationCsv} from './simpleCalibrationCsv';
 import {GLOBAL_TANK_CAPACITIES_LITRES, exceedsGlobalCalibrationLimit, globalCalibrationMaxLitres} from '../../../shared/globalTankTypes';
 
@@ -52,12 +53,13 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const [showAllCharts,setShowAllCharts]=useState(false);
   const [approving,setApproving]=useState(false);
   const [acknowledgedApproval,setAcknowledgedApproval]=useState(false);
+  const [installingPdf,setInstallingPdf]=useState(false);
 
   const loadTemplates=async()=>{
     const result=await apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates');
     if(!result.success || !result.data)throw new Error(result.error?.message || 'Could not load calibration charts');
     setTemplates(result.data);
-    setSelectedCode(current=>current || result.data?.find(t=>isOperatorSuppliedSourceMetadata(t))?.code || result.data?.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code || result.data?.find(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status))?.code || '');
+    setSelectedCode(current=>current || result.data?.find(t=>isOperatorPdfSourceCode(t.code,t.nominalCapacityLitres))?.code || result.data?.find(t=>isOperatorSuppliedSourceMetadata(t))?.code || result.data?.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code || result.data?.find(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status))?.code || '');
   };
   const loadDefaults=async()=>{
     const r=await apiFetch<Array<{capacityLitres:number;templateId:string}>>('/api/v1/global-tank-defaults');
@@ -75,7 +77,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     dipMillimetresMilliunits:point.dipMillimetresMilliunits,volumeMilliunits:point.volumeMilliunits
   }))));
   const scannedSpec=chosen ? scannedReferenceSpec(chosen.nominalCapacityLitres) : null;
-  const alternateToScannedReference=Boolean(chosen && scannedSpec && chosen.code !== scannedSpec.code);
+  const alternateToScannedReference=Boolean(chosen && scannedSpec && chosen.code !== scannedSpec.code && !isOperatorPdfSourceCode(chosen.code,chosen.nominalCapacityLitres));
   const scannedReview=chosen && scannedSpec && !alternateToScannedReference
     ? reviewScannedCalibrationCandidate({
         code:chosen.code,
@@ -94,7 +96,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   useEffect(()=>{setAcknowledgedDefaultWarning(false);setAcknowledgedApproval(false);},[chosen?.id]);
   const capacityCards=GLOBAL_TANK_CAPACITIES_LITRES.map(capacity=>{
     const active=templates.filter(t=>t.nominalCapacityLitres===capacity&&!['ARCHIVED','SUPERSEDED'].includes(t.status));
-    return {capacity,template:active.find(t=>isOperatorSuppliedSourceMetadata(t))||
+    return {capacity,template:active.find(t=>isOperatorPdfSourceCode(t.code,t.nominalCapacityLitres))||
+      active.find(t=>isOperatorSuppliedSourceMetadata(t))||
       active.find(t=>t.id===defaultCharts[capacity])||
       active.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')||active[0]||null};
   });
@@ -114,6 +117,30 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       setNotice('Chart approved. You may now set it as the default for new tanks.');
     }catch(e:any){setError(plainWarning(e.message||'Approval failed.'));}
     finally{setApproving(false);}
+  };
+  const installOperatorPdf=async()=>{
+    if(!canWriteTankCalibration||!canApproveCalibrationChart||installingPdf)return;
+    setInstallingPdf(true);setError('');setNotice('');
+    try{
+      const created:string[]=[];
+      for(const capacity of [10000,20000]){
+        const source=operatorPdfSource(capacity)!;
+        if(templates.some(t=>t.code===source.code))continue;
+        const result=await apiFetch<GlobalTankCalibrationTemplate>('/api/v1/calibration-templates',{
+          method:'POST',
+          body:JSON.stringify({...source,status:'APPROVED',allowOverCapacity:true,
+            sourceFileName:'Calibration Chart.pdf',
+            notes:'Operator-supplied PDF transcription; 20 KL at 202 cm confirmed as 21,359.52 L. No engineering certificate implied. Historical tank revisions are unchanged.',
+          }),
+        });
+        if(!result.success)throw new Error(result.error?.message||'PDF chart could not be installed');
+        created.push(source.nominalCapacityLitres/1000+' KL');
+      }
+      clearApiCache();
+      await loadTemplates();
+      setNotice(created.length?'Saved separate PDF-based '+created.join(' and ')+' chart versions. Existing tanks and history remain unchanged.':'Both PDF chart versions are already saved. No duplicates created.');
+    }catch(e:any){setError(e.message||'Could not install operator PDF charts');}
+    finally{setInstallingPdf(false);}
   };
   const setDefault=async()=>{
     if(!chosen||!canSetAsDefault||settingDefault)return;
@@ -253,6 +280,13 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         </div>
         <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-[#17365D]"
           onClick={()=>{setError('');loadTemplates().catch(e=>setError(e.message));}}><RefreshCw className="mr-1 inline h-4 w-4"/>Refresh</button>
+        {canWriteTankCalibration&&canApproveCalibrationChart&&<button type="button"
+          data-testid="load-operator-pdf-chart" disabled={installingPdf}
+          onClick={()=>{void installOperatorPdf();}}
+          title="Create separate saved 10 KL and 20 KL PDF-source versions; preserve existing tank history"
+          className="ml-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 disabled:opacity-50">
+          {installingPdf?'Saving PDF charts…':'Use supplied 10 / 20 KL PDF charts'}
+        </button>}
         <button type="button" onClick={()=>setShowImport(v=>!v)}
           className="ml-2 rounded-lg bg-[#17365D] px-4 py-2 text-sm font-semibold text-white">
           {showImport?'Close import':'Import / New Chart'}

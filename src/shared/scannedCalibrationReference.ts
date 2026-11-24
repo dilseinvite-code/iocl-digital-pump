@@ -6,6 +6,7 @@
  * that every scanned row matches. Existing operational charts must not be
  * activated or overwritten on this evidence alone.
  */
+import {isOperatorPdfSourceCode} from './operatorPdfSourceData';
 export interface ScanPoint { dipMm: number; volumeLitres: number }
 export interface ScanReferenceCandidate {
   code: string;
@@ -74,7 +75,7 @@ export function reviewScannedCalibrationCandidate(candidate: ScanReferenceCandid
   const ref = scannedReferenceSpec(candidate.nominalCapacityLitres);
   if (!ref) return { passed: true, issues: [], checkedSamplePoints: 0 };
   const issues: string[] = [];
-  if (candidate.code !== ref.code) issues.push('Select the scanned '+ref.nominalCapacityLitres/1000+' KL Excel Reference chart, not an unrelated standard template.');
+  if (candidate.code !== ref.code && !isOperatorPdfSourceCode(candidate.code,ref.nominalCapacityLitres)) issues.push('Select the scanned '+ref.nominalCapacityLitres/1000+' KL Excel Reference chart, not an unrelated standard template.');
   if (candidate.tankDiameterMm !== ref.tankDiameterMm || candidate.tankLengthMm !== ref.tankLengthMm || candidate.maxDipMm !== ref.maxDipMm) {
     issues.push('Tank diameter, length or maximum dip differs from the supplied scan.');
   }

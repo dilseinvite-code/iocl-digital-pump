@@ -20,6 +20,7 @@ import { PERMISSIONS, ROLES } from '../../shared/constants';
 import { parseMilliunits, formatMilliunits } from '../../shared/precision';
 import {TEN_KL_TEMPLATE_CODE,limitTenKlCalibrationCurve} from '../../shared/tenKlCalibrationLimit';
 import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
+import {isOperatorPdfSourceCode} from '../../shared/operatorPdfSourceData';
 
 export const tankCalibration = new Hono<{ Bindings: EnvBindings }>();
 
@@ -2517,6 +2518,23 @@ tankCalibration.post('/calibration-templates', requirePermission(PERMISSIONS.TAN
   }
 
   const requestedStatus = status || 'DRAFT';
+  const isOperatorPdfRevision=isOperatorPdfSourceCode(String(code).toUpperCase(),Number(nominalCapacityLitres));
+  if(isOperatorPdfRevision){
+    if(!canAuthorizeCalibrationActivation(c)){
+      return c.json({success:false,data:null,error:{code:'FORBIDDEN',
+        message:'Importing an operational PDF source requires tank calibration and tank management access.'}},403);
+    }
+    if(requestedStatus!=='APPROVED'||overwrite===true||upsert===true||
+       !isOperatorSuppliedReference({
+         code:String(code).toUpperCase(),nominalCapacityLitres:Number(nominalCapacityLitres),
+         tankDiameterMm:Number(tankDiameterMm),tankLengthMm:Number(tankLengthMm),
+         maxDipMm:Number(maxDipMm),pointsCount:parsedPoints.length,
+         maxVolumeLitres:parsedPoints.length?parsedPoints[parsedPoints.length-1].volumeMilliunits/1000:0,
+       },parsedPoints)){
+      return c.json({success:false,data:null,error:{code:'PDF_SOURCE_ROWS_MISMATCH',
+        message:'The PDF source must contain the complete 195 or 211 exact operator-supplied rows. No existing revision will be overwritten.'}},409);
+    }
+  }
   if ((requestedStatus === 'APPROVED' || requestedStatus === 'ACTIVE') && parsedPoints.length < 2) {
     return c.json({
       success: false,
