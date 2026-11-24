@@ -3235,7 +3235,8 @@ export class PumpRepository {
   async activateOperatorPdfRevisionForTank(
     tankId:string, sourceTemplateId:string,
     sourcePoints:Array<{dipMillimetresMilliunits:number;volumeMilliunits:number}>,
-    actorUserId:string,expectedActiveChartId:string|null
+    actorUserId:string,expectedActiveChartId:string|null,
+    auditContext?:{ipAddress?:string|null;userAgent?:string|null}
   ):Promise<{chart:TankCalibrationChart;previousActiveChartId:string|null;alreadyApplied:boolean}>{
     const tank=await this.findTankById(tankId);
     if(!tank||![10000,20000].includes(tank.capacityLitres)){
@@ -3299,7 +3300,19 @@ export class PumpRepository {
     for(const part of chunkArray(points,SNAPSHOT_INSERT_CHUNK_SIZE)){
       batch.push(this.db.insert(schema.tankCalibrationPoints).values(part));
     }
-    // All chart status changes and 195/211 point inserts succeed or fail together.
+    batch.push(this.db.insert(schema.auditLogs).values({
+      id:'aud-'+crypto.randomUUID(),userId:actorUserId,
+      action:'TANK_CALIBRATION_OPERATOR_PDF_REMAP',
+      entityType:'TANK_CALIBRATION',entityId:chartId,
+      oldValueJson:JSON.stringify({chartId:oldActive?.id??null,revisionNumber:oldActive?.revisionNumber??null}),
+      newValueJson:JSON.stringify({chartId,sourceTemplateId:source.id,
+        revisionNumber,pointsCount:sourcePoints.length,effectiveFrom,
+        capacityLitres:tank.capacityLitres}),
+      ipAddress:auditContext?.ipAddress??null,userAgent:auditContext?.userAgent??null,
+      createdAt:nowIso,
+    }));
+    // Chart transition, all 195/211 source rows, and audit are one atomic D1 batch.
+    // A failed audit MUST roll back the chart switch, never leave a partial remap.
     await (this.db as any).batch(batch);
     const saved=await this.findCalibrationChartById(chartId);
     if(!saved)throw new Error('New calibration revision was not found after save.');

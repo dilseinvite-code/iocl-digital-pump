@@ -214,8 +214,7 @@ tankCalibration.post('/tanks/:tankId/calibration/operator-pdf-remap',
       }},403);
     }
     const tankId=c.req.param('tankId')||'';
-    const db=getDb(c.env.DB),repo=new PumpRepository(db),outlets=new OutletRepository(db),
-      audit=new AuditRepository(db);
+    const db=getDb(c.env.DB),repo=new PumpRepository(db),outlets=new OutletRepository(db);
     const tank=await repo.findTankById(tankId);
     if(!tank)return c.json({success:false,data:null,error:{code:'NOT_FOUND',message:'Tank not found'}},404);
     if(!await verifyOutletAuthority(c,tank.outletId,outlets)){
@@ -243,21 +242,11 @@ tankCalibration.post('/tanks/:tankId/calibration/operator-pdf-remap',
     const rows=await repo.listGlobalTankCalibrationTemplatePoints(source.id);
     try{
       const applied=await repo.activateOperatorPdfRevisionForTank(
-        tankId,source.id,rows,c.var.user!.user.id,body.expectedActiveChartId
-      );
-      if(!applied.alreadyApplied){
-        await audit.logAction({
-          id:'aud-'+crypto.randomUUID(),userId:c.var.user!.user.id,
-          action:'TANK_CALIBRATION_OPERATOR_PDF_REMAP',
-          entityType:'TANK_CALIBRATION',entityId:applied.chart.id,
-          oldValue:{chartId:applied.previousActiveChartId},
-          newValue:{chartId:applied.chart.id,sourceTemplateId:source.id,
-            capacityLitres:tank.capacityLitres,pointsCount:rows.length,
-            revisionNumber:applied.chart.revisionNumber,effectiveFrom:applied.chart.effectiveFrom},
+        tankId,source.id,rows,c.var.user!.user.id,body.expectedActiveChartId,{
           ipAddress:c.req.header('cf-connecting-ip')||null,
-          userAgent:c.req.header('user-agent')||null,createdAt:new Date().toISOString(),
-        });
-      }
+          userAgent:c.req.header('user-agent')||null,
+        }
+      );
       return c.json({success:true,data:{
         ...applied,pointsCount:rows.length,tankStatus:tank.status,
         message:applied.alreadyApplied?'This exact PDF chart is already active. No new revision created.':

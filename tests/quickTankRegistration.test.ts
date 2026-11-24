@@ -554,6 +554,10 @@ describe('Two-input global-calibration tank registration', () => {
     const revisions=await db.select().from(schema.tankCalibrationCharts)
       .where(eq(schema.tankCalibrationCharts.tankId,'tank-ro1-1'));
     expect(revisions).toHaveLength(2);
+    const audits=await db.select().from(schema.auditLogs)
+      .where(eq(schema.auditLogs.action,'TANK_CALIBRATION_OPERATOR_PDF_REMAP'));
+    expect(audits).toHaveLength(1);
+    expect(audits[0].entityId).toBe(changed.chart.id);
   });
 
   it('blocks calibration remap during an OPEN shift and for the seeded 25 KL Tank #2',async()=>{
@@ -605,6 +609,29 @@ describe('Two-input global-calibration tank registration', () => {
     });
     expect(wrong.status).toBe(409);
     expect(((await wrong.json()) as any).error.code).toBe('STALE_CALIBRATION_PREVIEW');
+  });
+
+  it('rolls back an existing-tank chart remap if its mandatory audit insert fails',async()=>{
+    const db=getDb(localD1),source=operatorPdfSource(20000)!;
+    const installed=await request('POST','/calibration-templates',{
+      ...source,status:'APPROVED',allowOverCapacity:true,
+    });
+    expect(installed.status).toBe(201);
+    const before=(await (await request('GET','/tanks/tank-ro1-1/calibration/operator-pdf-remap')).json() as any).data;
+    expect(before.ready).toBe(true);
+    await localD1.exec("CREATE TRIGGER fail_pdf_calibration_audit BEFORE INSERT ON audit_logs WHEN NEW.action='TANK_CALIBRATION_OPERATOR_PDF_REMAP' BEGIN SELECT RAISE(ABORT, 'MANDATORY_PDF_AUDIT_FAILED'); END;");
+    const failed=await request('POST','/tanks/tank-ro1-1/calibration/operator-pdf-remap',{
+      expectedActiveChartId:before.previousActiveChartId,
+    });
+    expect(failed.status).toBe(400);
+    const charts=await db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId,'tank-ro1-1'));
+    expect(charts).toHaveLength(1);
+    expect(charts[0].id).toBe(before.previousActiveChartId);
+    expect(charts[0].status).toBe('ACTIVE');
+    const audits=await db.select().from(schema.auditLogs)
+      .where(eq(schema.auditLogs.action,'TANK_CALIBRATION_OPERATOR_PDF_REMAP'));
+    expect(audits).toHaveLength(0);
   });
 
 });
