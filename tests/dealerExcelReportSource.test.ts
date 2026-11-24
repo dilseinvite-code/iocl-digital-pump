@@ -49,7 +49,9 @@ describe('Immutable Excel sources in Section-wise report and PDF',()=>{
       generatedBy:'Test Admin',sections,
     });
     const parsed=await PDFDocument.load(pdf);
-    expect(parsed.getPageCount()).toBeGreaterThanOrEqual(5);
+    // Sparse canonical/Excel sections now flow together rather than forcing five pages.
+    expect(parsed.getPageCount()).toBeGreaterThanOrEqual(1);
+    expect(parsed.getPageCount()).toBeLessThan(5);
   });
   it('never adds an unverified appendix for ordinary canonical-only reports',()=>{
     const sections=buildSectionWiseSections({

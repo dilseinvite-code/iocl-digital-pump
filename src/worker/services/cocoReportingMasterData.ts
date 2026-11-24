@@ -63,6 +63,10 @@ export function buildMasterSummaries(data: CocoReportMasterData, asOf: string): 
         .sort((x,y)=>y.inspectedOn.localeCompare(x.inspectedOn)||y.createdAt.localeCompare(x.createdAt))[0];
       return i ? [i] : [];
     });
+    // Inventory without an as-of inspection is not maintenance evidence.
+    // Preserve the canonical missing/manual status; the detailed asset table
+    // still explicitly flags the need for operational inspection.
+    if (!latest.length) continue;
     const bad = latest.filter(i=>i.condition!=='WORKING').length;
     const missing = assets.length-latest.length;
     const due = latest.flatMap(i=>i.nextServiceDate?[i.nextServiceDate]:[]).sort()[0]??null;
