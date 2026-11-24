@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy final COCO compliance reporting refinements (PR 117)
+    name: Verify and deploy single Biometric Attendance compliance row (PR 118)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
