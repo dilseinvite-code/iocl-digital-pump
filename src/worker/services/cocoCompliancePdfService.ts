@@ -23,7 +23,7 @@ const COLOR_ZEBRA_FILL = rgb(0.97, 0.97, 0.98);
 const COLOR_ALERT_FILL = rgb(0.96, 0.95, 0.93);
 const COLOR_ORANGE = rgb(0.90,0.35,0.07);
 const COLOR_NAVY = rgb(0.10,0.20,0.34);
-const statusColor = (value:string) => /expired|overdue|action required/i.test(value) ? rgb(0.64,0.12,0.12) : /pending|expiring|partial|review|paid late|service dates missing/i.test(value) ? rgb(0.57,0.32,0.05) : /^(valid|paid|working)$/i.test(value) ? rgb(0.10,0.38,0.22) : COLOR_BLACK;
+const statusColor = (value:string) => /expired|overdue|action required|not present/i.test(value) ? rgb(0.64,0.12,0.12) : /pending|expiring|partial|review|paid late|service dates missing/i.test(value) ? rgb(0.57,0.32,0.05) : /^(valid|paid|working|present)$/i.test(value) ? rgb(0.10,0.38,0.22) : COLOR_BLACK;
 
 /**
  * Replaces non-WinAnsi characters (like ₹, •, —) with safe printable ASCII equivalents

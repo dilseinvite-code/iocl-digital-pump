@@ -29,6 +29,7 @@ import {
   LinkedModuleSummary,
   STANDARD_CATEGORY_MAP,
   isRetiredCocoCategory,
+  BIOMETRIC_ATTENDANCE_CODE,
   isRecurringPaymentCategory,
   getCocoReportStatus,
   STANDARD_COCO_CATEGORIES,
@@ -365,7 +366,7 @@ export class CocoComplianceService {
   }
 
   /**
-   * Builds the full list of merged compliance records (all 13 standard categories in predefined order
+   * Builds the full list of merged compliance records (all 14 standard categories in predefined order
    * plus any custom categories for the outlet), integrating authoritative linked modules and flagging discrepancies.
    */
   async getOutletComplianceRegister(params: {
@@ -800,6 +801,13 @@ export class CocoComplianceService {
       return clean;
     };
 
+    const isBiometric = rawCategoryCode === BIOMETRIC_ATTENDANCE_CODE;
+    if (isBiometric) {
+      if (input.statusYesNo !== undefined && !['YES','NO','NOT_RECORDED'].includes(input.statusYesNo)) {
+        throw new CocoComplianceError('INVALID_STATUS','Choose Present, Not Present, or Not Recorded.',400);
+      }
+      input = {...input, statusYesNo:input.statusYesNo ?? 'NOT_RECORDED', validityDueDate:null, lastServiceDate:null, amountPaise:null, paymentDate:null, paymentStatus:'NOT_APPLICABLE',frequency:null,complianceStatus:undefined};
+    }
     const issueDate = validateOptDate(input.issueDate, 'Issue date');
     const validityDueDate = validateOptDate(input.validityDueDate, 'Validity / due date');
     const lastServiceDate = validateOptDate(input.lastServiceDate, 'Last service date');
