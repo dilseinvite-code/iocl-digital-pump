@@ -385,7 +385,7 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       <label className="mt-4 block text-xs font-semibold text-slate-600">Save into</label>
       <select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" value={creatingCustom?'__new__':selectedCode}
         onChange={e=>{if(e.target.value==='__new__'){setCreatingCustom(true);}else{setCreatingCustom(false);setSelectedCode(e.target.value);}}}>
-        {templates.map(t=><option key={t.id} value={t.code}>{t.name} ({Math.round(t.nominalCapacityLitres/1000)} KL) — {t.status}</option>)}
+        {templates.filter(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status)).map(t=><option key={t.id} value={t.code}>{t.name} ({Math.round(t.nominalCapacityLitres/1000)} KL) — {t.status}</option>)}
         <option value="__new__">Create a new custom chart</option>
       </select>
       {creatingCustom&&<div className="mt-3 grid gap-3 sm:grid-cols-2">
