@@ -5,187 +5,154 @@ import {createLocalD1Database} from '../src/db/localD1';
 import {getDb} from '../src/db';
 import * as schema from '../src/db/schema';
 import {seedDatabase} from '../src/db/seed';
-import {ExcelCalibrationImportService} from '../src/worker/services/excelCalibrationImportService';
+import {operatorPdfSource} from '../src/shared/operatorPdfSourceData';
 import {eq} from 'drizzle-orm';
 
-describe('Admin fresh start: archive all old calibration, preserve historic stock',()=>{
+describe('Replace ONLY 10KL and 20KL calibration with uploaded PDF values',()=>{
  let localD1:any,env:any,dbPath:string,cookie:string;
  beforeEach(async()=>{
-   dbPath='./.sqlite/test_clear_all_cal_'+Math.random().toString(36).slice(2)+'.db';
-   localD1=createLocalD1Database(dbPath);
-   const db=getDb(localD1);
-   await seedDatabase(db);
-   env={DB:localD1,DOCUMENTS_BUCKET:null};
-   const login=await app.fetch(new Request('http://localhost/api/v1/auth/login',{
-     method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost:3000'},
-     body:JSON.stringify({email:'admin@iocl.in',password:'Password@123'})
-   }),env);
-   expect(login.status).toBe(200);
-   cookie=login.headers.get('set-cookie')?.split(';')[0]||'';
+  dbPath='./.sqlite/test_replace_10_20_'+Math.random().toString(36).slice(2)+'.db';
+  localD1=createLocalD1Database(dbPath);
+  const db=getDb(localD1);await seedDatabase(db);
+  env={DB:localD1,DOCUMENTS_BUCKET:null};
+  const login=await app.fetch(new Request('http://localhost/api/v1/auth/login',{
+   method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost:3000'},
+   body:JSON.stringify({email:'admin@iocl.in',password:'Password@123'})
+  }),env);
+  expect(login.status).toBe(200);
+  cookie=login.headers.get('set-cookie')?.split(';')[0]||'';
  });
  afterEach(()=>{
-   try{localD1.close()}catch{}
-   for(const ext of ['', '-wal','-shm'])try{fs.unlinkSync(dbPath+ext)}catch{}
+  try{localD1.close()}catch{}
+  for(const ext of ['', '-wal','-shm'])try{fs.unlinkSync(dbPath+ext)}catch{}
  });
- const request=(method:string,path:string,payload?:any)=>app.fetch(
-   new Request('http://localhost/api/v1'+path,{
-     method,headers:{'Content-Type':'application/json',Cookie:cookie,Origin:'http://localhost:3000'},
-     ...(payload===undefined?{}:{body:JSON.stringify(payload)})
-   }),env);
- async function addTemplateAndDefault(){
-   const db=getDb(localD1),now=new Date().toISOString();
-   await db.insert(schema.globalTankCalibrationTemplates).values({
-     id:'gtct-erase-test',code:'FRESH_RESET_TEST_10KL',name:'Previous 10 KL readings',
-     nominalCapacityLitres:10000,revisionNumber:1,status:'APPROVED',
-     tankDiameterMmMilliunits:1940000,tankLengthMmMilliunits:3750000,
-     maxDipMmMilliunits:1940000,sourceFileName:'old-calibration.xlsx',
-     createdAt:now,updatedAt:now,createdBy:'user-admin'
-   });
-   await db.insert(schema.globalTankCalibrationTemplatePoints).values([
-     {id:'old-dip-0',templateId:'gtct-erase-test',dipMillimetresMilliunits:0,volumeMilliunits:0,createdAt:now,createdBy:'user-admin'},
-     {id:'old-dip-1940',templateId:'gtct-erase-test',dipMillimetresMilliunits:1940000,volumeMilliunits:11073410,createdAt:now,createdBy:'user-admin'}
-   ]);
-   await db.insert(schema.globalTankCapacityDefaults).values({
-     capacityLitres:10000,templateId:'gtct-erase-test',updatedBy:'user-admin',updatedAt:now
-   }).onConflictDoNothing();
+ const request=(method:string,path:string,payload?:any)=>app.fetch(new Request(
+  'http://localhost/api/v1'+path,{
+   method,headers:{'Content-Type':'application/json',Cookie:cookie,Origin:'http://localhost:3000'},
+   ...(payload===undefined?{}:{body:JSON.stringify(payload)})
+  }),env);
+ async function prepareOldSource(capacity:number,code:string){
+  const db=getDb(localD1),now=new Date().toISOString();
+  const id='old-source-'+capacity;
+  await db.insert(schema.globalTankCalibrationTemplates).values({
+   id,code,name:'Old '+capacity+' Excel',nominalCapacityLitres:capacity,
+   revisionNumber:1,status:'APPROVED',createdAt:now,updatedAt:now,createdBy:'user-admin'
+  });
+  await db.insert(schema.globalTankCalibrationTemplatePoints).values([
+   {id:'old-zero-'+capacity,templateId:id,dipMillimetresMilliunits:0,volumeMilliunits:0,createdAt:now,createdBy:'user-admin'},
+   {id:'old-ten-'+capacity,templateId:id,dipMillimetresMilliunits:10000,volumeMilliunits:10000,createdAt:now,createdBy:'user-admin'},
+  ]);
+  return id;
  }
- it('archives all global and tank charts, clears default selection and inactivates tanks without deleting historic values',async()=>{
-   const db=getDb(localD1);
-   await addTemplateAndDefault();
-   const beforePoints=await db.select().from(schema.tankCalibrationPoints);
-   const beforeTemplates=await db.select().from(schema.globalTankCalibrationTemplatePoints);
-   const stockBefore=await db.select().from(schema.tankStockReadings);
-   const snapshotsBefore=await db.select().from(schema.operationalShiftTanks);
-   const baseline=await db.select().from(schema.tankCalibrationCharts);
-   expect(baseline.some(c=>c.status==='ACTIVE')).toBe(true);
-   const preview=await request('GET','/calibration-templates/reset-all-preview');
-   expect(preview.status).toBe(200);
-   const plan=(await preview.json() as any).data;
-   expect(plan.openOrClosingShifts).toBe(0);
-   expect(plan.globalSourcesToArchive).toBeGreaterThan(0);
-   expect(plan.tankChartsToArchive).toBeGreaterThan(0);
-   expect(plan.defaultChartMappingsToClear).toBeGreaterThan(0);
-   expect((await request('POST','/calibration-templates/reset-all',{confirm:'CLEAR'})).status).toBe(400);
-   const result=await request('POST','/calibration-templates/reset-all',{confirm:'CLEAR ALL CALIBRATION'});
-   expect(result.status).toBe(200);
-   expect((await result.json() as any).data.completed).toBe(true);
-   const templates=await db.select().from(schema.globalTankCalibrationTemplates);
-   expect(templates.every(t=>t.status==='ARCHIVED'||t.status==='SUPERSEDED')).toBe(true);
-   const charts=await db.select().from(schema.tankCalibrationCharts);
-   expect(charts.every(c=>c.status==='ARCHIVED'||c.status==='SUPERSEDED')).toBe(true);
-   expect(await db.select().from(schema.globalTankCapacityDefaults)).toHaveLength(0);
-   const tanks=await db.select().from(schema.tanks);
-   expect(tanks.every(t=>t.status!=='ACTIVE')).toBe(true);
-   expect(await db.select().from(schema.tankCalibrationPoints)).toEqual(beforePoints);
-   expect(await db.select().from(schema.globalTankCalibrationTemplatePoints)).toEqual(beforeTemplates);
-   expect(await db.select().from(schema.tankStockReadings)).toEqual(stockBefore);
-   expect(await db.select().from(schema.operationalShiftTanks)).toEqual(snapshotsBefore);
-   const audit=await db.select().from(schema.auditLogs)
-     .where(eq(schema.auditLogs.action,'ALL_CALIBRATION_ARCHIVED_FOR_FRESH_START'));
-   expect(audit).toHaveLength(1);
-   const next=await request('POST','/outlets/ro-1001/tanks/quick-register',{
-     name:'Fresh 10 KL tank after reset',capacityLitres:10000
-   });
-   expect(next.status).toBe(409);
-   const error=(await next.json() as any).error.code;
-   expect(['CALIBRATION_NOT_FOUND','DEFAULT_CHART_REQUIRED']).toContain(error);
+ it('purges old 10/20 global rows, installs PDF values and leaves 50/25 KL unchanged',async()=>{
+  const db=getDb(localD1);
+  const old10=await prepareOldSource(10000,'EXCEL_10KL_REFERENCE');
+  const old20=await prepareOldSource(20000,'EXCEL_20KL_REFERENCE');
+  const allBefore=await db.select().from(schema.tanks);
+  const twentyFive=allBefore.find(t=>t.id==='tank-ro1-2');
+  const fiftyTemplate=await db.select().from(schema.globalTankCalibrationTemplates)
+   .where(eq(schema.globalTankCalibrationTemplates.code,'STANDARD_50KL'));
+  const fiftyPoints=await db.select().from(schema.globalTankCalibrationTemplatePoints)
+   .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,fiftyTemplate[0].id));
+  const stockBefore=await db.select().from(schema.tankStockReadings);
+  const preview=await request('GET','/calibration-templates/replace-10-20-preview');
+  expect(preview.status).toBe(200);
+  expect((await preview.json() as any).data.oldGlobalSources).toBeGreaterThan(0);
+  expect((await request('POST','/calibration-templates/replace-10-20',{confirm:'CLEAR ALL CALIBRATION'})).status).toBe(400);
+  const response=await request('POST','/calibration-templates/replace-10-20',{confirm:'REPLACE 10KL 20KL'});
+  expect(response.status).toBe(200);
+  expect((await response.json() as any).data.completed).toBe(true);
+  const after=await db.select().from(schema.globalTankCalibrationTemplates);
+  for(const id of [old10,old20]){
+   expect(after.find(t=>t.id===id)?.status).toBe('ARCHIVED');
+   expect(await db.select().from(schema.globalTankCalibrationTemplatePoints)
+    .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,id))).toHaveLength(0);
+  }
+  for(const capacity of [10000,20000]){
+   const source=operatorPdfSource(capacity)!;
+   const saved=after.find(t=>t.code===source.code);
+   expect(saved?.status).toBe('APPROVED');
+   const rows=await db.select().from(schema.globalTankCalibrationTemplatePoints)
+    .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,saved!.id));
+   expect(rows).toHaveLength(source.points.length);
+   const record=rows.find(row=>row.dipMillimetresMilliunits===2020000);
+   if(capacity===20000)expect(record?.volumeMilliunits).toBe(21359520);
+   const defaults=await db.select().from(schema.globalTankCapacityDefaults)
+    .where(eq(schema.globalTankCapacityDefaults.capacityLitres,capacity));
+   expect(defaults[0]?.templateId).toBe(saved!.id);
+  }
+  const afterTanks=await db.select().from(schema.tanks);
+  expect(afterTanks.find(t=>t.id==='tank-ro1-1')?.status).toBe('INACTIVE');
+  expect(afterTanks.find(t=>t.id==='tank-ro1-2')?.status).toBe(twentyFive?.status);
+  expect(await db.select().from(schema.globalTankCalibrationTemplatePoints)
+   .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,fiftyTemplate[0].id))).toEqual(fiftyPoints);
+  expect(await db.select().from(schema.tankStockReadings)).toEqual(stockBefore);
+  const audit=await db.select().from(schema.auditLogs)
+   .where(eq(schema.auditLogs.action,'REPLACE_10KL_20KL_WITH_PDF'));
+  expect(audit).toHaveLength(1);
  });
- it('blocks the organization-wide reset while any shift is OPEN or CLOSING',async()=>{
-   const db=getDb(localD1),now=new Date().toISOString();
-   const [shiftTemplate]=await db.select().from(schema.globalShiftTemplates);
-   await db.insert(schema.operationalShifts).values({
-     id:'reset-open-shift',outletId:'ro-1001',shiftTemplateId:shiftTemplate.id,
-     businessDate:'2026-11-24',startedAt:now,status:'OPEN',
-     openedByUserId:'user-admin',createdAt:now,updatedAt:now
-   });
-   const preview=await request('GET','/calibration-templates/reset-all-preview');
-   expect((await preview.json() as any).data.openOrClosingShifts).toBe(1);
-   const failed=await request('POST','/calibration-templates/reset-all',{
-     confirm:'CLEAR ALL CALIBRATION'
-   });
-   expect(failed.status).toBe(409);
-   expect((await failed.json() as any).error.code).toBe('OPEN_SHIFTS_BLOCK_CALIBRATION_RESET');
-   const [old]=await db.select().from(schema.tankCalibrationCharts)
-     .where(eq(schema.tankCalibrationCharts.id,'tcc-legacy-tank-ro1-1-r1'));
-   expect(old.status).toBe('ACTIVE');
+ it('preserves existing historically referenced 20KL tank chart rows',async()=>{
+  const db=getDb(localD1),now=new Date().toISOString(),oldId='tcc-legacy-tank-ro1-1-r1';
+  const oldPoints=await db.select().from(schema.tankCalibrationPoints)
+   .where(eq(schema.tankCalibrationPoints.chartId,oldId));
+  const [template]=await db.select().from(schema.globalShiftTemplates);
+  const id='old-20kl-history-'+Math.random().toString(36).slice(2);
+  await db.insert(schema.operationalShifts).values({
+   id,outletId:'ro-1001',shiftTemplateId:template.id,businessDate:'2024-01-01',
+   startedAt:'2024-01-01T06:00:00Z',closedAt:'2024-01-01T14:00:00Z',
+   status:'CLOSED',openedByUserId:'user-admin',closedByUserId:'user-admin',
+   createdAt:now,updatedAt:now
+  });
+  await db.insert(schema.tankStockReadings).values({
+   id:'old-stock-'+id,operationalShiftId:id,outletId:'ro-1001',
+   tankId:'tank-ro1-1',productId:'prod-ms',readingType:'OPENING',source:'MANUAL',
+   productDipMmMilliunits:1000000,waterDipMmMilliunits:0,
+   grossObservedVolumeMilliunits:8000000,waterVolumeMilliunits:0,
+   netProductVolumeMilliunits:8000000,calibrationChartId:oldId,
+   calibrationRevision:1,recordedAt:now,recordedByUserId:'user-admin',createdAt:now,updatedAt:now
+  });
+  const action=await request('POST','/calibration-templates/replace-10-20',{confirm:'REPLACE 10KL 20KL'});
+  expect(action.status).toBe(200);
+  const [chart]=await db.select().from(schema.tankCalibrationCharts)
+   .where(eq(schema.tankCalibrationCharts.id,oldId));
+  expect(chart.status).toBe('ARCHIVED');
+  const points=await db.select().from(schema.tankCalibrationPoints)
+   .where(eq(schema.tankCalibrationPoints.chartId,oldId));
+  expect(points).toEqual(oldPoints);
+  const [reading]=await db.select().from(schema.tankStockReadings)
+   .where(eq(schema.tankStockReadings.operationalShiftId,id));
+  expect(reading.netProductVolumeMilliunits).toBe(8000000);
+  expect(reading.calibrationChartId).toBe(oldId);
  });
- it('rolls back all calibration and tank status updates if the mandatory audit fails',async()=>{
-   const db=getDb(localD1);
-   await addTemplateAndDefault();
-   await localD1.exec("CREATE TRIGGER deny_global_calibration_reset BEFORE INSERT ON audit_logs WHEN NEW.action='ALL_CALIBRATION_ARCHIVED_FOR_FRESH_START' BEGIN SELECT RAISE(ABORT,'AUDIT_RESET_REJECTED'); END;");
-   const response=await request('POST','/calibration-templates/reset-all',{
-     confirm:'CLEAR ALL CALIBRATION'
-   });
-   expect(response.status).toBe(500);
-   const [chart]=await db.select().from(schema.tankCalibrationCharts)
-     .where(eq(schema.tankCalibrationCharts.id,'tcc-legacy-tank-ro1-1-r1'));
-   expect(chart.status).toBe('ACTIVE');
-   const [template]=await db.select().from(schema.globalTankCalibrationTemplates)
-     .where(eq(schema.globalTankCalibrationTemplates.id,'gtct-erase-test'));
-   expect(template.status).toBe('APPROVED');
-   expect(await db.select().from(schema.globalTankCapacityDefaults)).toHaveLength(1);
-   const [tank]=await db.select().from(schema.tanks)
-     .where(eq(schema.tanks.id,'tank-ro1-1'));
-   expect(tank.status).toBe('ACTIVE');
+ it('blocks requested deletion while an operational shift is open',async()=>{
+  const db=getDb(localD1),now=new Date().toISOString();
+  const [shiftTemplate]=await db.select().from(schema.globalShiftTemplates);
+  await db.insert(schema.operationalShifts).values({
+   id:'open-shift-blocks-10kl-20kl',outletId:'ro-1001',
+   shiftTemplateId:shiftTemplate.id,businessDate:'2026-11-24',
+   startedAt:now,status:'OPEN',openedByUserId:'user-admin',createdAt:now,updatedAt:now
+  });
+  const res=await request('POST','/calibration-templates/replace-10-20',{confirm:'REPLACE 10KL 20KL'});
+  expect(res.status).toBe(409);
+  const j=await res.json() as any;
+  expect(j.error.code).toBe('SHIFT_OPEN');
+  const [tank]=await db.select().from(schema.tanks)
+   .where(eq(schema.tanks.id,'tank-ro1-1'));
+  expect(tank.status).toBe('ACTIVE');
  });
- it('imports a fresh Excel revision without reopening the archived source code',async()=>{
-   const db=getDb(localD1),now=new Date().toISOString();
-   await db.insert(schema.globalTankCalibrationTemplates).values({
-     id:'archive-original-excel-10',code:'EXCEL_10KL_REFERENCE',name:'Old Excel 10 KL',
-     nominalCapacityLitres:10000,status:'ARCHIVED',revisionNumber:1,
-     createdAt:now,updatedAt:now,createdBy:'user-admin'
-   });
-   const workbook=fs.readFileSync('tests/fixtures/20KL_15KL_10KL_calibration_Dip_chart.xlsx');
-   const extracted=await ExcelCalibrationImportService.extractWorkbook(workbook,'fresh.xlsx');
-   const result=await ExcelCalibrationImportService.importEligibleCharts(
-     db,extracted,{userId:'user-admin'},
-     {confirmImport:true,targetCodes:['EXCEL_10KL_REFERENCE']}
-   );
-   expect(result.importedTemplates).toHaveLength(1);
-   const fresh=result.importedTemplates[0];
-   expect(fresh.code).toMatch(/^EXCEL_10KL_REFERENCE_FRESH_[A-F0-9]{8}$/);
-   expect(fresh.status).toBe('DRAFT');
-   const [archived]=await db.select().from(schema.globalTankCalibrationTemplates)
-     .where(eq(schema.globalTankCalibrationTemplates.id,'archive-original-excel-10'));
-   expect(archived.status).toBe('ARCHIVED');
-   const saved=await db.select().from(schema.globalTankCalibrationTemplates)
-     .where(eq(schema.globalTankCalibrationTemplates.code,fresh.code));
-   expect(saved).toHaveLength(1);
-   const points=await db.select().from(schema.globalTankCalibrationTemplatePoints)
-     .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,saved[0].id));
-   expect(points).toHaveLength(195);
+ it('rolls back old-data purge if audit insert fails',async()=>{
+  const db=getDb(localD1);
+  const old=await prepareOldSource(10000,'EXCEL_10KL_REFERENCE');
+  await localD1.exec("CREATE TRIGGER prevent_pdf_replacement_audit BEFORE INSERT ON audit_logs WHEN NEW.action='REPLACE_10KL_20KL_WITH_PDF' BEGIN SELECT RAISE(ABORT,'AUDIT_FAILURE'); END;");
+  const result=await request('POST','/calibration-templates/replace-10-20',{confirm:'REPLACE 10KL 20KL'});
+  expect(result.status).toBe(500);
+  const [oldSource]=await db.select().from(schema.globalTankCalibrationTemplates)
+   .where(eq(schema.globalTankCalibrationTemplates.id,old));
+  expect(oldSource.status).toBe('APPROVED');
+  expect(await db.select().from(schema.globalTankCalibrationTemplatePoints)
+   .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,old))).toHaveLength(2);
+  const [oldTank]=await db.select().from(schema.tanks)
+   .where(eq(schema.tanks.id,'tank-ro1-1'));
+  expect(oldTank.status).toBe('ACTIVE');
  });
-
- it('does not resurrect orphan legacy calibration points after the all-chart reset',async()=>{
-   const db=getDb(localD1),now=new Date().toISOString(),id='legacy-only-reset-tank';
-   await db.insert(schema.tanks).values({
-     id,outletId:'ro-1001',tankNumber:99,name:'Old unversioned 10KL tank',
-     productId:'prod-ms',capacityLitres:10000,safeFillCapacityLitres:9000,
-     minimumOperatingLevelLitres:0,status:'ACTIVE',createdAt:now,updatedAt:now,
-     createdBy:'user-admin'
-   });
-   await db.insert(schema.tankCalibrationPoints).values([
-     {id:'legacy-unlinked-zero',chartId:null,tankId:id,dipMillimetresMilliunits:0,
-       volumeMilliunits:0,createdAt:now,createdBy:'user-admin'},
-     {id:'legacy-unlinked-ten',chartId:null,tankId:id,dipMillimetresMilliunits:10000,
-       volumeMilliunits:6900,createdAt:now,createdBy:'user-admin'},
-   ]);
-   const reset=await request('POST','/calibration-templates/reset-all',{
-     confirm:'CLEAR ALL CALIBRATION'
-   });
-   expect(reset.status).toBe(200);
-   const view=await request('GET','/tanks/'+id+'/calibration');
-   expect(view.status).toBe(200);
-   const body=(await view.json() as any);
-   expect(body.data).toHaveLength(0);
-   expect(body.activeChart).toBeNull();
-   const charts=await db.select().from(schema.tankCalibrationCharts)
-     .where(eq(schema.tankCalibrationCharts.tankId,id));
-   expect(charts).toHaveLength(0);
-   const oldPoints=await db.select().from(schema.tankCalibrationPoints)
-     .where(eq(schema.tankCalibrationPoints.tankId,id));
-   expect(oldPoints).toHaveLength(2);
-   expect(oldPoints.every(p=>p.chartId===null)).toBe(true);
- });
-
 });
