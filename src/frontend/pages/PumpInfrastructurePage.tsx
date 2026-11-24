@@ -78,6 +78,14 @@ import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
 import {consumeWorkspaceSection} from '../components/layout/workspaceTaskCatalog';
 
+type PdfRemapPreview = {
+  ready:boolean;code:string|null;message:string|null;alreadyApplied:boolean;
+  tankId:string;tankNumber:number;capacityLitres:number;safeFillCapacityLitres:number;
+  sourceCode:string|null;sourceTemplateId:string|null;sourceReadings:number;
+  sourceMaxVolumeLitres:number|null;previousActiveChartId:string|null;
+  previousActiveRevisionNumber:number|null;previousHistoricalReadings:number;
+  openShiftPresent:boolean;
+};
 type PendingQuickTank = {
   id: string; outletId: string; name: string; capacityLitres: number;
   templateId: string; status: 'PENDING_FUEL'; createdAt: string;
@@ -161,6 +169,9 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [calActiveChart, setCalActiveChart] = useState<TankCalibrationChart | null>(null);
   const [calSelectedChart, setCalSelectedChart] = useState<TankCalibrationChart | null>(null);
   const [calGlobalSource, setCalGlobalSource] = useState<GlobalTankCalibrationTemplate | null>(null);
+  const [pdfRemapPreview,setPdfRemapPreview]=useState<PdfRemapPreview|null>(null);
+  const [pdfRemapLoading,setPdfRemapLoading]=useState(false);
+  const [pdfRemapNotice,setPdfRemapNotice]=useState('');
   const [calShowAdvanced, setCalShowAdvanced] = useState(false);
   const [initialGlobalChartCode, setInitialGlobalChartCode] = useState('');
   const [calModalPoints, setCalModalPoints] = useState<TankCalibrationPoint[]>([]);
@@ -892,12 +903,55 @@ export const PumpInfrastructurePage: React.FC = () => {
     }
   };
 
+  const loadPdfRemapPreview=async(tankId:string)=>{
+    setPdfRemapLoading(true);
+    try{
+      const result=await apiFetch<PdfRemapPreview>(
+        '/api/v1/tanks/'+encodeURIComponent(tankId)+'/calibration/operator-pdf-remap',
+        {cache:'no-store'}
+      );
+      if(!result.success||!result.data)throw new Error(result.error?.message||'Cannot check PDF calibration readiness.');
+      setPdfRemapPreview(result.data);
+    }catch(error:any){
+      setPdfRemapPreview(null);
+      setPdfRemapNotice(error.message||'Cannot check PDF calibration readiness.');
+    }finally{
+      setPdfRemapLoading(false);
+    }
+  };
+  const usePdfCalibrationForTank=async()=>{
+    if(!calibratingTank||!pdfRemapPreview?.ready||pdfRemapPreview.alreadyApplied||modalSubmitting)return;
+    setModalSubmitting(true);setModalError(null);setPdfRemapNotice('');
+    try{
+      const response=await apiFetch<{
+        chart:TankCalibrationChart;previousActiveChartId:string|null;
+        alreadyApplied:boolean;pointsCount:number;tankStatus:string;message:string;
+      }>('/api/v1/tanks/'+encodeURIComponent(calibratingTank.id)+'/calibration/operator-pdf-remap',{
+        method:'POST',
+        body:JSON.stringify({expectedActiveChartId:pdfRemapPreview.previousActiveChartId})
+      });
+      if(!response.success||!response.data)throw new Error(response.error?.message||'Could not use the PDF chart.');
+      clearApiCache();
+      await refreshTankCalibration(calibratingTank.id,response.data.chart.id);
+      await loadPdfRemapPreview(calibratingTank.id);
+      notifyCalibrationChanged(calibratingTank.id);
+      setPdfRemapNotice('PDF calibration applied as Revision #'+response.data.chart.revisionNumber+
+        '. Previous readings preserved. Tank status remains '+response.data.tankStatus+'.');
+    }catch(error:any){
+      setModalError(error.message||'The calibration was not changed.');
+      await loadPdfRemapPreview(calibratingTank.id);
+    }finally{
+      setModalSubmitting(false);
+    }
+  };
   const openCalibrationModal = async (t: Tank) => {
     setCalibratingTank(t);
     setCalCharts([]);
     setCalActiveChart(null);
     setCalSelectedChart(null);
     setCalGlobalSource(null);
+    setPdfRemapPreview(null);
+    setPdfRemapNotice('');
     setCalShowAdvanced(false);
     setCalModalPoints([]);
     setCalEditingPoint(null);
@@ -924,6 +978,9 @@ export const PumpInfrastructurePage: React.FC = () => {
     setModalError(null);
     setModalType('tankCalibration');
     await refreshTankCalibration(t.id);
+    if(t.capacityLitres===10000||t.capacityLitres===20000){
+      await loadPdfRemapPreview(t.id);
+    }
   };
 
   const handleSelectCalibrationChartRevision = async (chartId: string) => {
@@ -3287,6 +3344,52 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </button>
               </div>
 
+              {(calibratingTank.capacityLitres===10000||calibratingTank.capacityLitres===20000) && canReadTankCalibration && (
+                <section data-testid="existing-tank-pdf-remap"
+                  className="rounded-xl border border-[#B8D5C7] bg-[#F4FAF7] p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-bold text-[#17365D]">Use supplied {calibratingTank.capacityLitres/1000} KL PDF calibration</p>
+                      <p className="text-xs text-slate-600">Creates a new active chart revision for this tank. Older readings and reports remain unchanged.</p>
+                    </div>
+                    <button type="button" onClick={()=>{void loadPdfRemapPreview(calibratingTank.id);}}
+                      disabled={pdfRemapLoading||modalSubmitting}
+                      className="rounded-lg border border-[#B8D5C7] bg-white px-3 py-2 text-xs font-semibold text-[#17365D] disabled:opacity-50">
+                      {pdfRemapLoading?'Checking…':'Refresh'}
+                    </button>
+                  </div>
+                  {pdfRemapLoading&&!pdfRemapPreview&&<p className="text-xs text-[#475569]">Checking saved chart and open shift…</p>}
+                  {pdfRemapPreview&&<>
+                    <div className="flex flex-wrap gap-3 text-xs text-[#334155]">
+                      <span>{pdfRemapPreview.sourceReadings} saved source readings</span>
+                      <span>Current: Rev #{pdfRemapPreview.previousActiveRevisionNumber??'—'}</span>
+                      <span>Safe-fill: {pdfRemapPreview.safeFillCapacityLitres.toLocaleString('en-IN')} L (unchanged)</span>
+                    </div>
+                    {pdfRemapPreview.alreadyApplied&&
+                      <p className="text-sm font-semibold text-emerald-800" role="status">
+                        This PDF calibration is already active for Tank #{calibratingTank.tankNumber}. No duplicate revision needed.
+                      </p>}
+                    {!pdfRemapPreview.ready&&
+                      <p role="status" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+                        {pdfRemapPreview.message||'PDF source not ready.'}
+                      </p>}
+                    {pdfRemapPreview.code==='PDF_SOURCE_NOT_INSTALLED'&&canApproveCalibrationChart&&
+                      <button type="button" onClick={()=>{
+                        setInitialGlobalChartCode('');
+                        setModalType(null);setActiveTab('globalCalibration');
+                      }} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-[#17365D]">
+                        Open Tank Calibration to install the PDF charts
+                      </button>}
+                    {pdfRemapPreview.ready&&!pdfRemapPreview.alreadyApplied&&canApproveCalibrationChart&&
+                      <button type="button" data-testid="apply-pdf-calibration-existing-tank"
+                        onClick={()=>{void usePdfCalibrationForTank();}} disabled={modalSubmitting||pdfRemapLoading}
+                        className="rounded-lg bg-[#17365D] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+                        {modalSubmitting?'Applying PDF chart…':'Use PDF chart for Tank #'+calibratingTank.tankNumber}
+                      </button>}
+                  </>}
+                  {pdfRemapNotice&&<p className="text-sm font-semibold text-emerald-800" role="status">{pdfRemapNotice}</p>}
+                </section>
+              )}
               {calSelectedChart?.sourceTemplateId && !calShowAdvanced && (
                 <section className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 space-y-4" data-testid="global-calibration-linked-summary">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
