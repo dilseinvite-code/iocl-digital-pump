@@ -43,6 +43,10 @@ jobs:
         run: |
           bun run typecheck
           bun test
+      - name: Confirm shift blocker details endpoint is included
+        run: |
+          grep -q "blockingShifts:shifts.map" src/worker/routes/tankCalibration.ts
+          grep -q "replace-10-20-preview" src/worker/routes/tankCalibration.ts
       - name: Read-only remote D1 compatibility check
         shell: bash
         run: |

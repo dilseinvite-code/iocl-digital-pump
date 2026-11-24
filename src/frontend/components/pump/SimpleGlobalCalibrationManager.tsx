@@ -60,6 +60,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     oldUnreferencedTankRevisions:number;protectedHistoricalRevisions:number;
     activeTanksToInactivate:number;existingDefaultMappings:number;
     openOrClosingShifts:number;replacement10klPoints:number;replacement20klPoints:number;
+    blockingShifts:Array<{
+      id:string;outletId:string;outletCode:string;outletName:string;businessDate:string;
+      status:'OPEN'|'CLOSING';shiftName:string;startedAt:string;
+    }>;
   }|null>(null);
   const [resetText,setResetText]=useState('');
   const [resetBusy,setResetBusy]=useState(false);
@@ -165,6 +169,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         oldUnreferencedTankRevisions:number;protectedHistoricalRevisions:number;
         activeTanksToInactivate:number;existingDefaultMappings:number;
         openOrClosingShifts:number;replacement10klPoints:number;replacement20klPoints:number;
+    blockingShifts:Array<{
+      id:string;outletId:string;outletCode:string;outletName:string;businessDate:string;
+      status:'OPEN'|'CLOSING';shiftName:string;startedAt:string;
+    }>;
       }>('/api/v1/calibration-templates/replace-10-20-preview',{cache:'no-store'});
       if(!res.success||!res.data)throw new Error(res.error?.message||'Cannot preview calibration reset.');
       setResetPreview(res.data);
@@ -359,7 +367,32 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         <span>New PDF readings: {resetPreview.replacement10klPoints + resetPreview.replacement20klPoints}</span>
       </div>}
       {resetPreview?.openOrClosingShifts?(
-        <p role="alert" className="text-sm font-bold text-rose-900">Cannot clear while {resetPreview.openOrClosingShifts} shift(s) are OPEN or CLOSING.</p>
+        <div role="alert" data-testid="blocking-calibration-shifts" className="space-y-2 rounded-xl border border-rose-300 bg-white p-3">
+          <p className="text-sm font-bold text-rose-900">
+            Cannot replace calibration: {resetPreview.openOrClosingShifts} OPEN/CLOSING shift(s) across all outlets.
+          </p>
+          <p className="text-xs text-slate-700">
+            The Daily Operations page shows shifts only for the selected outlet and business date.
+            Find these exact records, complete their closing readings and close them before replacing calibration.
+            Do not open a new shift.
+          </p>
+          {(resetPreview.blockingShifts||[]).map(shift=>(
+            <div key={shift.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+              <div className="space-y-0.5">
+                <p className="font-bold text-[#17365D]">{shift.outletCode} — {shift.outletName}</p>
+                <p className="text-slate-700">
+                  Date: <strong>{shift.businessDate}</strong> · {shift.shiftName} ·
+                  <strong className="ml-1 text-rose-700">{shift.status}</strong>
+                </p>
+              </div>
+              <span className="text-slate-500">Shift ID: {shift.id}</span>
+            </div>
+          ))}
+          <button type="button" disabled={resetBusy} onClick={()=>{void showCalibrationReset();}}
+            className="rounded-lg border border-[#B9CFE6] bg-white px-3 py-2 text-xs font-semibold text-[#17365D]">
+            Recheck open shifts
+          </button>
+        </div>
       ):null}
       <label className="block text-xs font-bold text-rose-900">Type REPLACE 10KL 20KL to confirm</label>
       <input type="text" value={resetText} onChange={e=>setResetText(e.target.value)}
