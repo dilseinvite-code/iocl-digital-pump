@@ -234,7 +234,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
       categoryCode:'PPL_LICENCE', categoryName:'Public Performance Licence (PPL)',
       displayOrder:12, isCustomCategory:0, paymentStatus:'NOT_RECORDED',
       complianceStatus:'NOT_RECORDED', statusYesNo:'NOT_RECORDED',
-      attachmentDocumentIdsJson:'[]', createdAt:now, updatedAt:now,
+      attachmentDocumentIdsJson:'[]', createdBy:'user-admin', updatedBy:'user-admin', createdAt:now, updatedAt:now,
     });
     const response = await app.request('/api/v1/documents/compliance/register?outletId='+OUTLET_3_ID,
       {headers:{Cookie:adminCookie}},env);
