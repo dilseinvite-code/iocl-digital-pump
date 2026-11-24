@@ -1,0 +1,72 @@
+name: Sync Cloudflare Worker API (code only)
+
+# One-time Worker deployment when this workflow file reaches main.
+# No migrations, reset, purge or data writes happen in this workflow.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-cloudflare-worker-api.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iocl-cloudflare-worker-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-worker:
+    name: Check D1 schema and deploy API code
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Check available deployment credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Cloudflare deployment secrets are missing. No changes performed."
+            exit 1
+          fi
+      - name: Typecheck and full regression suite
+        run: |
+          bun run typecheck
+          bun test
+      - name: Read-only remote D1 compatibility check
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT=$(npx wrangler d1 execute iocl-pump-manager-d1 \
+            --remote \
+            --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('global_tank_calibration_templates','global_tank_calibration_template_points','global_tank_capacity_defaults','tank_calibration_charts','tank_calibration_points','tanks','operational_shifts','tank_stock_readings','operational_shift_tanks','audit_logs','pending_underground_tanks');" \
+            --json --yes)
+          printf '%s\n' "$RESULT" | jq -e '
+            (.[0].results | map(.name)) as $actual |
+            ["global_tank_calibration_templates","global_tank_calibration_template_points",
+             "global_tank_capacity_defaults","tank_calibration_charts","tank_calibration_points",
+             "tanks","operational_shifts","tank_stock_readings","operational_shift_tanks",
+             "audit_logs","pending_underground_tanks"] |
+            all(. as $required | $actual | index($required) != null)
+          ' >/dev/null || {
+            echo "::error::Remote D1 schema is incompatible. No Worker deploy, migration, or data modification."
+            exit 1
+          }
+          echo "Schema compatible. No database rows were touched."
+      - name: Deploy Cloudflare Worker code only
+        run: npx wrangler deploy
+      - name: Summarize production boundary
+        if: success()
+        run: |
+          echo "Worker API code synchronized. No D1 reset/deletion/migration performed." >> "$GITHUB_STEP_SUMMARY"
+          echo "The authenticated admin must still trigger the 10/20 KL PDF replacement." >> "$GITHUB_STEP_SUMMARY"
