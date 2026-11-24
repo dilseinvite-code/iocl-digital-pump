@@ -5,6 +5,7 @@ import {createLocalD1Database} from '../src/db/localD1';
 import {getDb} from '../src/db';
 import * as schema from '../src/db/schema';
 import {seedDatabase} from '../src/db/seed';
+import {ExcelCalibrationImportService} from '../src/worker/services/excelCalibrationImportService';
 import {eq} from 'drizzle-orm';
 
 describe('Admin fresh start: archive all old calibration, preserve historic stock',()=>{
@@ -127,4 +128,32 @@ describe('Admin fresh start: archive all old calibration, preserve historic stoc
      .where(eq(schema.tanks.id,'tank-ro1-1'));
    expect(tank.status).toBe('ACTIVE');
  });
+ it('imports a fresh Excel revision without reopening the archived source code',async()=>{
+   const db=getDb(localD1),now=new Date().toISOString();
+   await db.insert(schema.globalTankCalibrationTemplates).values({
+     id:'archive-original-excel-10',code:'EXCEL_10KL_REFERENCE',name:'Old Excel 10 KL',
+     nominalCapacityLitres:10000,status:'ARCHIVED',revisionNumber:1,
+     createdAt:now,updatedAt:now,createdBy:'user-admin'
+   });
+   const workbook=fs.readFileSync('tests/fixtures/20KL_15KL_10KL_calibration_Dip_chart.xlsx');
+   const extracted=await ExcelCalibrationImportService.extractWorkbook(workbook,'fresh.xlsx');
+   const result=await ExcelCalibrationImportService.importEligibleCharts(
+     db,extracted,{userId:'user-admin'},
+     {confirmImport:true,targetCodes:['EXCEL_10KL_REFERENCE']}
+   );
+   expect(result.importedTemplates).toHaveLength(1);
+   const fresh=result.importedTemplates[0];
+   expect(fresh.code).toMatch(/^EXCEL_10KL_REFERENCE_FRESH_[A-F0-9]{8}$/);
+   expect(fresh.status).toBe('DRAFT');
+   const [archived]=await db.select().from(schema.globalTankCalibrationTemplates)
+     .where(eq(schema.globalTankCalibrationTemplates.id,'archive-original-excel-10'));
+   expect(archived.status).toBe('ARCHIVED');
+   const saved=await db.select().from(schema.globalTankCalibrationTemplates)
+     .where(eq(schema.globalTankCalibrationTemplates.code,fresh.code));
+   expect(saved).toHaveLength(1);
+   const points=await db.select().from(schema.globalTankCalibrationTemplatePoints)
+     .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,saved[0].id));
+   expect(points).toHaveLength(195);
+ });
+
 });
