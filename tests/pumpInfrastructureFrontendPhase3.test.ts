@@ -10,6 +10,7 @@ import {
   getPumpInfrastructureErrorMessage,
   getProductCategoryBadgeClass,
   getTankCalibrationStatus,
+  getTankCardCalibrationStatus,
   buildDummyCalibrationPreset,
   formatDummyCalibrationPresetText,
   validateCalibrationChartPoints,
@@ -396,6 +397,20 @@ describe('Phase 3 Pump Infrastructure Pure Frontend Helpers Suite', () => {
   // 10. Tank Calibration Chart Management Helpers
   // =========================================================================
   describe('Tank Calibration Chart Management Helpers', () => {
+    it('never flashes missing while a calibration request is pending or failed', () => {
+      const loading = getTankCardCalibrationStatus(undefined, true, true);
+      expect(loading.badgeLabel).toBe('Checking calibration…');
+      expect(loading.warningText).toBeNull();
+      expect(loading.isActive).toBe(false);
+      const failed = getTankCardCalibrationStatus(undefined, false, true);
+      expect(failed.badgeLabel).toBe('Unable to verify');
+      expect(failed.warningText).not.toContain('Upload calibration chart');
+      expect(getTankCardCalibrationStatus(undefined, false, false).badgeLabel).toBe('Not verified');
+      expect(getTankCardCalibrationStatus({pointsCount:0,status:null},false,true).badgeLabel).toBe('Missing');
+      expect(getTankCardCalibrationStatus({pointsCount:211,status:'ACTIVE'},false,true).warningText).toBeNull();
+      expect(getTankCardCalibrationStatus({pointsCount:5,status:'ARCHIVED'},false,true).warningText).toContain('archived');
+    });
+
     it('Tank card shows Calibration Missing when 0 points exist', () => {
       const status = getTankCalibrationStatus(0);
       expect(status.isConfigured).toBe(false);
