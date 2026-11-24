@@ -29,6 +29,8 @@ import {
   LinkedModuleSummary,
   STANDARD_CATEGORY_MAP,
   isRetiredCocoCategory,
+  isRecurringPaymentCategory,
+  getCocoReportStatus,
   STANDARD_COCO_CATEGORIES,
   toCocoOnePagerRow,
 } from '../../shared/cocoComplianceUtils';
@@ -484,7 +486,8 @@ export class CocoComplianceService {
       validCount: mergedItems.filter((i) => i.complianceStatus === 'VALID').length,
       expiringSoonCount: mergedItems.filter((i) => i.complianceStatus === 'EXPIRING_SOON').length,
       expiredCount: mergedItems.filter((i) => i.complianceStatus === 'EXPIRED').length,
-      paymentPendingCount: mergedItems.filter((i) => i.complianceStatus === 'PAYMENT_PENDING').length,
+      paymentPendingCount: mergedItems.filter((i) => i.complianceStatus === 'PAYMENT_PENDING' && getCocoReportStatus(i) !== 'Pending Approval').length,
+      pendingApprovalCount: mergedItems.filter(i => getCocoReportStatus(i) === 'Pending Approval').length,
       actionRequiredCount: mergedItems.filter((i) => i.complianceStatus === 'ACTION_REQUIRED').length,
       notRecordedCount: mergedItems.filter((i) => i.complianceStatus === 'NOT_RECORDED').length,
       notApplicableCount: mergedItems.filter((i) => i.complianceStatus === 'NOT_APPLICABLE').length,
@@ -635,8 +638,12 @@ export class CocoComplianceService {
     }
     const remarks = remarksParts.length > 0 ? remarksParts.join(' | ') : null;
 
-    const invalidServiceDate = Boolean(manualRec?.lastServiceDate && manualRec.lastServiceDate > reportDate);
-    const actionRequired = [linked?.actionRequired, manualRec?.actionRequired, invalidServiceDate ? 'Saved service date is after report date; verify source date.' : null].filter(Boolean).join(' | ') || null;
+    const serviceRelevant = !isRecurringPaymentCategory(categoryCode) && STANDARD_CATEGORY_MAP.get(categoryCode)?.supportsServiceDate !== false;
+    const invalidServiceDate = Boolean(serviceRelevant && manualRec?.lastServiceDate && manualRec.lastServiceDate > reportDate);
+    const serviceDatesMissing = ['WATER_COOLER_MAINTENANCE','GENERATOR_MAINTENANCE'].includes(categoryCode)
+      && statusYesNo === 'YES' && !validityDueDate && !manualRec?.lastServiceDate;
+    const actionRequired = [linked?.actionRequired, manualRec?.actionRequired, invalidServiceDate ? 'Saved service date is after report date; verify source date.' : null,
+      serviceDatesMissing ? 'Service dates missing; verify service evidence.' : null].filter(Boolean).join(' | ') || null;
 
     const manualAttachmentIds = this.parseAttachmentIds(manualRec?.attachmentDocumentIdsJson);
     const combinedDocIds = Array.from(
@@ -670,7 +677,7 @@ export class CocoComplianceService {
       referenceNumber,
       issueDate: linked?.issueDate ?? manualRec?.issueDate ?? null,
       validityDueDate,
-      lastServiceDate: STANDARD_CATEGORY_MAP.get(categoryCode)?.supportsServiceDate === false || invalidServiceDate ? null : manualRec?.lastServiceDate ?? null,
+      lastServiceDate: !serviceRelevant || invalidServiceDate ? null : manualRec?.lastServiceDate ?? null,
       amountPaise,
       frequency,
       paymentStatus,
@@ -717,8 +724,8 @@ export class CocoComplianceService {
     const generatedBy = actor ? `${actor.name} (${actor.email})` : params.actorUserId;
     const generatedAt = new Date().toISOString();
 
-    const standardItems = register.items.filter((i) => !i.isCustomCategory);
-    const customItems = register.items.filter((i) => i.isCustomCategory);
+    const standardItems = register.items.filter((i) => !i.isCustomCategory || i.categoryCode === 'LAND_LEASE');
+    const customItems = register.items.filter((i) => i.isCustomCategory && i.categoryCode !== 'LAND_LEASE');
 
     return {
       outletId: register.outlet.id,
@@ -727,8 +734,8 @@ export class CocoComplianceService {
       reportDate: register.reportDate,
       generatedAt,
       generatedBy,
-      rows: standardItems.map(toCocoOnePagerRow),
-      customRows: customItems.map(toCocoOnePagerRow),
+      rows: standardItems.map((i,index)=>toCocoOnePagerRow({...i,srNo:index+1})),
+      customRows: customItems.map((i,index)=>toCocoOnePagerRow({...i,srNo:standardItems.length+index+1})),
       summary: register.summary,
     };
   }

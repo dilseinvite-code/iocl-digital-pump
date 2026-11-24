@@ -7,6 +7,8 @@ import {
   CocoComplianceMergedItem,
   formatComplianceDateDisplay,
   formatIndianCurrencyFromPaise,
+  getCocoReportStatus,
+  getCocoReportDueDate,
 } from '../../shared/cocoComplianceUtils';
 import { CocoComplianceService } from './cocoComplianceService';
 import { loadCocoReportMasterData, projectClaims } from './cocoReportingMasterData';
@@ -99,10 +101,7 @@ const EMPTY = '-';
 const printable = (value: string, maxLength = 180) =>
   value.length > maxLength ? value.slice(0, maxLength - 25) + '... See source record' : value;
 const date = (v: string | null | undefined) => formatComplianceDateDisplay(v, NR);
-const fromItem = (item?: CocoComplianceMergedItem): string =>
-  item?.linkedModuleData?.reportStatusLabel || (item && item.complianceStatus !== 'NOT_RECORDED'
-    ? item.complianceStatus.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-    : NR);
+const fromItem = (item?: CocoComplianceMergedItem): string => item ? getCocoReportStatus(item) : NR;
 const money = (item?: CocoComplianceMergedItem): string => {
   if (!item) return NR;
   const amount = item.amountPaise == null
@@ -117,8 +116,7 @@ const notes = (item?: CocoComplianceMergedItem): string => {
   if (!item || item.complianceStatus === 'NOT_RECORDED') return NR;
   const parts = [
     item.referenceNumber ? 'Ref: ' + item.referenceNumber : '',
-    item.linkedModuleData?.summaryText || '',
-    item.remarks || '',
+    item.remarks || item.linkedModuleData?.summaryText || '',
     item.actionRequired ? 'Action: ' + item.actionRequired : '',
     item.hasDiscrepancy && item.discrepancyNote ? 'DISCREPANCY: ' + item.discrepancyNote : '',
   ].filter(Boolean);
@@ -252,12 +250,8 @@ export function buildSectionWiseSections(args: {
   ];
   const bills = billDefs.map(([code, label], index) => {
     const i = item(code);
-    const due = i?.linkedModuleData ? i.linkedModuleData.paymentDueDate : i?.validityDueDate;
-    const payment = !i || i.paymentStatus === 'NOT_RECORDED' ? fromItem(i)
-      : i.paymentStatus === 'PAID' ? (due && i.paymentDate && i.paymentDate > due ? 'Paid Late' : 'Paid')
-      : i.paymentStatus === 'OVERDUE' ? 'Overdue' : 'Pending';
-    return [String(index + 1), label, payment, i ? date(i.validityDueDate) : NR,
-      money(i), i?.frequency || EMPTY, i?.frequency || EMPTY, notes(i)];
+    return [String(index + 1), label, fromItem(i), i ? getCocoReportDueDate(i) : NR,
+      money(i), i ? date(i.paymentDate) : NR, i?.frequency || EMPTY, notes(i)];
   });
 
   const licenceDefs = [
@@ -398,8 +392,8 @@ export function buildSectionWiseSections(args: {
       subtitle: 'Consolidated recurring bills, government dues and lease-related charges.',
       tables: [
         { title: '2. Bills, Taxes & Charges', source: 'Municipal Taxes / Utilities / NFR',
-          headers: ['Sr.', 'Category / Particular', 'Status', 'Validity / Due', 'Amount & Payment', 'Duration', 'Frequency', 'Remarks / Action'],
-          widths: [25, 105, 60, 72, 83, 47, 49, 68], rows: bills },
+          headers: ['Sr.', 'Category / Particular', 'Status', 'Validity / Due', 'Amount & Payment', 'Paid On', 'Frequency', 'Remarks / Action'],
+          widths: [25, 95, 57, 73, 83, 62, 45, 69], rows: bills },
         { title: 'Payment and Due-Date Review', source: 'Reporting rules',
           headers: ['Status', 'Meaning in Final Report', 'Expected System Behaviour'],
           widths: [94, 164, 251], rows: [
