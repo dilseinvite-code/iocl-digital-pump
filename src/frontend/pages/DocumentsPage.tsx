@@ -199,6 +199,7 @@ export const DocumentsPage: React.FC = () => {
     expiringSoonCount: 0,
     expiredCount: 0,
     paymentPendingCount: 0,
+    pendingApprovalCount: 0,
     actionRequiredCount: 0,
     notRecordedCount: 0,
     notApplicableCount: 0,
@@ -946,7 +947,7 @@ export const DocumentsPage: React.FC = () => {
 
       {/* Legacy compliance summary is relevant only to its register and due-date view. */}
       {registerReady && (activeTab === 'REGISTER' || activeTab === 'DUE_DATES') && <div className="space-y-2">
-      <p className="text-xs font-medium text-[#64748B]">Compliance register summary · excludes dedicated agreement, claim and inspection records</p>
+      <p className="text-xs font-medium text-[#64748B]">Compliance register summary · includes linked agreements, claims and inspection records</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
           <div className="text-xs font-medium text-[#64748B]">VALID</div>
@@ -967,6 +968,7 @@ export const DocumentsPage: React.FC = () => {
           <div className="text-xs font-medium text-[#64748B]">PAYMENT PENDING</div>
           <div className="text-2xl font-bold text-[#B8530D] mt-1">{summary.paymentPendingCount}</div>
           <div className="text-[11px] text-[#64748B] mt-0.5">Tax, rent or utility due</div>
+          <div className="text-[11px] text-[#64748B] mt-1">Pending approval: {summary.pendingApprovalCount ?? 0}</div>
         </div>
         <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
           <div className="text-xs font-medium text-[#64748B]">ACTION REQUIRED</div>

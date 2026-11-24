@@ -20,7 +20,10 @@ const COLOR_BORDER = rgb(0.18, 0.18, 0.18);
 const COLOR_INNER_GRID = rgb(0.55, 0.55, 0.55);
 const COLOR_HEADER_FILL = rgb(0.9, 0.91, 0.93);
 const COLOR_ZEBRA_FILL = rgb(0.97, 0.97, 0.98);
-const COLOR_ALERT_FILL = rgb(0.94, 0.94, 0.94);
+const COLOR_ALERT_FILL = rgb(0.96, 0.95, 0.93);
+const COLOR_ORANGE = rgb(0.90,0.35,0.07);
+const COLOR_NAVY = rgb(0.10,0.20,0.34);
+const statusColor = (value:string) => /expired|overdue|action required/i.test(value) ? rgb(0.64,0.12,0.12) : /pending|expiring|partial|review|paid late|service dates missing/i.test(value) ? rgb(0.57,0.32,0.05) : /^(valid|paid|working)$/i.test(value) ? rgb(0.10,0.38,0.22) : COLOR_BLACK;
 
 /**
  * Replaces non-WinAnsi characters (like ₹, •, —) with safe printable ASCII equivalents
@@ -176,12 +179,13 @@ export class CocoCompliancePdfService {
       color: COLOR_DARK_GRAY,
     });
 
+    page1.drawRectangle({x:MARGIN_X,y:cursorY-3,width:CONTENT_WIDTH,height:3,color:COLOR_ORANGE});
     cursorY -= headerBoxHeight + 6;
 
     // =========================================================================
     // 2. COMPLIANCE SUMMARY STRIP
     // =========================================================================
-    const summaryHeight = 20;
+    const summaryHeight = 28;
     page1.drawRectangle({
       x: MARGIN_X,
       y: cursorY - summaryHeight,
@@ -192,17 +196,11 @@ export class CocoCompliancePdfService {
     });
 
     const s = report.summary;
-    const summaryLine = sanitizePdfText(
-      `Summary (As of ${reportDateFormatted}):   Valid / Paid: ${s.validCount}   |   Expiring Soon: ${s.expiringSoonCount}   |   Expired: ${s.expiredCount}   |   Payment Pending: ${s.paymentPendingCount}   |   Action Required: ${s.actionRequiredCount}   |   Not Recorded: ${s.notRecordedCount}`
-    );
-    page1.drawText(summaryLine, {
-      x: MARGIN_X + 8,
-      y: cursorY - 13,
-      size: 7.8,
-      font: fontBold,
-      color: COLOR_BLACK,
-    });
-
+    const summaryLines = [
+      `Summary: Valid / Paid: ${s.validCount} | Expiring Soon: ${s.expiringSoonCount} | Expired: ${s.expiredCount} | Not Recorded: ${s.notRecordedCount}`,
+      `Payment Pending: ${s.paymentPendingCount} | Pending Approval: ${s.pendingApprovalCount ?? 0} | Action Required: ${s.actionRequiredCount} | N/A: ${s.notApplicableCount}`
+    ];
+    summaryLines.forEach((line,index)=>page1.drawText(sanitizePdfText(line),{x:MARGIN_X+8,y:cursorY-10-index*11,size:7.8,font:fontBold,color:COLOR_NAVY}));
     cursorY -= summaryHeight + 6;
 
     // =========================================================================
@@ -270,7 +268,7 @@ export class CocoCompliancePdfService {
     const availableTableHeight = cursorY - (MARGIN_BOTTOM + footerReserveHeight);
     const fontSizeCell = 7.6;
     const lineHeight = 9.2;
-    const cellPaddingY = 4.5;
+    const cellPaddingY = 3.5;
 
     // Pre-wrap all standard rows; if total height exceeds availableTableHeight, cap remarks on Page 1 to 3 lines
     // and place full extended remarks in an Annex page so no text is ever clipped!
@@ -304,7 +302,7 @@ export class CocoCompliancePdfService {
         1
       );
 
-      const rowHeight = Math.max(22, maxLines * lineHeight + cellPaddingY * 2);
+      const rowHeight = Math.max(20, maxLines * lineHeight + cellPaddingY * 2);
 
       return {
         row,
@@ -315,7 +313,7 @@ export class CocoCompliancePdfService {
     };
 
     // First try up to 4 lines per cell on Page 1; if total > availableTableHeight, tighten to 3 or 2 lines
-    let maxRemarkLinesAllowed = 4;
+    let maxRemarkLinesAllowed = Math.max(4, ...report.rows.map(r=>wrapPdfText(r.remarksActionRequiredDisplay,fontRegular,fontSizeCell,ONE_PAGER_COLUMNS[6].width-8).length));
     let preparedRows = report.rows.map((r) => prepareWrappedRow(r, maxRemarkLinesAllowed));
     let totalHeight = preparedRows.reduce((acc, r) => acc + r.rowHeight, 0);
 
@@ -328,7 +326,7 @@ export class CocoCompliancePdfService {
     // If totalHeight is well below availableTableHeight, distribute extra vertical breathing room evenly
     const extraPerRow =
       preparedRows.length > 0 && totalHeight < availableTableHeight - 28
-        ? Math.min(8, Math.floor((availableTableHeight - totalHeight) / preparedRows.length))
+        ? Math.min(3, Math.floor((availableTableHeight - totalHeight) / preparedRows.length))
         : 0;
 
     for (let idx = 0; idx < preparedRows.length; idx++) {
@@ -395,7 +393,7 @@ export class CocoCompliancePdfService {
             y: textY,
             size: fontSizeCell,
             font: cellFont,
-            color: COLOR_BLACK,
+            color: cIdx === 2 ? statusColor(pr.row.statusYesNoDisplay) : COLOR_BLACK,
           });
           textY -= lineHeight;
         }

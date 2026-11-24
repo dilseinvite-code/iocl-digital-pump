@@ -771,7 +771,7 @@ describe('Phase 1: COCO Documents & Compliance Management Module Suite', () => {
     expect(previewData.roCode).toBe('373196');
     expect(previewData.rows).toHaveLength(13);
     expect(previewData.rows[0].particular).toBe('PESO Licence');
-    expect(previewData.rows[0].statusYesNoDisplay).toBe('Yes');
+    expect(previewData.rows[0].statusYesNoDisplay).toBe('Valid');
     expect(previewData.rows[0].amountInrDisplay).toContain('20,000');
     // Unrecorded rows must explicitly show 'Not Recorded' and never invent data
     expect(previewData.rows[5].statusYesNoDisplay).toBe('Not Recorded');

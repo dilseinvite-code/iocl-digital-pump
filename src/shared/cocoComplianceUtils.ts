@@ -281,6 +281,7 @@ export interface CocoOnePagerReport {
     expiringSoonCount: number;
     expiredCount: number;
     paymentPendingCount: number;
+    pendingApprovalCount?: number;
     actionRequiredCount: number;
     notRecordedCount: number;
     notApplicableCount: number;
@@ -565,42 +566,36 @@ export function buildDueDatesAndActionsSummary(
  * Converts a merged compliance item into a printable One-Pager row.
  * Missing data is shown as 'Not Recorded' or '-' and never invented.
  */
-export function toCocoOnePagerRow(item: CocoComplianceMergedItem): CocoOnePagerRow {
-  let statusYesNoDisplay = 'Not Recorded';
-  if (item.complianceStatus === 'NOT_RECORDED') {
-    statusYesNoDisplay = 'Not Recorded';
-  } else if (item.statusYesNo === 'NA' || item.complianceStatus === 'NOT_APPLICABLE') {
-    statusYesNoDisplay = 'N/A';
-  } else if (
-    item.statusYesNo === 'YES' &&
-    item.complianceStatus !== 'EXPIRED' &&
-    item.complianceStatus !== 'PAYMENT_PENDING'
-  ) {
-    statusYesNoDisplay = 'Yes';
-  } else if (
-    item.statusYesNo === 'NO' ||
-    item.complianceStatus === 'EXPIRED' ||
-    item.complianceStatus === 'PAYMENT_PENDING' ||
-    item.complianceStatus === 'ACTION_REQUIRED'
-  ) {
-    statusYesNoDisplay = item.statusYesNo === 'YES' ? 'Yes (Due)' : 'No';
-  } else if (item.statusYesNo === 'YES') {
-    statusYesNoDisplay = 'Yes';
-  }
-
-  if (item.linkedModuleData?.reportStatusLabel) statusYesNoDisplay = item.linkedModuleData.reportStatusLabel;
-  else if (isRecurringPaymentCategory(item.categoryCode)) {
+export function getCocoReportStatus(item: CocoComplianceMergedItem): string {
+  if (item.complianceStatus === 'NOT_RECORDED') return 'Not Recorded';
+  if (item.complianceStatus === 'NOT_APPLICABLE' || item.statusYesNo === 'NA') return 'N/A';
+  if (item.linkedModuleData?.reportStatusLabel) return item.linkedModuleData.reportStatusLabel;
+  if (isRecurringPaymentCategory(item.categoryCode)) {
     const due = item.linkedModuleData ? item.linkedModuleData.paymentDueDate : item.validityDueDate;
-    if (item.paymentStatus === 'PAID') statusYesNoDisplay = due && item.paymentDate && item.paymentDate > due ? 'Paid Late' : 'Paid';
-    else if (item.paymentStatus === 'OVERDUE') statusYesNoDisplay = 'Overdue';
-    else if (item.paymentStatus === 'PENDING') statusYesNoDisplay = 'Payment Pending';
-  } else if (item.complianceStatus === 'EXPIRED') statusYesNoDisplay = 'Expired';
-  else if (item.complianceStatus === 'EXPIRING_SOON') statusYesNoDisplay = 'Expiring Soon';
-  else if (item.complianceStatus === 'ACTION_REQUIRED') statusYesNoDisplay = 'Action Required';
+    if (item.paymentStatus === 'PAID') return due && item.paymentDate && item.paymentDate > due ? 'Paid Late' : 'Paid';
+    if (item.paymentStatus === 'OVERDUE') return 'Overdue';
+    if (item.paymentStatus === 'PENDING') return 'Payment Pending';
+  }
+  if (item.complianceStatus === 'ACTION_REQUIRED' && item.actionRequired?.includes('Service dates missing')) return 'Service dates missing';
+  return item.complianceStatus.replaceAll('_',' ').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
+}
+
+export function getCocoReportDueDate(item: CocoComplianceMergedItem): string {
+  if (!item.validityDueDate) return item.complianceStatus === 'NOT_RECORDED' ? 'Not Recorded' : '-';
+  const value = formatComplianceDateDisplay(item.validityDueDate);
+  const paymentDue = item.linkedModuleData?.paymentDueDate;
+  if (item.categoryCode === 'PROPERTY_TAX' && paymentDue && paymentDue !== item.validityDueDate) {
+    return 'Period end: '+value+' | Due: '+formatComplianceDateDisplay(paymentDue);
+  }
+  return value;
+}
+
+export function toCocoOnePagerRow(item: CocoComplianceMergedItem): CocoOnePagerRow {
+  const statusYesNoDisplay = getCocoReportStatus(item);
 
   const validityParts: string[] = [];
   if (item.validityDueDate) {
-    validityParts.push(formatComplianceDateDisplay(item.validityDueDate));
+    validityParts.push(getCocoReportDueDate(item));
   }
   if (item.lastServiceDate && STANDARD_CATEGORY_MAP.get(item.categoryCode)?.supportsServiceDate !== false) {
     validityParts.push(`Last Svc: ${formatComplianceDateDisplay(item.lastServiceDate)}`);
@@ -639,14 +634,14 @@ export function toCocoOnePagerRow(item: CocoComplianceMergedItem): CocoOnePagerR
     if (item.referenceNumber) {
       remarksSegments.push(`Ref: ${item.referenceNumber}`);
     }
-    if (item.paymentStatus === 'PAID') {
+    if (item.paymentStatus === 'PAID' && (isRecurringPaymentCategory(item.categoryCode) || item.amountPaise != null || item.paymentDate)) {
       remarksSegments.push(
         item.paymentDate
           ? `Paid (${formatComplianceDateDisplay(item.paymentDate)})`
           : 'Paid'
       );
     } else if (item.paymentStatus === 'PENDING' || item.paymentStatus === 'OVERDUE') {
-      remarksSegments.push('Payment Pending');
+      if (statusYesNoDisplay !== 'Pending Approval') remarksSegments.push(item.paymentStatus === 'OVERDUE' ? 'Payment Overdue' : 'Payment Pending');
     }
     if (item.remarks && item.remarks.trim() !== '') {
       remarksSegments.push(item.remarks.trim());
