@@ -14,6 +14,7 @@ interface Props {
   selectedOutletName?: string;
   canWriteTankCalibration: boolean;
   canApproveCalibrationChart: boolean;
+  canResetAllCalibration?: boolean;
   initialSelectedCode?: string;
   onCalibrationAssigned?: () => void;
 }
@@ -28,7 +29,7 @@ const fmt=(value:number)=>value.toLocaleString('en-IN',{maximumFractionDigits:3}
 const MAX_FILE_BYTES=8*1024*1024;
 
 export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
-  selectedOutletName,canWriteTankCalibration,canApproveCalibrationChart,initialSelectedCode,
+  selectedOutletName,canWriteTankCalibration,canApproveCalibrationChart,canResetAllCalibration=false,initialSelectedCode,
 })=>{
   const [templates,setTemplates]=useState<GlobalTankCalibrationTemplate[]>([]);
   const [defaultCharts,setDefaultCharts]=useState<Record<number,string>>({});
@@ -54,12 +55,23 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const [approving,setApproving]=useState(false);
   const [acknowledgedApproval,setAcknowledgedApproval]=useState(false);
   const [installingPdf,setInstallingPdf]=useState(false);
+  const [resetPreview,setResetPreview]=useState<{
+    globalSourcesToArchive:number;tankChartsToArchive:number;defaultChartMappingsToClear:number;
+    activeTanksToInactivate:number;openOrClosingShifts:number;
+  }|null>(null);
+  const [resetText,setResetText]=useState('');
+  const [resetBusy,setResetBusy]=useState(false);
+  const [showReset,setShowReset]=useState(false);
 
   const loadTemplates=async()=>{
     const result=await apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates');
     if(!result.success || !result.data)throw new Error(result.error?.message || 'Could not load calibration charts');
     setTemplates(result.data);
-    setSelectedCode(current=>current || result.data?.find(t=>isOperatorPdfSourceCode(t.code,t.nominalCapacityLitres))?.code || result.data?.find(t=>isOperatorSuppliedSourceMetadata(t))?.code || result.data?.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code || result.data?.find(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status))?.code || '');
+    setSelectedCode(current=>{
+      const active=result.data.filter(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status));
+      return active.some(t=>t.code===current)?current:
+        active.find(t=>t.status==='APPROVED'||t.status==='ACTIVE')?.code||active[0]?.code||'';
+    });
   };
   const loadDefaults=async()=>{
     const r=await apiFetch<Array<{capacityLitres:number;templateId:string}>>('/api/v1/global-tank-defaults');
@@ -141,6 +153,32 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       setNotice(created.length?'Saved separate PDF-based '+created.join(' and ')+' chart versions. Existing tanks and history remain unchanged.':'Both PDF chart versions are already saved. No duplicates created.');
     }catch(e:any){setError(e.message||'Could not install operator PDF charts');}
     finally{setInstallingPdf(false);}
+  };
+  const showCalibrationReset=async()=>{
+    setError('');setNotice('');setResetText('');setShowReset(true);
+    try{
+      const res=await apiFetch<{
+        globalSourcesToArchive:number;tankChartsToArchive:number;
+        defaultChartMappingsToClear:number;activeTanksToInactivate:number;openOrClosingShifts:number;
+      }>('/api/v1/calibration-templates/reset-all-preview',{cache:'no-store'});
+      if(!res.success||!res.data)throw new Error(res.error?.message||'Cannot preview calibration reset.');
+      setResetPreview(res.data);
+    }catch(e:any){setError(e.message||'Cannot preview reset');setResetPreview(null);}
+  };
+  const resetAllCalibration=async()=>{
+    if(resetBusy||resetText!=='CLEAR ALL CALIBRATION'||!canResetAllCalibration)return;
+    setResetBusy(true);setError('');
+    try{
+      const res=await apiFetch<{message:string}>('/api/v1/calibration-templates/reset-all',{
+        method:'POST',body:JSON.stringify({confirm:resetText})
+      });
+      if(!res.success)throw new Error(res.error?.message||'Could not reset calibration.');
+      clearApiCache();await Promise.all([loadTemplates(),loadDefaults()]);
+      setDetail(null);setShowReset(false);setResetPreview(null);setResetText('');
+      setShowAllCharts(false);setShowImport(true);setCreatingCustom(true);
+      setNotice('All previous calibration sources and active tank charts have been archived. Historical stock is preserved. Upload your new calibration readings.');
+    }catch(e:any){setError(e.message||'Reset failed.');}
+    finally{setResetBusy(false);}
   };
   const setDefault=async()=>{
     if(!chosen||!canSetAsDefault||settingDefault)return;
@@ -280,12 +318,10 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
         </div>
         <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-[#17365D]"
           onClick={()=>{setError('');loadTemplates().catch(e=>setError(e.message));}}><RefreshCw className="mr-1 inline h-4 w-4"/>Refresh</button>
-        {canWriteTankCalibration&&canApproveCalibrationChart&&<button type="button"
-          data-testid="load-operator-pdf-chart" disabled={installingPdf}
-          onClick={()=>{void installOperatorPdf();}}
-          title="Create separate saved 10 KL and 20 KL PDF-source versions; preserve existing tank history"
-          className="ml-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 disabled:opacity-50">
-          {installingPdf?'Saving PDF charts…':'Use supplied 10 / 20 KL PDF charts'}
+        {canResetAllCalibration&&<button type="button" data-testid="reset-all-calibration-open"
+          onClick={()=>{void showCalibrationReset();}}
+          className="ml-2 rounded-lg border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-800">
+          Clear all previous calibrations
         </button>}
         <button type="button" onClick={()=>setShowImport(v=>!v)}
           className="ml-2 rounded-lg bg-[#17365D] px-4 py-2 text-sm font-semibold text-white">
@@ -300,6 +336,36 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       </div>
     </section>
 
+    {showReset&&canResetAllCalibration&&<section className="space-y-3 rounded-2xl border border-rose-300 bg-rose-50 p-5"
+      data-testid="confirm-calibration-reset">
+      <h3 className="text-base font-bold text-rose-900">Start calibration from zero</h3>
+      <p className="text-sm text-rose-900">This affects all outlets: all current charts are archived, defaults cleared and active tanks made INACTIVE.
+        Historical calibration rows, stock readings, shift snapshots and audit records remain stored.
+        No calibration will be active until you upload fresh readings and reactivate each tank.</p>
+      {resetPreview&&<div className="grid gap-2 sm:grid-cols-4 text-xs font-semibold text-rose-900">
+        <span>Global sources: {resetPreview.globalSourcesToArchive}</span>
+        <span>Tank charts: {resetPreview.tankChartsToArchive}</span>
+        <span>Defaults: {resetPreview.defaultChartMappingsToClear}</span>
+        <span>Active tanks: {resetPreview.activeTanksToInactivate}</span>
+      </div>}
+      {resetPreview?.openOrClosingShifts?(
+        <p role="alert" className="text-sm font-bold text-rose-900">Cannot clear while {resetPreview.openOrClosingShifts} shift(s) are OPEN or CLOSING.</p>
+      ):null}
+      <label className="block text-xs font-bold text-rose-900">Type CLEAR ALL CALIBRATION to confirm</label>
+      <input type="text" value={resetText} onChange={e=>setResetText(e.target.value)}
+        placeholder="CLEAR ALL CALIBRATION" aria-label="Confirm reset all calibration"
+        className="w-full rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm"/>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" data-testid="submit-reset-all-calibration"
+          disabled={resetBusy||resetText!=='CLEAR ALL CALIBRATION'||!resetPreview||resetPreview.openOrClosingShifts>0}
+          onClick={()=>{void resetAllCalibration();}}
+          className="rounded-lg bg-rose-800 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+          {resetBusy?'Clearing…':'Archive old charts and clear calibration'}
+        </button>
+        <button type="button" onClick={()=>{setShowReset(false);setResetText('');}}
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm">Cancel</button>
+      </div>
+    </section>}
     {showImport&&<div className="space-y-5" data-testid="calibration-import-workspace">
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="simple-calibration-upload">
       <div className="flex items-center gap-2"><UploadCloud className="h-5 w-5 text-orange-600"/><h3 className="font-bold text-[#17365D]">Upload calibration file</h3></div>

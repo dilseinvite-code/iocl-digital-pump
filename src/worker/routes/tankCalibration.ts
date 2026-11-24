@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
 import { PumpRepository } from '../repositories/pumpRepository';
@@ -1628,6 +1628,97 @@ tankCalibration.get('/calibration-templates', requirePermission(PERMISSIONS.TANK
     data: templates,
     error: null,
   });
+});
+
+
+// Admin-only reset: remove every prior calibration from ACTIVE use while retaining
+// immutable dip/volume records and historical shift/stock references.
+// This is explicitly user-triggered and never runs during deployment.
+const activeCalibrationStatuses=['ACTIVE','APPROVED','DRAFT'] as const;
+function canResetAllCalibrations(c:AppContext){
+ const user=c.var.user;
+ return Boolean(user?.roles?.includes(ROLES.ADMIN)&&
+   user.permissions.includes(PERMISSIONS.TANK_CALIBRATION_WRITE)&&
+   user.permissions.includes(PERMISSIONS.TANKS_WRITE));
+}
+async function calibrationResetPreview(db:ReturnType<typeof getDb>){
+ const [templates,charts,defaults,tanks,shifts]=await Promise.all([
+   db.select({id:schema.globalTankCalibrationTemplates.id,status:schema.globalTankCalibrationTemplates.status})
+     .from(schema.globalTankCalibrationTemplates),
+   db.select({id:schema.tankCalibrationCharts.id,status:schema.tankCalibrationCharts.status})
+     .from(schema.tankCalibrationCharts),
+   db.select({capacityLitres:schema.globalTankCapacityDefaults.capacityLitres})
+     .from(schema.globalTankCapacityDefaults),
+   db.select({id:schema.tanks.id,status:schema.tanks.status}).from(schema.tanks),
+   db.select({id:schema.operationalShifts.id,status:schema.operationalShifts.status})
+     .from(schema.operationalShifts)
+     .where(inArray(schema.operationalShifts.status,['OPEN','CLOSING'])),
+ ]);
+ return {
+   globalSourcesToArchive:templates.filter(t=>activeCalibrationStatuses.includes(t.status as any)).length,
+   tankChartsToArchive:charts.filter(t=>activeCalibrationStatuses.includes(t.status as any)).length,
+   defaultChartMappingsToClear:defaults.length,
+   activeTanksToInactivate:tanks.filter(t=>t.status==='ACTIVE').length,
+   openOrClosingShifts:shifts.length,
+   willPreserveHistoricalPoints:true,willPreserveStockReadings:true,
+ };
+}
+tankCalibration.get('/calibration-templates/reset-all-preview',
+  requirePermission(PERMISSIONS.TANK_CALIBRATION_READ) as any,async(c:AppContext)=>{
+  if(!canResetAllCalibrations(c))return c.json({success:false,data:null,
+    error:{code:'FORBIDDEN',message:'Only an administrator with tank permissions may reset the calibration library.'}},403);
+  return c.json({success:true,data:await calibrationResetPreview(getDb(c.env.DB)),error:null});
+});
+tankCalibration.post('/calibration-templates/reset-all',
+  requirePermission(PERMISSIONS.TANK_CALIBRATION_WRITE) as any,async(c:AppContext)=>{
+  if(!canResetAllCalibrations(c))return c.json({success:false,data:null,
+    error:{code:'FORBIDDEN',message:'Only an administrator with tank permissions may reset the calibration library.'}},403);
+  const body=await c.req.json().catch(()=>null);
+  if(!body||body.confirm!=='CLEAR ALL CALIBRATION'){
+    return c.json({success:false,data:null,
+      error:{code:'RESET_CONFIRMATION_REQUIRED',message:'Enter CLEAR ALL CALIBRATION to archive every active calibration reference.'}},400);
+  }
+  const db=getDb(c.env.DB);
+  const preview=await calibrationResetPreview(db);
+  if(preview.openOrClosingShifts>0){
+    return c.json({success:false,data:preview,error:{
+      code:'OPEN_SHIFTS_BLOCK_CALIBRATION_RESET',
+      message:'Close all open/closing shifts before clearing calibration; historical stock must remain on its original chart.'}},409);
+  }
+  const now=new Date().toISOString(),userId=c.var.user!.user.id;
+  try{
+    await (db as any).batch([
+      db.update(schema.globalTankCalibrationTemplates).set({status:'ARCHIVED',updatedAt:now})
+        .where(inArray(schema.globalTankCalibrationTemplates.status,['ACTIVE','APPROVED','DRAFT'])),
+      db.update(schema.tankCalibrationCharts).set({
+        status:'ARCHIVED',updatedAt:now,updatedBy:userId,effectiveTo:now.slice(0,10)
+      }).where(inArray(schema.tankCalibrationCharts.status,['ACTIVE','APPROVED','DRAFT'])),
+      db.delete(schema.globalTankCapacityDefaults),
+      // Tanks without an active chart cannot safely record new stock dips.
+      // Existing physical tank definitions and linked nozzles are retained.
+      db.update(schema.tanks).set({status:'INACTIVE',updatedAt:now})
+        .where(eq(schema.tanks.status,'ACTIVE')),
+      db.insert(schema.auditLogs).values({
+        id:'aud-'+crypto.randomUUID(),userId,
+        action:'ALL_CALIBRATION_ARCHIVED_FOR_FRESH_START',
+        entityType:'GLOBAL_TANK_CALIBRATION_RESET',
+        entityId:'GLOBAL',oldValueJson:JSON.stringify(preview),
+        newValueJson:JSON.stringify({reason:'Operator requested fresh calibration data',
+          allSourcesArchived:true,activeTankChartsArchived:true,
+          defaultMappingsCleared:true,tanksMadeInactive:true,
+          historicalPointsAndStockRetained:true}),
+        createdAt:now,ipAddress:c.req.header('cf-connecting-ip')||null,
+        userAgent:c.req.header('user-agent')||null,
+      })
+    ]);
+    return c.json({success:true,data:{
+      ...preview,completed:true,message:'Old charts archived and defaults cleared. Upload new calibration readings; tanks stay inactive until the correct charts are linked.'
+    },error:null});
+  }catch(error:any){
+    return c.json({success:false,data:null,error:{
+      code:'CALIBRATION_RESET_FAILED',message:'No changes applied. '+(error.message||'Atomic reset failed.')
+    }},500);
+  }
 });
 
 // GET /api/v1/calibration-templates/audit-logs - List audit trail for global calibration templates

@@ -68,7 +68,7 @@ import {
   evaluateCalibrationDryRunClient,
   ClientDryRunReport,
 } from '../components/pump/pumpInfrastructureUi';
-import { PERMISSIONS } from '../../shared/constants';
+import { PERMISSIONS, ROLES } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
 import { reviewReusableGlobalChart } from '../components/pump/reusableGlobalChart';
 import { GLOBAL_TANK_CAPACITIES_LITRES } from '../../shared/globalTankTypes';
@@ -1628,6 +1628,7 @@ export const PumpInfrastructurePage: React.FC = () => {
             selectedOutlet ? `${selectedOutlet.roCode} — ${selectedOutlet.name}` : undefined
           }
           canWriteTankCalibration={canWriteTankCalibration}
+          canResetAllCalibration={Boolean(userCtx?.roles?.includes(ROLES.ADMIN)&&canWriteTanks&&canWriteTankCalibration)}
           canApproveCalibrationChart={canApproveCalibrationChart}
           initialSelectedCode={initialGlobalChartCode}
           onCalibrationAssigned={() => {
