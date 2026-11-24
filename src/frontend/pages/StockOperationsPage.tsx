@@ -33,6 +33,7 @@ import { useAuth } from '../context/AuthContext';
 import { stockStageOrder, tankDipCoverage, filterStockReceipts, isFinalizedReceipt, stockReconciliationLabel, type ReceiptFilter, type StockStage } from '../utils/stockWorkflow';
 import { PERMISSIONS } from '../../shared/constants';
 import { getLocalDateInputValue, getLocalDateTimeInputValue } from '../../shared/utils/dateUtils';
+import {consumeWorkspaceSection} from '../components/layout/workspaceTaskCatalog';
 
 export interface ReceiptLineReadiness {
   lineId: string;
@@ -341,6 +342,19 @@ export const StockOperationsPage: React.FC = () => {
   const [shifts, setShifts] = useState<OperationalShift[]>([]);
   const [selectedShiftId, setSelectedShiftId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<StockStage>(selection?.shiftId ? 'RECEIPTS' : 'OPENING');
+  useEffect(()=>{
+    const allowed=['OPENING','RECEIPTS','CLOSING','RECONCILIATION'] as const;
+    const pick=(section:string|null)=>{
+      if(section&&allowed.includes(section as typeof allowed[number]))setActiveTab(section as StockStage);
+    };
+    pick(consumeWorkspaceSection('stock-ops',allowed));
+    const handle=(event:Event)=>{
+      const detail=(event as CustomEvent<{tab:string;section:string}>).detail;
+      if(detail?.tab==='stock-ops')pick(detail.section);
+    };
+    window.addEventListener('iocl:workspace-task',handle);
+    return ()=>window.removeEventListener('iocl:workspace-task',handle);
+  },[]);
   const [receiptFilter,setReceiptFilter]=useState<ReceiptFilter>('PENDING');
   const [receiptSearch,setReceiptSearch]=useState('');
   const [showDipForm,setShowDipForm]=useState(false);

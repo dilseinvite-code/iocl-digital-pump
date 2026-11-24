@@ -72,10 +72,20 @@ import { PERMISSIONS } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
 import { reviewReusableGlobalChart } from '../components/pump/reusableGlobalChart';
 import { GLOBAL_TANK_CAPACITIES_LITRES } from '../../shared/globalTankTypes';
+import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../shared/operatorSuppliedCalibration';
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
+import {consumeWorkspaceSection} from '../components/layout/workspaceTaskCatalog';
 
+type PdfRemapPreview = {
+  ready:boolean;code:string|null;message:string|null;alreadyApplied:boolean;
+  tankId:string;tankNumber:number;capacityLitres:number;safeFillCapacityLitres:number;
+  sourceCode:string|null;sourceTemplateId:string|null;sourceReadings:number;
+  sourceMaxVolumeLitres:number|null;previousActiveChartId:string|null;
+  previousActiveRevisionNumber:number|null;previousHistoricalReadings:number;
+  openShiftPresent:boolean;
+};
 type PendingQuickTank = {
   id: string; outletId: string; name: string; capacityLitres: number;
   templateId: string; status: 'PENDING_FUEL'; createdAt: string;
@@ -99,6 +109,21 @@ export const PumpInfrastructurePage: React.FC = () => {
 
   // Active Sub-tab
   const [activeTab, setActiveTab] = useState<'products' | 'tanks' | 'globalCalibration' | 'dispensers' | 'nozzles' | 'shifts' | 'fuelMapping'>('products');
+  useEffect(()=>{
+    const allowed=['products','tanks','globalCalibration','dispensers','nozzles','shifts','fuelMapping'] as const;
+    const pick=(section:string|null)=>{
+      if(!section||!allowed.includes(section as typeof allowed[number]))return;
+      if(section==='globalCalibration'&&!canReadTankCalibration)return;
+      setActiveTab(section as typeof activeTab);
+    };
+    pick(consumeWorkspaceSection('pump-infra',allowed));
+    const handle=(event:Event)=>{
+      const detail=(event as CustomEvent<{tab:string;section:string}>).detail;
+      if(detail?.tab==='pump-infra')pick(detail.section);
+    };
+    window.addEventListener('iocl:workspace-task',handle);
+    return ()=>window.removeEventListener('iocl:workspace-task',handle);
+  },[canReadTankCalibration]);
 
   // Outlet-specific data
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
@@ -144,6 +169,9 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [calActiveChart, setCalActiveChart] = useState<TankCalibrationChart | null>(null);
   const [calSelectedChart, setCalSelectedChart] = useState<TankCalibrationChart | null>(null);
   const [calGlobalSource, setCalGlobalSource] = useState<GlobalTankCalibrationTemplate | null>(null);
+  const [pdfRemapPreview,setPdfRemapPreview]=useState<PdfRemapPreview|null>(null);
+  const [pdfRemapLoading,setPdfRemapLoading]=useState(false);
+  const [pdfRemapNotice,setPdfRemapNotice]=useState('');
   const [calShowAdvanced, setCalShowAdvanced] = useState(false);
   const [initialGlobalChartCode, setInitialGlobalChartCode] = useState('');
   const [calModalPoints, setCalModalPoints] = useState<TankCalibrationPoint[]>([]);
@@ -187,6 +215,8 @@ export const PumpInfrastructurePage: React.FC = () => {
   const [editTankSafeFill, setEditTankSafeFill] = useState(19000);
   const [editTankMinOperating, setEditTankMinOperating] = useState(1000);
   const [editTankStatus, setEditTankStatus] = useState<'ACTIVE' | 'INACTIVE' | 'MAINTENANCE' | 'DECOMMISSIONED'>('ACTIVE');
+  const [showRemovedTanks,setShowRemovedTanks]=useState(false);
+  const [changingTankStatusId,setChangingTankStatusId]=useState<string|null>(null);
   const [confirmTankPhysicalCompatibility, setConfirmTankPhysicalCompatibility] = useState(false);
   const [confirmTankOperatingLimits, setConfirmTankOperatingLimits] = useState(false);
 
@@ -653,6 +683,21 @@ export const PumpInfrastructurePage: React.FC = () => {
     }
   };
 
+  // Removal is audited decommissioning; live history is preserved.
+  const changeTankStatus=async(tank:Tank,status:'INACTIVE'|'DECOMMISSIONED')=>{
+    if(changingTankStatusId)return;
+    if(status==='DECOMMISSIONED'&&!window.confirm('Remove '+tank.name+' from the normal list? Stock history will be preserved.'))return;
+    setChangingTankStatusId(tank.id);setError(null);
+    try{
+      const res=await apiFetch<Tank>('/api/v1/tanks/'+encodeURIComponent(tank.id)+'/status',{
+        method:'PATCH',body:JSON.stringify({status})});
+      if(!res.success)throw new Error(getPumpInfrastructureErrorMessage(res.error));
+      await loadOutletData();
+      setSuccessMsg(status==='DECOMMISSIONED'?'Tank removed from the normal list. Use Show removed to restore.':tank.name+' is INACTIVE.');
+    }catch(e:any){setError(e.message||'Status update failed.');}
+    finally{setChangingTankStatusId(null);}
+  };
+
   const openEditTank = (t: Tank) => {
     setEditingTank(t);
     setEditTankName(t.name);
@@ -672,10 +717,6 @@ export const PumpInfrastructurePage: React.FC = () => {
     if (modalSubmitting || !editingTank) return;
     const needsReview = editingTank.id.startsWith('tank-pgt-') &&
       editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE';
-    if (needsReview && (!confirmTankPhysicalCompatibility || !confirmTankOperatingLimits)) {
-      setModalError('Confirm physical tank/fuel mapping and approved safe-fill and minimum operating limits before activation.');
-      return;
-    }
     setModalSubmitting(true);
     setModalError(null);
 
@@ -862,12 +903,55 @@ export const PumpInfrastructurePage: React.FC = () => {
     }
   };
 
+  const loadPdfRemapPreview=async(tankId:string)=>{
+    setPdfRemapLoading(true);
+    try{
+      const result=await apiFetch<PdfRemapPreview>(
+        '/api/v1/tanks/'+encodeURIComponent(tankId)+'/calibration/operator-pdf-remap',
+        {cache:'no-store'}
+      );
+      if(!result.success||!result.data)throw new Error(result.error?.message||'Cannot check PDF calibration readiness.');
+      setPdfRemapPreview(result.data);
+    }catch(error:any){
+      setPdfRemapPreview(null);
+      setPdfRemapNotice(error.message||'Cannot check PDF calibration readiness.');
+    }finally{
+      setPdfRemapLoading(false);
+    }
+  };
+  const usePdfCalibrationForTank=async()=>{
+    if(!calibratingTank||!pdfRemapPreview?.ready||pdfRemapPreview.alreadyApplied||modalSubmitting)return;
+    setModalSubmitting(true);setModalError(null);setPdfRemapNotice('');
+    try{
+      const response=await apiFetch<{
+        chart:TankCalibrationChart;previousActiveChartId:string|null;
+        alreadyApplied:boolean;pointsCount:number;tankStatus:string;message:string;
+      }>('/api/v1/tanks/'+encodeURIComponent(calibratingTank.id)+'/calibration/operator-pdf-remap',{
+        method:'POST',
+        body:JSON.stringify({expectedActiveChartId:pdfRemapPreview.previousActiveChartId})
+      });
+      if(!response.success||!response.data)throw new Error(response.error?.message||'Could not use the PDF chart.');
+      clearApiCache();
+      await refreshTankCalibration(calibratingTank.id,response.data.chart.id);
+      await loadPdfRemapPreview(calibratingTank.id);
+      notifyCalibrationChanged(calibratingTank.id);
+      setPdfRemapNotice('PDF calibration applied as Revision #'+response.data.chart.revisionNumber+
+        '. Previous readings preserved. Tank status remains '+response.data.tankStatus+'.');
+    }catch(error:any){
+      setModalError(error.message||'The calibration was not changed.');
+      await loadPdfRemapPreview(calibratingTank.id);
+    }finally{
+      setModalSubmitting(false);
+    }
+  };
   const openCalibrationModal = async (t: Tank) => {
     setCalibratingTank(t);
     setCalCharts([]);
     setCalActiveChart(null);
     setCalSelectedChart(null);
     setCalGlobalSource(null);
+    setPdfRemapPreview(null);
+    setPdfRemapNotice('');
     setCalShowAdvanced(false);
     setCalModalPoints([]);
     setCalEditingPoint(null);
@@ -894,6 +978,9 @@ export const PumpInfrastructurePage: React.FC = () => {
     setModalError(null);
     setModalType('tankCalibration');
     await refreshTankCalibration(t.id);
+    if(t.capacityLitres===10000||t.capacityLitres===20000){
+      await loadPdfRemapPreview(t.id);
+    }
   };
 
   const handleSelectCalibrationChartRevision = async (chartId: string) => {
@@ -1475,7 +1562,7 @@ export const PumpInfrastructurePage: React.FC = () => {
           {id:'storage',label:'1. Fuel & Storage',items:[
             {id:'products',label:'Mapped Products',icon:Fuel},
             {id:'tanks',label:'Underground Tanks',icon:Gauge},
-            ...(canReadTankCalibration?[{id:'globalCalibration' as const,label:'Calibration Charts',icon:Layers,testId:'tab-global-calibration-masters'}]:[])]},
+            ...(canReadTankCalibration?[{id:'globalCalibration' as const,label:'Tank Calibration',icon:Layers,testId:'tab-global-calibration-masters'}]:[])]},
           {id:'dispensing',label:'2. Dispensing & Mapping',items:[
             {id:'dispensers',label:'Dispensers / MPDs',icon:Sliders},
             {id:'nozzles',label:'Nozzles',icon:Flame},
@@ -1564,7 +1651,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F1F5F9] hover:bg-[#E8EEF5] text-orange-800 border border-orange-500/30 rounded-lg text-xs font-mono font-bold transition-colors"
                 >
                   <Layers className="w-3.5 h-3.5 text-[#B8530D]" />
-                  <span>Calibration Charts</span>
+                  <span>Tank Calibration</span>
                 </button>
               )}
               {canWriteTanks && (
@@ -1578,13 +1665,19 @@ export const PumpInfrastructurePage: React.FC = () => {
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-600 text-[#17365D] rounded-lg text-xs font-bold shadow-md shadow-orange-500/20"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add Storage Tank</span>
+                  <span>Add Tank</span>
                 </button>
               )}
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {tanks.some(t=>t.status==='DECOMMISSIONED')&&<div className="md:col-span-2">
+              <button type="button" onClick={()=>setShowRemovedTanks(v=>!v)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-[#17365D]">
+                {showRemovedTanks?'Hide removed tanks':'Show removed tanks ('+tanks.filter(t=>t.status==='DECOMMISSIONED').length+')'}
+              </button>
+            </div>}
             {pendingQuickTanks.map(pending => (
               <div key={pending.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 space-y-3">
                 <div className="flex justify-between items-start gap-3">
@@ -1613,7 +1706,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                 )}
               </div>
             ))}
-            {tanks.map(t => {
+            {tanks.filter(t=>showRemovedTanks||t.status!=='DECOMMISSIONED').map(t => {
               const safeFillPercent = Math.min(100, Math.round((t.safeFillCapacityLitres / t.capacityLitres) * 100));
               const calPoints = tankCalibrationByTankId[t.id] || [];
               const summary = tankChartStatusByTankId[t.id];
@@ -1695,7 +1788,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                           className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-[#F1F5F9]/80 hover:bg-[#E8EEF5]/80 text-[#B8530D] hover:text-orange-800 border border-[#D7E0EA]/80 rounded-xl text-xs font-semibold transition-colors"
                         >
                           <Layers className="w-3.5 h-3.5" />
-                          <span>Calibration Chart</span>
+                          <span>Linked Chart</span>
                         </button>
                       )}
                       {canWriteTanks && (
@@ -1710,6 +1803,21 @@ export const PumpInfrastructurePage: React.FC = () => {
                       )}
                     </div>
                   )}
+                  {canWriteTanks&&<div className="flex flex-wrap gap-2 border-t border-slate-200 pt-3">
+                    {t.status==='ACTIVE'&&<button type="button" disabled={!!changingTankStatusId}
+                      onClick={()=>{void changeTankStatus(t,'INACTIVE');}}
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">Deactivate</button>}
+                    {t.status==='INACTIVE'&&<button type="button" disabled={!!changingTankStatusId}
+                      onClick={()=>{openEditTank(t);setEditTankStatus('ACTIVE');}}
+                      className="rounded-lg bg-[#17365D] px-3 py-1.5 text-xs font-semibold text-white">Activate</button>}
+                    {t.status==='DECOMMISSIONED'&&<button type="button" disabled={!!changingTankStatusId}
+                      onClick={()=>{void changeTankStatus(t,'INACTIVE');}}
+                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-[#17365D]">Restore</button>}
+                    {t.status==='INACTIVE'&&<button type="button" disabled={!!changingTankStatusId}
+                      onClick={()=>{void changeTankStatus(t,'DECOMMISSIONED');}}
+                      title="Remove from normal list, preserving history"
+                      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50">Remove</button>}
+                  </div>}
                 </div>
               );
             })}
@@ -2930,18 +3038,9 @@ export const PumpInfrastructurePage: React.FC = () => {
               {editingTank.id.startsWith('tank-pgt-') && editingTank.status !== 'ACTIVE' && editTankStatus === 'ACTIVE' && (
                 <section className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-[#17365D]" data-testid="simple-activate-tank">
                   <div className="font-bold">Ready to use Tank #{editingTank.tankNumber}?</div>
-                  <p>If the tank's linked chart is already approved and matches its stored readings, it is used automatically. No re-upload is needed.</p>
-                  <p className="text-amber-900">Confirm the fuel grade and actual operating limits once. The initial safe-fill value may be provisional.</p>
-                  <label className="flex items-start gap-2 rounded-lg bg-white p-3 border border-blue-200">
-                    <input type="checkbox" className="mt-0.5"
-                      data-testid="confirm-tank-readiness"
-                      checked={confirmTankPhysicalCompatibility && confirmTankOperatingLimits}
-                      onChange={e => {
-                        setConfirmTankPhysicalCompatibility(e.target.checked);
-                        setConfirmTankOperatingLimits(e.target.checked);
-                      }}/>
-                    I confirm this tank's fuel mapping and operating limits.
-                  </label>
+                  <p>The complete supplied 10/20 KL chart is reused without another approval or upload.</p>
+                  <p className="text-amber-900">Check the fuel grade, Safe Fill and Min Level above. Clicking Use Tank applies these values.</p>
+                  
                   <button type="button" onClick={() => { void openCalibrationModal(editingTank); }} className="text-blue-800 underline font-semibold">
                     View this tank's linked calibration chart
                   </button>
@@ -3122,6 +3221,13 @@ export const PumpInfrastructurePage: React.FC = () => {
         const activePoints = tankCalibrationByTankId[calibratingTank.id] || [];
         const calPoints = calModalPoints.length > 0 || calSelectedChart ? calModalPoints : activePoints;
         const calStatus = getTankCalibrationStatus(calPoints.length, calSelectedChart?.status);
+        const linkedSuppliedReady = Boolean(
+          calSelectedChart?.status === 'DRAFT' &&
+          calSelectedChart.sourceTemplateId &&
+          calGlobalSource &&
+          isOperatorSuppliedReference(calGlobalSource, calGlobalSource.points || []) &&
+          reviewReusableGlobalChart(calSelectedChart, calPoints, calGlobalSource, calibratingTank.capacityLitres).ready
+        );
         const lastRecordedPoint = calPoints.reduce<TankCalibrationPoint | null>((last, point) =>
           !last || point.dipMillimetresMilliunits > last.dipMillimetresMilliunits ? point : last, null);
         const isLoadingPoints = loadingCalibrationTankId === calibratingTank.id;
@@ -3159,19 +3265,19 @@ export const PumpInfrastructurePage: React.FC = () => {
                       {calSelectedChart?.sourceTemplateId ? 'Linked Global Calibration' : 'Tank Calibration Chart'}
                     </h2>
                     <span
-                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 font-mono ${calStatus.badgeClass}`}
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 font-mono ${linkedSuppliedReady?'bg-emerald-50 text-emerald-800 border-emerald-300':calStatus.badgeClass}`}
                     >
-                      {calStatus.isConfigured ? (
+                      {(calStatus.isConfigured || linkedSuppliedReady) ? (
                         <CheckCircle className="w-3 h-3 shrink-0" />
                       ) : (
                         <AlertTriangle className="w-3 h-3 shrink-0" />
                       )}
-                      <span>Calibration: {calStatus.badgeLabel}</span>
+                      <span>Calibration: {linkedSuppliedReady?'READY TO USE':calStatus.badgeLabel}</span>
                     </span>
                     {calSelectedChart && (
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 font-mono ${
-                          calSelectedChart.status === 'ACTIVE'
+                          linkedSuppliedReady || calSelectedChart.status === 'ACTIVE'
                             ? 'bg-emerald-500/10 text-emerald-800 border-emerald-500/30'
                             : calSelectedChart.status === 'APPROVED'
                               ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
@@ -3180,7 +3286,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                                 : 'bg-[#F1F5F9] text-[#64748B] border-[#D7E0EA]'
                         }`}
                       >
-                        Rev #{calSelectedChart.revisionNumber} • {calSelectedChart.status}
+                        Rev #{calSelectedChart.revisionNumber} • {linkedSuppliedReady?'READY TO USE':calSelectedChart.status}
                       </span>
                     )}
                     {calSelectedChart && (
@@ -3238,6 +3344,52 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </button>
               </div>
 
+              {(calibratingTank.capacityLitres===10000||calibratingTank.capacityLitres===20000) && canReadTankCalibration && (
+                <section data-testid="existing-tank-pdf-remap"
+                  className="rounded-xl border border-[#B8D5C7] bg-[#F4FAF7] p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-bold text-[#17365D]">Use supplied {calibratingTank.capacityLitres/1000} KL PDF calibration</p>
+                      <p className="text-xs text-slate-600">Creates a new active chart revision for this tank. Older readings and reports remain unchanged.</p>
+                    </div>
+                    <button type="button" onClick={()=>{void loadPdfRemapPreview(calibratingTank.id);}}
+                      disabled={pdfRemapLoading||modalSubmitting}
+                      className="rounded-lg border border-[#B8D5C7] bg-white px-3 py-2 text-xs font-semibold text-[#17365D] disabled:opacity-50">
+                      {pdfRemapLoading?'Checking…':'Refresh'}
+                    </button>
+                  </div>
+                  {pdfRemapLoading&&!pdfRemapPreview&&<p className="text-xs text-[#475569]">Checking saved chart and open shift…</p>}
+                  {pdfRemapPreview&&<>
+                    <div className="flex flex-wrap gap-3 text-xs text-[#334155]">
+                      <span>{pdfRemapPreview.sourceReadings} saved source readings</span>
+                      <span>Current: Rev #{pdfRemapPreview.previousActiveRevisionNumber??'—'}</span>
+                      <span>Safe-fill: {pdfRemapPreview.safeFillCapacityLitres.toLocaleString('en-IN')} L (unchanged)</span>
+                    </div>
+                    {pdfRemapPreview.alreadyApplied&&
+                      <p className="text-sm font-semibold text-emerald-800" role="status">
+                        This PDF calibration is already active for Tank #{calibratingTank.tankNumber}. No duplicate revision needed.
+                      </p>}
+                    {!pdfRemapPreview.ready&&
+                      <p role="status" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+                        {pdfRemapPreview.message||'PDF source not ready.'}
+                      </p>}
+                    {pdfRemapPreview.code==='PDF_SOURCE_NOT_INSTALLED'&&canApproveCalibrationChart&&
+                      <button type="button" onClick={()=>{
+                        setInitialGlobalChartCode('');
+                        setModalType(null);setActiveTab('globalCalibration');
+                      }} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-[#17365D]">
+                        Open Tank Calibration to install the PDF charts
+                      </button>}
+                    {pdfRemapPreview.ready&&!pdfRemapPreview.alreadyApplied&&canApproveCalibrationChart&&
+                      <button type="button" data-testid="apply-pdf-calibration-existing-tank"
+                        onClick={()=>{void usePdfCalibrationForTank();}} disabled={modalSubmitting||pdfRemapLoading}
+                        className="rounded-lg bg-[#17365D] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+                        {modalSubmitting?'Applying PDF chart…':'Use PDF chart for Tank #'+calibratingTank.tankNumber}
+                      </button>}
+                  </>}
+                  {pdfRemapNotice&&<p className="text-sm font-semibold text-emerald-800" role="status">{pdfRemapNotice}</p>}
+                </section>
+              )}
               {calSelectedChart?.sourceTemplateId && !calShowAdvanced && (
                 <section className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 space-y-4" data-testid="global-calibration-linked-summary">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -3252,24 +3404,24 @@ export const PumpInfrastructurePage: React.FC = () => {
                   <p className="text-sm text-slate-700">
                     Tank #{calibratingTank.tankNumber} automatically uses your selected
                     {calibratingTank.capacityLitres / 1000} KL global reference.
-                    Its dip-to-litre values are already saved. You do not need to re-upload its readings. An approved, identical global source can be reused at tank activation.
+                    Its dip-to-litre values are already saved. You do not need to re-upload its readings. The saved supplied chart can be reused without a second approval when copied readings match.
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                     <div><p className="text-slate-500">Source global chart</p>
                       <p className="font-semibold text-[#17365D]">{calGlobalSource?.name ?? calSelectedChart.sourceFileName ?? 'Saved global chart'}</p></div>
-                    <div><p className="text-slate-500">Global approval in software</p>
+                    <div><p className="text-slate-500">Linked chart source</p>
                       <p className={'font-semibold ' + (calGlobalSource?.status === 'APPROVED' || calGlobalSource?.status === 'ACTIVE' ? 'text-green-800':'text-amber-800')}>
-                        {calGlobalSource?.status ?? 'Checking source status…'}</p></div>
+                        {calGlobalSource?(isOperatorSuppliedReference(calGlobalSource,calGlobalSource.points||[])?'Operator-provided · Ready':isOperatorSuppliedSourceMetadata(calGlobalSource)?'Supplied source · Reconcile readings':calGlobalSource.status):'Checking source…'}</p></div>
                     <div><p className="text-slate-500">Highest stored dip / volume</p>
                       <p className="font-semibold text-[#17365D]">{lastRecordedPoint
                         ? `${formatCalibrationDisplay(lastRecordedPoint.dipMillimetresMilliunits / 1000)} mm / ${formatCalibrationDisplay(lastRecordedPoint.volumeMilliunits / 1000)} L`
                         : 'Not available'}</p></div>
                   </div>
-                  {calGlobalSource?.status === 'DRAFT' && (
+                  {calGlobalSource?.status === 'DRAFT'&&!isOperatorSuppliedReference(calGlobalSource,calGlobalSource.points||[]) && (
                     <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                      The chart was selected as your default reference, but the source global chart is still DRAFT in this software.
-                      This is why operational activation was blocked. The tank's APPROVED revision status does not override the global source status.
-                      You only need to resolve the source once in Calibration Charts, not reapprove each copied chart.
+                      {isOperatorSuppliedSourceMetadata(calGlobalSource)
+                        ? 'The digital chart does not match the supplied PDF checkpoints. Correct its numerical readings in Tank Calibration; no additional approval is needed.'
+                        : 'The linked chart is not ready for operational use. Review its numerical source in Tank Calibration.'}
                     </p>
                   )}
                   <p className="text-xs text-slate-600">
@@ -3283,14 +3435,11 @@ export const PumpInfrastructurePage: React.FC = () => {
                     }} className="rounded-lg bg-[#17365D] px-4 py-2 text-xs font-bold text-white">
                       Manage global calibration once
                     </button>
-                    <button type="button" onClick={() => setCalShowAdvanced(true)}
-                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs text-slate-700">
-                      Show advanced technical details
-                    </button>
+                    <p className="text-xs text-slate-600">Manage chart readings in Tank Calibration.</p>
                   </div>
                 </section>
               )}
-              {(!calSelectedChart?.sourceTemplateId || calShowAdvanced) && (<>
+              {!calSelectedChart?.sourceTemplateId && (<>
               {/* Revision Selector & Lifecycle Controls */}
               {calCharts.length > 0 && (
                 <div className="p-3.5 bg-slate-950/60 border border-[#E2E8F0] rounded-xl space-y-3">

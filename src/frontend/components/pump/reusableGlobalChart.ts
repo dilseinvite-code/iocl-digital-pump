@@ -1,4 +1,5 @@
 import type { GlobalTankCalibrationTemplate, TankCalibrationChart, TankCalibrationPoint } from '../../../shared/types';
+import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../../shared/operatorSuppliedCalibration';
 
 /**
  * Checks whether an existing quick-registered tank can reuse an authorised
@@ -19,10 +20,14 @@ export function reviewReusableGlobalChart(
   if (!source || source.id !== chart.sourceTemplateId) {
     return {ready:false,message:'The linked global chart could not be loaded. Refresh and review its source.'};
   }
-  if (source.status !== 'APPROVED' && source.status !== 'ACTIVE') {
+  const operatorProvided=isOperatorSuppliedReference(source,source.points||[]);
+  if (!operatorProvided && isOperatorSuppliedSourceMetadata(source)) {
+    return {ready:false,message:'Stored Excel readings differ from the supplied PDF checkpoints. Correct the numerical source in Tank Calibration; a second approval is not needed.'};
+  }
+  if (!operatorProvided&&source.status !== 'APPROVED' && source.status !== 'ACTIVE') {
     return {ready:false,message:'The source global chart is still '+source.status+'. Review and approve it once in Calibration Charts; there is no need to upload tank readings again.'};
   }
-  if (source.requiresEngineeringReview || source.requiresDimensionVerification || source.isOverCapacityCeiling) {
+  if (!operatorProvided&&(source.requiresEngineeringReview || source.requiresDimensionVerification || source.isOverCapacityCeiling)) {
     return {ready:false,message:'The global chart has an unresolved calibration or dimensional warning that prevents operational activation. Review the source once.'};
   }
   if (source.nominalCapacityLitres !== tankCapacityLitres) {
@@ -50,5 +55,5 @@ export function reviewReusableGlobalChart(
       return {ready:false,message:'The attached readings differ from the approved global chart. No automatic reapproval or data replacement will occur.'};
     }
   }
-  return {ready:true,message:'The attached chart matches its approved global source. No separate tank chart approval step is needed.'};
+  return {ready:true,message:operatorProvided?'Your provided chart is linked with identical readings; no repeat approval needed.':'This chart matches its approved global source.'};
 }

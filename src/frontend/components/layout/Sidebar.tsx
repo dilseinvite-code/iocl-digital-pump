@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PERMISSIONS, PermissionCode } from '../../../shared/constants';
+import {findWorkspaceTasks,openWorkspaceTask,WORKSPACE_TASKS} from './workspaceTaskCatalog';
 import {
   LayoutDashboard,
   Building2,
@@ -232,7 +233,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     'documents': 'document vault r2 statutory licence agreement evidence claims pdf',
     'pump-infra': 'pump infrastructure tanks nozzles calibration',
   };
-  const searchedNav = filteredNav.filter(item => (item.label + ' ' + (searchAliases[item.id] || '')).toLowerCase().includes(navSearch.trim().toLowerCase()));
+  const searchedNav = filteredNav.filter(item => (item.label + ' ' + (searchAliases[item.id] || '') + ' ' +
+    WORKSPACE_TASKS.filter(task=>task.tab===item.id).map(task=>task.keywords).join(' ')).toLowerCase().includes(navSearch.trim().toLowerCase()));
+  const matchedTasks=findWorkspaceTasks(navSearch,hasPermission,6).filter(task=>filteredNav.some(item=>item.id===task.tab));
 
   const content = (
     <div className={`iocl-sidebar-content flex h-full min-h-0 ${collapsed ? 'w-64 lg:w-[72px]' : 'w-64'} flex-col overflow-hidden border-r border-[#153F9B] bg-gradient-to-b from-[#1646B1] via-[#103991] to-[#092767] p-3 text-white shadow-[8px_0_22px_rgba(11,30,52,0.09)] transition-[width] duration-200`}>
@@ -283,7 +286,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             aria-label="Find a page"
             value={navSearch}
             onChange={event => setNavSearch(event.target.value)}
-            placeholder="Find a page…"
+            placeholder="Find a page or task…"
             className="h-10 w-full rounded-xl border border-white/20 bg-white/10 pl-9 pr-3 text-xs font-medium text-white placeholder:text-slate-300 focus:border-[#F47721] focus:outline-none focus:ring-2 focus:ring-[#F47721]/30"
           />
         </label>
@@ -291,11 +294,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Nav Menu */}
       <nav aria-label="Main navigation" className="min-h-0 flex-1 space-y-1 overflow-y-scroll overscroll-contain pr-1 [scrollbar-width:thin] [scrollbar-color:#54708B_#112B49]">
-        {navSearch.trim() && searchedNav.length === 0 && (
+        {navSearch.trim() && searchedNav.length === 0 && matchedTasks.length === 0 && (
           <p className="rounded-lg bg-white/10 px-3 py-4 text-xs text-slate-200" role="status">
             No accessible pages match “{navSearch}”.
           </p>
         )}
+        {navSearch.trim()&&matchedTasks.length>0&&<div className="mb-3 rounded-xl border border-white/15 bg-white/10 p-2">
+          <p className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-200">Matching tasks</p>
+          {matchedTasks.map(task=><button key={task.id} type="button"
+            onClick={()=>{openWorkspaceTask(task,setActiveTab);setNavSearch('');onCloseMobile();}}
+            className="w-full rounded-lg px-2 py-2 text-left text-xs text-white hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-orange-400">
+            <span className="block font-semibold">{task.label}</span>
+            <span className="block text-[10px] text-slate-200">{task.description}</span>
+          </button>)}
+        </div>}
         {navigationGroups.map(group => {
           const available = searchedNav.filter(item => group.ids.includes(item.id)).sort((a,b) => group.ids.indexOf(a.id)-group.ids.indexOf(b.id));
           if (!available.length) return null;

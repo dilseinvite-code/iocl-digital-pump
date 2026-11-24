@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
+import { WorkspaceTaskFinder } from './WorkspaceTaskFinder';
 import './vibrantTheme.css';
 import './option4Saas.css';
 import './premiumIndigoTheme.css';
@@ -40,6 +41,7 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
         />
 
         <main id="main-workspace" tabIndex={-1} className="min-w-0 flex-1 overflow-x-hidden p-3 sm:p-5 lg:p-6 xl:p-8">
+          <WorkspaceTaskFinder activeTab={activeTab} onNavigate={setActiveTab}/>
           {children}
         </main>
       </div>
