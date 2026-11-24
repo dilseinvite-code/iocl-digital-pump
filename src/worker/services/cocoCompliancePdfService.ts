@@ -100,7 +100,7 @@ interface ColumnSpec {
 const ONE_PAGER_COLUMNS: readonly ColumnSpec[] = [
   { key: 'srNo', header: 'Sr. No.', width: 32, align: 'center' },
   { key: 'particular', header: 'Particular', width: 118, align: 'left' },
-  { key: 'statusYesNo', header: 'Status (Yes/No)', width: 58, align: 'center' },
+  { key: 'statusYesNo', header: 'Status', width: 58, align: 'center' },
   { key: 'validityDueDate', header: 'Validity / Due Date', width: 78, align: 'center' },
   { key: 'amountInr', header: 'Amount (Rs.)', width: 66, align: 'right' },
   { key: 'frequency', header: 'Frequency', width: 58, align: 'center' },
@@ -193,7 +193,7 @@ export class CocoCompliancePdfService {
 
     const s = report.summary;
     const summaryLine = sanitizePdfText(
-      `Summary (As of ${reportDateFormatted}):   Valid: ${s.validCount}   |   Expiring Soon: ${s.expiringSoonCount}   |   Expired: ${s.expiredCount}   |   Payment Pending: ${s.paymentPendingCount}   |   Action Required: ${s.actionRequiredCount}   |   Not Recorded: ${s.notRecordedCount}`
+      `Summary (As of ${reportDateFormatted}):   Valid / Paid: ${s.validCount}   |   Expiring Soon: ${s.expiringSoonCount}   |   Expired: ${s.expiredCount}   |   Payment Pending: ${s.paymentPendingCount}   |   Action Required: ${s.actionRequiredCount}   |   Not Recorded: ${s.notRecordedCount}`
     );
     page1.drawText(summaryLine, {
       x: MARGIN_X + 8,

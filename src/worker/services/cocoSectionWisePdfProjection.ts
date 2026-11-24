@@ -5,7 +5,7 @@ const absent=(v:string|undefined)=>!v||['Not Recorded','N/A','-'].includes(v.tri
 // Missing individual values are shown as a neutral dash in print, while
 // their actual Not Recorded state remains unchanged in the API/UI.
 const printCells=(table:SectionWiseTable):SectionWiseTable=>({
-  ...table,rows:table.rows.map(row=>row.map(cell=>cell==='Not Recorded'?'-':cell)),
+  ...table,rows:table.rows.map((row,index)=>row.map((cell,col)=>col===0 && /^Sr\.?$/i.test(table.headers[0]) ? String(index+1) : cell==='Not Recorded'?'-':cell)),
 });
 export function printableSectionTables(section:SectionWiseSection):SectionWiseTable[]{
   if(section.title==='Lease & Agreements'){
@@ -26,7 +26,7 @@ export function printableSectionTables(section:SectionWiseSection):SectionWiseTa
   }
   return section.tables
     .filter(table=>table.source!=='Reporting rules'&&table.source!=='Status rules')
-    .map(table=>({...table,rows:table.rows.filter(row=>row.slice(2).some(v=>!absent(v)))}))
+    .map(table=>({...table,rows:table.rows.filter(row=>table.headers[0]==='Particular' || row.slice(2).some(v=>!absent(v)))}))
     .filter(table=>table.rows.length>0)
     .map(printCells);
 }

@@ -9,6 +9,7 @@ import {
   formatIndianCurrencyFromPaise,
 } from '../../shared/cocoComplianceUtils';
 import { CocoComplianceService } from './cocoComplianceService';
+import { loadCocoReportMasterData, projectClaims } from './cocoReportingMasterData';
 import { type LeaseTerms, formatLeaseDimension } from '../../shared/leaseTerms';
 import { getCocoLeaseTerms } from './cocoLeaseTermsService';
 
@@ -250,8 +251,9 @@ export function buildSectionWiseSections(args: {
   ];
   const bills = billDefs.map(([code, label], index) => {
     const i = item(code);
+    const due = i?.linkedModuleData ? i.linkedModuleData.paymentDueDate : i?.validityDueDate;
     const payment = !i || i.paymentStatus === 'NOT_RECORDED' ? fromItem(i)
-      : i.paymentStatus === 'PAID' ? 'Paid'
+      : i.paymentStatus === 'PAID' ? (due && i.paymentDate && i.paymentDate > due ? 'Paid Late' : 'Paid')
       : i.paymentStatus === 'OVERDUE' ? 'Overdue' : 'Pending';
     return [String(index + 1), label, payment, i ? date(i.validityDueDate) : NR,
       money(i), i?.frequency || EMPTY, i?.frequency || EMPTY, notes(i)];
@@ -346,6 +348,7 @@ export function buildSectionWiseSections(args: {
       }
     }
     let i = item(code);
+    if (code === 'WAGES_INCENTIVES_MISC' && i?.authoritativeSource === 'CLAIMS_REGISTER') continue;
     if (code === 'LEASE_RENT' && i?.authoritativeSource !== 'NFR_LEASE_RENT_MODULE') i = undefined;
     const status = !i || i.paymentStatus === 'NOT_RECORDED' ? NR
       : i.paymentStatus === 'PAID' ? 'Paid'
@@ -366,6 +369,9 @@ export function buildSectionWiseSections(args: {
       printable(claim.remarks || EMPTY)]);
   }
 
+  const pendingApprovalPaise=expenseClaims.filter(c=>c.approvalStatus==='DRAFT').reduce((n,c)=>n+c.amountPaise,0);
+  const outstandingApprovedPaise=expenseClaims.filter(c=>c.approvalStatus==='APPROVED').reduce((n,c)=>n+Math.max(0,c.amountPaise-c.paidPaise),0);
+  const paidClaimsPaise=expenseClaims.reduce((n,c)=>n+c.paidPaise,0);
   return [
     {
       title: 'Lease & Agreements',
@@ -444,6 +450,7 @@ export function buildSectionWiseSections(args: {
         { title: '5. Claims & Payments Register', source: 'NFR / Compliance records',
           headers: ['Sr.', 'Category / Particular', 'Status', 'Duration / Period', 'Amount & Payment', 'Settled', 'Remarks / Action'],
           widths: [25, 144, 64, 68, 83, 57, 68], rows: claimRows },
+        ...(expenseClaims.length ? [{title:'Claims Financial Summary',source:'Claims & Settlements Register',headers:['Particular','Amount (Rs.)'],widths:[300,209],rows:[['Pending approval',formatIndianCurrencyFromPaise(pendingApprovalPaise,{asciiPrefix:true})],['Approved outstanding',formatIndianCurrencyFromPaise(outstandingApprovedPaise,{asciiPrefix:true})],['Recorded settlements',formatIndianCurrencyFromPaise(paidClaimsPaise,{asciiPrefix:true})]]}] : []),
         { title: 'Settlement Rules & Evidence', source: 'Reporting rules',
           headers: ['Display Field', 'Evidence Needed', 'Source of Truth'],
           widths: [123, 213, 173], rows: [
@@ -464,7 +471,9 @@ export class CocoSectionWiseReportService {
 
   async getReport(args: { outletId: string; reportDate?: string; actorUserId: string; includeDealerDraftSource?: boolean }): Promise<CocoSectionWiseReport> {
     const compliance = new CocoComplianceService(this.db);
+    const masterData = await loadCocoReportMasterData(this.db, args.outletId);
     const register = await compliance.getOutletComplianceRegister({
+      masterData,
       outletId: args.outletId,
       reportDate: args.reportDate,
     });
@@ -479,14 +488,11 @@ export class CocoSectionWiseReportService {
         throw err;
       }
     };
-    const [leases, vendors, equipment, actor, agreementRecords, claimRecords, settlements, inspections, leaseTerms, contractDocs] = await Promise.all([
+    const [leases, vendors, equipment, actor, inspections, leaseTerms, contractDocs] = await Promise.all([
       this.db.select().from(nfrLeases).where(eq(nfrLeases.outletId, args.outletId)).all(),
       this.db.select().from(nfrVendors).where(eq(nfrVendors.outletId, args.outletId)).all(),
       this.db.select().from(equipmentAssets).where(eq(equipmentAssets.outletId, args.outletId)).all(),
       this.db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, args.actorUserId)).get(),
-      legacySafe(this.db.select().from(cocoAgreementDetails).where(eq(cocoAgreementDetails.outletId, args.outletId)).all(), []),
-      legacySafe(this.db.select().from(cocoExpenseClaims).where(eq(cocoExpenseClaims.outletId, args.outletId)).all(), []),
-      legacySafe(this.db.select().from(cocoClaimSettlements).where(eq(cocoClaimSettlements.outletId, args.outletId)).all(), []),
       legacySafe(this.db.select().from(cocoAssetInspections).where(eq(cocoAssetInspections.outletId, args.outletId)).all(), []),
       getCocoLeaseTerms(this.db,args.outletId),
       this.db.select({id:documents.id,name:documents.name}).from(documents).where(eq(documents.outletId,args.outletId)).all(),
@@ -530,7 +536,7 @@ export class CocoSectionWiseReportService {
       sections: buildSectionWiseSections({
         items: register.items,
         leases: leaseInfo,
-        agreements: agreementRecords.map((a) => ({
+        agreements: masterData.agreements.map((a) => ({
           id: a.id, agreementType: a.agreementType, agreementName: a.agreementName,
           agreementNumber: a.agreementNumber, linkedNfrLeaseId: a.linkedNfrLeaseId,
           counterpartyName: a.counterpartyName, vendorCode: a.vendorCode,
@@ -538,14 +544,12 @@ export class CocoSectionWiseReportService {
           startDate: a.startDate, endDate: a.endDate, remarks: a.remarks,
           leaseTerms:leaseTerms.byId.get(a.id)||null,contractName:a.agreementDocumentId?docNames.get(a.agreementDocumentId)||null:null,
         })),
-        claims: claimRecords.map((claim) => ({
+        claims: projectClaims(masterData, register.reportDate).map((claim) => ({
           id: claim.id, claimCategory: claim.claimCategory, title: claim.title,
           invoiceNumber: claim.invoiceNumber,
           periodStart: claim.periodStart, periodEnd: claim.periodEnd, dueDate: claim.dueDate,
           amountPaise: claim.amountPaise, approvalStatus: claim.approvalStatus,
-          paidPaise: settlements.filter((payment) => payment.claimId === claim.id &&
-            payment.paymentDate <= register.reportDate)
-            .reduce((sum, payment) => sum + payment.amountPaise, 0),
+          paidPaise: claim.paidPaise,
           remarks: claim.remarks,
         })),
         inspections: inspections.map((i) => ({
