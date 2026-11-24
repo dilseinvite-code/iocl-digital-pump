@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
 import { PumpRepository } from '../repositories/pumpRepository';
@@ -20,7 +20,7 @@ import { PERMISSIONS, ROLES } from '../../shared/constants';
 import { parseMilliunits, formatMilliunits } from '../../shared/precision';
 import {TEN_KL_TEMPLATE_CODE,limitTenKlCalibrationCurve} from '../../shared/tenKlCalibrationLimit';
 import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
-import {isOperatorPdfSourceCode,operatorPdfCodeForCapacity,matchesExactOperatorPdfRows} from '../../shared/operatorPdfSourceData';
+import {isOperatorPdfSourceCode,operatorPdfCodeForCapacity,operatorPdfSource,matchesExactOperatorPdfRows} from '../../shared/operatorPdfSourceData';
 
 export const tankCalibration = new Hono<{ Bindings: EnvBindings }>();
 
@@ -1631,93 +1631,135 @@ tankCalibration.get('/calibration-templates', requirePermission(PERMISSIONS.TANK
 });
 
 
-// Admin-only reset: remove every prior calibration from ACTIVE use while retaining
-// immutable dip/volume records and historical shift/stock references.
-// This is explicitly user-triggered and never runs during deployment.
-const activeCalibrationStatuses=['ACTIVE','APPROVED','DRAFT'] as const;
-function canResetAllCalibrations(c:AppContext){
- const user=c.var.user;
- return Boolean(user?.roles?.includes(ROLES.ADMIN)&&
-   user.permissions.includes(PERMISSIONS.TANK_CALIBRATION_WRITE)&&
-   user.permissions.includes(PERMISSIONS.TANKS_WRITE));
+// Scoped fresh start: ONLY 10KL/20KL. PDF is supplied by the operator.
+// Preserve FK-linked history; old unreferenced numeric rows are physically purged.
+const REPLACED_CAPACITIES=[10000,20000] as const;
+function canReplaceCalibration(c:AppContext):boolean{
+ const u=c.var.user;
+ return Boolean(u&&u.roles.includes(ROLES.ADMIN)&&u.permissions.includes(PERMISSIONS.TANK_CALIBRATION_WRITE)&&u.permissions.includes(PERMISSIONS.TANKS_WRITE));
 }
-async function calibrationResetPreview(db:ReturnType<typeof getDb>){
- const [templates,charts,defaults,tanks,shifts]=await Promise.all([
-   db.select({id:schema.globalTankCalibrationTemplates.id,status:schema.globalTankCalibrationTemplates.status})
-     .from(schema.globalTankCalibrationTemplates),
-   db.select({id:schema.tankCalibrationCharts.id,status:schema.tankCalibrationCharts.status})
-     .from(schema.tankCalibrationCharts),
-   db.select({capacityLitres:schema.globalTankCapacityDefaults.capacityLitres})
-     .from(schema.globalTankCapacityDefaults),
-   db.select({id:schema.tanks.id,status:schema.tanks.status}).from(schema.tanks),
-   db.select({id:schema.operationalShifts.id,status:schema.operationalShifts.status})
-     .from(schema.operationalShifts)
-     .where(inArray(schema.operationalShifts.status,['OPEN','CLOSING'])),
+async function getReplacementPlan(db:ReturnType<typeof getDb>){
+ const [templates,charts,defaults,tanks,shifts,reads,snapshots]=await Promise.all([
+  db.select().from(schema.globalTankCalibrationTemplates),
+  db.select().from(schema.tankCalibrationCharts),
+  db.select().from(schema.globalTankCapacityDefaults),
+  db.select({id:schema.tanks.id,capacity:schema.tanks.capacityLitres,status:schema.tanks.status}).from(schema.tanks),
+  db.select({id:schema.operationalShifts.id}).from(schema.operationalShifts)
+   .where(inArray(schema.operationalShifts.status,['OPEN','CLOSING'])),
+  db.select({id:schema.tankStockReadings.calibrationChartId}).from(schema.tankStockReadings),
+  db.select({id:schema.operationalShiftTanks.calibrationChartId}).from(schema.operationalShiftTanks),
  ]);
- return {
-   globalSourcesToArchive:templates.filter(t=>activeCalibrationStatuses.includes(t.status as any)).length,
-   tankChartsToArchive:charts.filter(t=>activeCalibrationStatuses.includes(t.status as any)).length,
-   defaultChartMappingsToClear:defaults.length,
-   activeTanksToInactivate:tanks.filter(t=>t.status==='ACTIVE').length,
-   openOrClosingShifts:shifts.length,
-   willPreserveHistoricalPoints:true,willPreserveStockReadings:true,
- };
+ const affected=tanks.filter(t=>REPLACED_CAPACITIES.includes(t.capacity as 10000|20000));
+ const tankIds=new Set(affected.map(t=>t.id)),historical=new Set([...reads,...snapshots].map(x=>x.id).filter((x):x is string=>Boolean(x)));
+ const oldTemplates=templates.filter(t=>REPLACED_CAPACITIES.includes(t.nominalCapacityLitres as 10000|20000)
+  &&!isOperatorPdfSourceCode(t.code,t.nominalCapacityLitres));
+ const allCharts=charts.filter(t=>tankIds.has(t.tankId));
+ return {oldTemplates,allCharts,affected,defaults:defaults.filter(d=>REPLACED_CAPACITIES.includes(d.capacityLitres as 10000|20000)),
+  historical,openShifts:shifts.length,templates,
+  counts:{oldGlobalSources:oldTemplates.length,oldTankRevisions:allCharts.length,
+   oldUnreferencedTankRevisions:allCharts.filter(c=>!historical.has(c.id)).length,
+   protectedHistoricalRevisions:allCharts.filter(c=>historical.has(c.id)).length,
+   activeTanksToInactivate:affected.filter(t=>t.status==='ACTIVE').length,
+   existingDefaultMappings:defaults.filter(d=>REPLACED_CAPACITIES.includes(d.capacityLitres as 10000|20000)).length,
+   openOrClosingShifts:shifts.length,replacement10klPoints:195,replacement20klPoints:211,
+   untouched:'15 KL, 50 KL and all other capacities'}};
 }
-tankCalibration.get('/calibration-templates/reset-all-preview',
-  requirePermission(PERMISSIONS.TANK_CALIBRATION_READ) as any,async(c:AppContext)=>{
-  if(!canResetAllCalibrations(c))return c.json({success:false,data:null,
-    error:{code:'FORBIDDEN',message:'Only an administrator with tank permissions may reset the calibration library.'}},403);
-  return c.json({success:true,data:await calibrationResetPreview(getDb(c.env.DB)),error:null});
+tankCalibration.get('/calibration-templates/replace-10-20-preview',
+ requirePermission(PERMISSIONS.TANK_CALIBRATION_READ) as any,async(c:AppContext)=>{
+  if(!canReplaceCalibration(c))return c.json({success:false,data:null,error:{code:'FORBIDDEN',message:'Administrator tank permissions are required.'}},403);
+  const p=await getReplacementPlan(getDb(c.env.DB));
+  return c.json({success:true,data:p.counts,error:null});
 });
-tankCalibration.post('/calibration-templates/reset-all',
-  requirePermission(PERMISSIONS.TANK_CALIBRATION_WRITE) as any,async(c:AppContext)=>{
-  if(!canResetAllCalibrations(c))return c.json({success:false,data:null,
-    error:{code:'FORBIDDEN',message:'Only an administrator with tank permissions may reset the calibration library.'}},403);
+tankCalibration.post('/calibration-templates/replace-10-20',
+ requirePermission(PERMISSIONS.TANK_CALIBRATION_WRITE) as any,async(c:AppContext)=>{
+  if(!canReplaceCalibration(c))return c.json({success:false,data:null,error:{code:'FORBIDDEN',message:'Administrator tank permissions are required.'}},403);
   const body=await c.req.json().catch(()=>null);
-  if(!body||body.confirm!=='CLEAR ALL CALIBRATION'){
-    return c.json({success:false,data:null,
-      error:{code:'RESET_CONFIRMATION_REQUIRED',message:'Enter CLEAR ALL CALIBRATION to archive every active calibration reference.'}},400);
+  if(body?.confirm!=='REPLACE 10KL 20KL')return c.json({success:false,data:null,error:{code:'CONFIRMATION_REQUIRED',message:'Type REPLACE 10KL 20KL to replace only the two requested capacities.'}},400);
+  const db=getDb(c.env.DB),p=await getReplacementPlan(db);
+  if(p.openShifts)return c.json({success:false,data:p.counts,error:{code:'SHIFT_OPEN',message:'Close all open or closing shifts before replacing tank calibration.'}},409);
+  const userId=c.var.user!.user.id,now=new Date().toISOString(),batch:any[]=[];
+  const replacementIds=new Map<number,string>();
+  for(const capacity of REPLACED_CAPACITIES){
+   const source=operatorPdfSource(capacity)!;
+   const existing=p.templates.find(t=>t.code===source.code);
+   if(existing){
+    const points=await db.select().from(schema.globalTankCalibrationTemplatePoints)
+     .where(eq(schema.globalTankCalibrationTemplatePoints.templateId,existing.id))
+     .orderBy(schema.globalTankCalibrationTemplatePoints.dipMillimetresMilliunits);
+    if(!matchesExactOperatorPdfRows(capacity,points))return c.json({success:false,data:null,error:{code:'PDF_SOURCE_MISMATCH',message:'The existing PDF chart does not match the supplied 10/20 KL reference. Nothing was changed.'}},409);
+    replacementIds.set(capacity,existing.id);
+    batch.push(db.update(schema.globalTankCalibrationTemplates).set({status:'APPROVED',updatedAt:now}).where(eq(schema.globalTankCalibrationTemplates.id,existing.id)));
+   }else{
+    const id='gtct-pdf-'+capacity+'-'+crypto.randomUUID().slice(0,8);
+    replacementIds.set(capacity,id);
+    batch.push(db.insert(schema.globalTankCalibrationTemplates).values({
+     id,code:source.code,name:source.name,nominalCapacityLitres:capacity,
+     tankDiameterMmMilliunits:source.tankDiameterMm*1000,tankLengthMmMilliunits:source.tankLengthMm*1000,
+     maxDipMmMilliunits:source.maxDipMm*1000,revisionNumber:1,status:'APPROVED',
+     sourceFileName:'Calibration Chart.pdf',referenceDocument:'Operator PDF supplied 24 November 2026',
+     notes:'Latest operator PDF source. 20 KL at 2020 mm = 21359.52 litres confirmed.',
+     createdBy:userId,createdAt:now,updatedAt:now,approvedBy:userId,approvedAt:now,
+    }));
+    for(let offset=0;offset<source.points.length;offset+=12){
+     batch.push(db.insert(schema.globalTankCalibrationTemplatePoints).values(
+      source.points.slice(offset,offset+12).map(point=>({
+       id:'gtcp-'+crypto.randomUUID(),templateId:id,
+       dipMillimetresMilliunits:Math.round(point.dipMm*1000),
+       volumeMilliunits:Math.round(point.volumeLitres*1000),createdBy:userId,createdAt:now,
+      }))
+     ));
+    }
+   }
   }
-  const db=getDb(c.env.DB);
-  const preview=await calibrationResetPreview(db);
-  if(preview.openOrClosingShifts>0){
-    return c.json({success:false,data:preview,error:{
-      code:'OPEN_SHIFTS_BLOCK_CALIBRATION_RESET',
-      message:'Close all open/closing shifts before clearing calibration; historical stock must remain on its original chart.'}},409);
+  if(p.oldTemplates.length){
+   const oldIds=p.oldTemplates.map(t=>t.id);
+   batch.push(db.update(schema.globalTankCalibrationTemplates).set({status:'ARCHIVED',updatedAt:now})
+    .where(inArray(schema.globalTankCalibrationTemplates.id,oldIds)));
+   // Global old numerical readings are removed; metadata remains where FK-linked.
+   batch.push(db.delete(schema.globalTankCalibrationTemplatePoints).where(inArray(schema.globalTankCalibrationTemplatePoints.templateId,oldIds)));
   }
-  const now=new Date().toISOString(),userId=c.var.user!.user.id;
+  if(p.allCharts.length){
+   // Preserve SUPERSEDED/ARCHIVED status and original effective dates for history.
+   const currentIds=p.allCharts.filter(c=>['ACTIVE','APPROVED','DRAFT'].includes(c.status)).map(c=>c.id);
+   if(currentIds.length)batch.push(db.update(schema.tankCalibrationCharts).set({
+    status:'ARCHIVED',effectiveTo:now.slice(0,10),updatedBy:userId,updatedAt:now
+   }).where(inArray(schema.tankCalibrationCharts.id,currentIds)));
+   const safeToPurge=p.allCharts.filter(c=>!p.historical.has(c.id)).map(c=>c.id);
+   if(safeToPurge.length)batch.push(db.delete(schema.tankCalibrationPoints)
+    .where(inArray(schema.tankCalibrationPoints.chartId,safeToPurge)));
+  }
+  const affectedIds=p.affected.map(t=>t.id);
+  if(affectedIds.length){
+   batch.push(db.delete(schema.tankCalibrationPoints).where(and(
+    inArray(schema.tankCalibrationPoints.tankId,affectedIds),isNull(schema.tankCalibrationPoints.chartId))));
+   batch.push(db.update(schema.tanks).set({status:'INACTIVE',updatedAt:now})
+    .where(and(inArray(schema.tanks.id,affectedIds),eq(schema.tanks.status,'ACTIVE'))));
+  }
+  batch.push(db.delete(schema.globalTankCapacityDefaults)
+   .where(inArray(schema.globalTankCapacityDefaults.capacityLitres,[...REPLACED_CAPACITIES])));
+  for(const capacity of REPLACED_CAPACITIES){
+   batch.push(db.insert(schema.globalTankCapacityDefaults).values({
+    capacityLitres:capacity,templateId:replacementIds.get(capacity)!,updatedAt:now,updatedBy:userId,
+   }));
+   batch.push(db.update(schema.pendingUndergroundTanks).set({templateId:replacementIds.get(capacity)!,updatedAt:now})
+    .where(and(eq(schema.pendingUndergroundTanks.capacityLitres,capacity),eq(schema.pendingUndergroundTanks.status,'PENDING_FUEL'))));
+  }
+  batch.push(db.insert(schema.auditLogs).values({
+   id:'aud-'+crypto.randomUUID(),userId,action:'REPLACE_10KL_20KL_WITH_PDF',
+   entityType:'GLOBAL_TANK_CALIBRATION_RESET',entityId:'10KL_20KL',
+   oldValueJson:JSON.stringify(p.counts),
+   newValueJson:JSON.stringify({replacement:'Calibration Chart.pdf',capacities:[10000,20000],
+    oldGlobalRowsRemoved:true,oldUnreferencedTankRowsRemoved:true,
+    historicalChartRowsRetained:true,otherCapacitiesUnchanged:true}),
+   createdAt:now,ipAddress:c.req.header('cf-connecting-ip')||null,
+   userAgent:c.req.header('user-agent')||null,
+  }));
   try{
-    await (db as any).batch([
-      db.update(schema.globalTankCalibrationTemplates).set({status:'ARCHIVED',updatedAt:now})
-        .where(inArray(schema.globalTankCalibrationTemplates.status,['ACTIVE','APPROVED','DRAFT'])),
-      db.update(schema.tankCalibrationCharts).set({
-        status:'ARCHIVED',updatedAt:now,updatedBy:userId,effectiveTo:now.slice(0,10)
-      }).where(inArray(schema.tankCalibrationCharts.status,['ACTIVE','APPROVED','DRAFT'])),
-      db.delete(schema.globalTankCapacityDefaults),
-      // Tanks without an active chart cannot safely record new stock dips.
-      // Existing physical tank definitions and linked nozzles are retained.
-      db.update(schema.tanks).set({status:'INACTIVE',updatedAt:now})
-        .where(eq(schema.tanks.status,'ACTIVE')),
-      db.insert(schema.auditLogs).values({
-        id:'aud-'+crypto.randomUUID(),userId,
-        action:'ALL_CALIBRATION_ARCHIVED_FOR_FRESH_START',
-        entityType:'GLOBAL_TANK_CALIBRATION_RESET',
-        entityId:'GLOBAL',oldValueJson:JSON.stringify(preview),
-        newValueJson:JSON.stringify({reason:'Operator requested fresh calibration data',
-          allSourcesArchived:true,activeTankChartsArchived:true,
-          defaultMappingsCleared:true,tanksMadeInactive:true,
-          historicalPointsAndStockRetained:true}),
-        createdAt:now,ipAddress:c.req.header('cf-connecting-ip')||null,
-        userAgent:c.req.header('user-agent')||null,
-      })
-    ]);
-    return c.json({success:true,data:{
-      ...preview,completed:true,message:'Old charts archived and defaults cleared. Upload new calibration readings; tanks stay inactive until the correct charts are linked.'
-    },error:null});
-  }catch(error:any){
-    return c.json({success:false,data:null,error:{
-      code:'CALIBRATION_RESET_FAILED',message:'No changes applied. '+(error.message||'Atomic reset failed.')
-    }},500);
+   await (db as any).batch(batch);
+   return c.json({success:true,data:{...p.counts,completed:true,
+    message:'Old 10/20 KL operational readings cleared and the supplied PDF installed as the only current reference. Historical stock charts remain protected. Other capacities unchanged.'},error:null});
+  }catch(e:any){
+   return c.json({success:false,data:null,error:{code:'REPLACEMENT_FAILED',message:'No changes applied. '+(e.message||'Atomic database change failed')}},500);
   }
 });
 
