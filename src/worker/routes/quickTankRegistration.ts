@@ -159,8 +159,9 @@ quickTankRegistrationRoutes.post(
     const suppliedCode=capacityLitres===10000?'EXCEL_10KL_REFERENCE':
       capacityLitres===20000?'EXCEL_20KL_REFERENCE':null;
     const pdfCode=operatorPdfCodeForCapacity(capacityLitres);
-    const suppliedTemplate=(pdfCode?allTemplates.find(t=>t.code===pdfCode):null) ||
-      (suppliedCode?allTemplates.find(t=>t.code===suppliedCode):null);
+    const usableTemplates=allTemplates.filter(t=>!['ARCHIVED','SUPERSEDED'].includes(t.status));
+    const suppliedTemplate=(pdfCode?usableTemplates.find(t=>t.code===pdfCode):null) ||
+      (suppliedCode?usableTemplates.find(t=>t.code===suppliedCode):null);
     // Prefer the operator's actual 10/20 KL reference when present, not a different standard.
     if(suppliedTemplate){
       selected=await validatedReference(db,suppliedTemplate.id);
@@ -175,7 +176,7 @@ quickTankRegistrationRoutes.post(
       }
     } else {
       const eligible = [];
-      for (const candidate of allTemplates) {
+      for (const candidate of usableTemplates) {
         const checked = await validatedReference(db, candidate.id);
         if (checked) eligible.push(checked);
       }

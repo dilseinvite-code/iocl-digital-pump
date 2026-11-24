@@ -2511,6 +2511,16 @@ export class PumpRepository {
       return;
     }
 
+    // A deliberate organization-wide calibration reset takes precedence over
+    // legacy automatic migration. Never silently resurrect old points as an
+    // ACTIVE chart after the operator cleared their setup.
+    const [globalCalibrationReset]=await this.db.select({id:schema.auditLogs.id})
+      .from(schema.auditLogs)
+      .where(and(eq(schema.auditLogs.entityType,'GLOBAL_TANK_CALIBRATION_RESET'),
+        eq(schema.auditLogs.entityId,'GLOBAL')))
+      .limit(1);
+    if(globalCalibrationReset)return;
+
     const existingCharts = await this.db
       .select()
       .from(schema.tankCalibrationCharts)
@@ -2772,6 +2782,12 @@ export class PumpRepository {
           // only ACTIVE charts should be treated as operationally calibrated!
           return [];
         }
+        const [cleared]=await this.db.select({id:schema.auditLogs.id})
+          .from(schema.auditLogs)
+          .where(and(eq(schema.auditLogs.entityType,'GLOBAL_TANK_CALIBRATION_RESET'),
+            eq(schema.auditLogs.entityId,'GLOBAL')))
+          .limit(1);
+        if(cleared)return []; // legacy orphan points remain historical, not operational
       }
     }
 

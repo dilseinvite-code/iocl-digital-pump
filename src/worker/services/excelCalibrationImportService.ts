@@ -640,7 +640,14 @@ export class ExcelCalibrationImportService {
         .filter(Boolean)
         .join(' ');
 
-      const existing = await pumpRepo.findGlobalTankCalibrationTemplateByCode(chart.templateCode);
+      const previous = await pumpRepo.findGlobalTankCalibrationTemplateByCode(chart.templateCode);
+      // The archive remains immutable for historical stock. New operator Excel
+      // readings get a new unique source code, never overwrite an archived one.
+      const freshRevision=Boolean(previous&&['ARCHIVED','SUPERSEDED'].includes(previous.status));
+      const targetCode=freshRevision
+        ? chart.templateCode+'_FRESH_'+crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()
+        : chart.templateCode;
+      const existing=freshRevision?null:previous;
 
       if (existing) {
         if (existing.status !== 'DRAFT' ||
@@ -735,20 +742,20 @@ export class ExcelCalibrationImportService {
           action: 'UPDATED_DRAFT' as const,
         });
       } else {
-        const templateId = `gtct-${chart.templateCode.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+        const templateId = `gtct-${targetCode.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
 
         const created = await pumpRepo.createGlobalTankCalibrationTemplate(
           {
             id: templateId,
-            code: chart.templateCode,
-            name: chart.templateName,
+            code: targetCode,
+            name: chart.templateName+(freshRevision?' (fresh chart)':''),
             nominalCapacityLitres: chart.nominalCapacityLitres,
             tankDiameterMmMilliunits: Math.round(chart.tankDiameterMm * 1000),
             tankLengthMmMilliunits: Math.round(chart.tankLengthMm * 1000),
             maxDipMmMilliunits: Math.round(chart.maxDipMm * 1000),
             status: 'DRAFT',
             sourceFileName: extractedResult.workbookName,
-            referenceDocument: `IOCL-${chart.templateCode}-EXCEL`,
+            referenceDocument: `IOCL-${targetCode}-EXCEL`,
             notes: noteDetails,
             createdBy: actor.userId,
             createdAt: nowIso,
@@ -768,7 +775,7 @@ export class ExcelCalibrationImportService {
           entityType: 'GLOBAL_TANK_CALIBRATION_TEMPLATE',
           entityId: created.id,
           newValue: {
-            code: chart.templateCode,
+            code: targetCode,
             status: 'DRAFT',
             reviewStatusLabel: chart.reviewStatusLabel,
             requiresEngineeringReview: Boolean(chart.requiresEngineeringReview),
