@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy unified COCO compliance reporting
+    name: Verify and deploy final COCO compliance reporting refinements (PR 117)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
