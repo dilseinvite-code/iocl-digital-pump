@@ -120,7 +120,14 @@ describe('Phase 5B Comprehensive Nozzle Assignments Suite', () => {
     const prod = await db.select().from(products).get();
     const productId = prod ? prod.id : 'prod-ms';
 
-    const suffix = Math.floor(Math.random() * 10000);
+    // Allocate a free number after the seeded tank and dispenser numbers.
+    // Random numbers could collide with existing outlet fixtures.
+    const existingTanks = await db.select({number: tanks.tankNumber}).from(tanks).where(eq(tanks.outletId, outletId)).all();
+    const existingDispensers = await db.select({number: dispensers.dispenserNumber}).from(dispensers).where(eq(dispensers.outletId, outletId)).all();
+    const suffix = Math.max(0,
+      ...existingTanks.map((row: {number: number}) => row.number),
+      ...existingDispensers.map((row: {number: number}) => row.number)
+    ) + 1;
     await db.insert(tanks).values({
       id: tankId,
       outletId,
