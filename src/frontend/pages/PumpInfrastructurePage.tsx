@@ -72,6 +72,7 @@ import {
 import { PERMISSIONS } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
 import { reviewReusableGlobalChart } from '../components/pump/reusableGlobalChart';
+import { ExistingFiftyKlCalibration } from '../components/pump/ExistingFiftyKlCalibration';
 import { GLOBAL_TANK_CAPACITIES_LITRES } from '../../shared/globalTankTypes';
 import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../shared/operatorSuppliedCalibration';
 
@@ -3423,6 +3424,15 @@ export const PumpInfrastructurePage: React.FC = () => {
                   {pdfRemapNotice&&<p className="text-sm font-semibold text-emerald-800" role="status">{pdfRemapNotice}</p>}
                 </section>
               )}
+              {calibratingTank.capacityLitres === 50000 && !calActiveChart && (!calSelectedChart?.sourceTemplateId || calSelectedChart.sourceTemplateId === 'gtct-std-50kl') && (
+                <ExistingFiftyKlCalibration key={calibratingTank.id} tank={calibratingTank}
+                  chart={calSelectedChart} points={calPoints} canAssign={canApproveCalibrationChart}
+                  onChanged={async (chartId) => {
+                    clearApiCache();
+                    await refreshTankCalibration(calibratingTank.id, chartId);
+                    notifyCalibrationChanged(calibratingTank.id);
+                  }}/>
+              )}
               {calSelectedChart?.sourceTemplateId && (
                 <section className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 space-y-4" data-testid="global-calibration-linked-summary">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -3513,7 +3523,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                     </p>
                   )}
                   {(calibratingTank.capacityLitres!==10000 && calibratingTank.capacityLitres!==20000) && (
-                    <p className="text-xs text-slate-600">Use a tank-specific, verified calibration chart. The supplied 10/20 KL PDF action is not available for this capacity.</p>
+                    <p className="text-xs text-slate-600">Use a tank-specific, verified calibration chart. For 50 KL, use the global reference above when compatible; otherwise import the certified custom chart.</p>
                   )}
                   <button type="button" data-testid="toggle-advanced-calibration"
                     aria-expanded={calShowAdvanced} aria-controls="advanced-calibration-tools"
