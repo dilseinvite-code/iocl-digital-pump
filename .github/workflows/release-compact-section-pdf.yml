@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy simplified 50 KL chart workflow (PR 125)
+    name: Verify and deploy 50 KL workflow with deterministic HR tests (PR 126)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
