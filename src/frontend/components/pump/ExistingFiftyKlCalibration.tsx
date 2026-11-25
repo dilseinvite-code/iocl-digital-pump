@@ -34,7 +34,7 @@ export function ExistingFiftyKlCalibration({tank,chart,points,canAssign,onChange
   const [busy,setBusy] = useState(false);
   const [loading,setLoading] = useState(true);
   const [error,setError] = useState('');
-  const [preview,setPreview] = useState(false);
+  const [verificationRequired,setVerificationRequired] = useState(false);
   const [verify,setVerify] = useState(false);
   const [values,setValues] = useState<Record<string,string>>({});
   const [confirmed,setConfirmed] = useState(false);
@@ -59,7 +59,14 @@ export function ExistingFiftyKlCalibration({tank,chart,points,canAssign,onChange
     const res = await apiFetch<{previews:Array<{tankId:string;hasProtectedDraft:boolean;isCompatible:boolean;currentActiveChart:unknown}>}>(base+'/assign-preview',{
       method:'POST',body:JSON.stringify({tankIds:[tank.id]})
     });
-    if(!res.success) throw new Error(res.error?.message || 'Tank compatibility could not be verified.');
+    if(!res.success) {
+      if(res.error?.code === 'UNVERIFIED_TANK_DIMENSIONS') {
+        setVerificationRequired(true);
+        throw new Error('Tank certificate verification is required before linking this chart.');
+      }
+      throw new Error(res.error?.message || 'Tank compatibility could not be verified.');
+    }
+    setVerificationRequired(false);
     const p = res.data?.previews?.find(x=>x.tankId===tank.id);
     if(!p?.isCompatible)throw new Error('Tank is not confirmed compatible with the source.');
     if(!linked && (p.hasProtectedDraft || p.currentActiveChart))throw new Error('An existing chart is protected. Review its revision rather than replacing it.');
@@ -71,8 +78,8 @@ export function ExistingFiftyKlCalibration({tank,chart,points,canAssign,onChange
     try { await fn(); } catch(e:any) {setError(e.message || 'Calibration action failed.');}
     finally {setBusy(false);}
   };
-  const assign = () => run(async()=>{
-    if(!ready||!preview||!canAssign||linked)return;
+  const linkDraft = async () => {
+    if(!ready||!canAssign||linked)return;
     await check();
     const res = await apiFetch<{assignments:Array<{tankId:string;chartId:string;preservedExistingDraft?:boolean}>}>(base+'/assign',{
       method:'POST',body:JSON.stringify({tankIds:[tank.id],notes:'Existing tank: certified compatible 50 KL global reference, staged as DRAFT.'})
@@ -82,7 +89,8 @@ export function ExistingFiftyKlCalibration({tank,chart,points,canAssign,onChange
     if(!item || item.preservedExistingDraft)throw new Error('An existing draft was preserved; review its revision.');
     setConfirmed(false);
     await onChanged(item.chartId);
-  });
+  };
+  const assign = () => run(linkDraft);
   const saveVerification = (event:React.FormEvent) => {
     event.preventDefault();
     void run(async()=>{
@@ -94,8 +102,8 @@ export function ExistingFiftyKlCalibration({tank,chart,points,canAssign,onChange
       });
       if(!res.success)throw new Error(res.error?.message || 'Could not record engineering verification.');
       clearApiCache();
-      setVerify(false);setPreview(false);
-      await check();setPreview(true);
+      setVerify(false);setVerificationRequired(false);
+      await linkDraft();
     });
   };
   const activate = () => run(async()=>{
@@ -110,22 +118,25 @@ export function ExistingFiftyKlCalibration({tank,chart,points,canAssign,onChange
 
   return <section className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 space-y-3" data-testid="existing-50kl-global-calibration">
     <div><h3 className="font-bold text-[#17365D]">Global 50 KL Calibration</h3>
-    <p className="text-xs text-slate-600">Reuse the saved reference without uploading readings. Tank-specific certification is required; assignment creates a draft and never activates a tank.</p></div>
+    <p className="text-xs text-slate-600">Use the saved chart for this tank. Existing readings and tank limits remain unchanged.</p></div>
     {loading && <p role="status" className="text-xs">Checking global reference…</p>}
-    {source && <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs text-slate-700">
-      <div><strong>{source.name}</strong><br/>{source.status} · Rev #{source.revisionNumber}</div>
-      <div>{source.pointsCount} saved readings<br/>Max dip: {source.maxDipMm ?? '—'} mm</div>
-      <div>Chart max: {source.maxVolumeLitres?.toLocaleString('en-IN') ?? '—'} L<br/>Safe-fill: {tank.safeFillCapacityLitres.toLocaleString('en-IN')} L (unchanged)</div>
-      <div>Reference diameter: {source.tankDiameterMm ?? '—'} mm</div><div>Reference length: {source.tankLengthMm ?? '—'} mm</div>
-    </div>}
+    {source && <>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-700">
+        <span className="font-semibold">{source.status} · Rev #{source.revisionNumber}</span>
+        <span>{source.pointsCount} saved readings</span>
+        <span>Max dip: {source.maxDipMm ?? '—'} mm</span>
+        <span>Chart max: {source.maxVolumeLitres?.toLocaleString('en-IN') ?? '—'} L</span>
+      </div>
+      <details className="text-xs text-slate-600">
+        <summary className="cursor-pointer">Reference dimensions</summary>
+        <p className="mt-1">Diameter: {source.tankDiameterMm ?? '—'} mm · Length: {source.tankLengthMm ?? '—'} mm · Safe-fill: {tank.safeFillCapacityLitres.toLocaleString('en-IN')} L (unchanged)</p>
+      </details>
+    </>}
     {!loading && !ready && <p role="status" className="text-xs text-amber-800">No usable approved standard 50 KL source is available. Review the global library.</p>}
     {ready && canAssign && !linked && <>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" disabled={busy} onClick={()=>void run(async()=>{setPreview(false);await check();setPreview(true);})} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-[#17365D]">Check tank compatibility</button>
-        <button type="button" data-testid="link-global-50kl-chart" disabled={busy||!preview} onClick={()=>void assign()} className="rounded-lg bg-[#17365D] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Link Global 50 KL Chart</button>
-        <button type="button" disabled={busy} onClick={()=>{setVerify(v=>!v);setPreview(false);}} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs">Record certificate verification</button>
-      </div>
-      {preview && <p className="text-xs text-emerald-800" role="status">Compatible according to saved verification. Link as DRAFT; activation is separate.</p>}
+      {!verify && <button type="button" data-testid="link-global-50kl-chart" disabled={busy} onClick={()=>void assign()} className="rounded-lg bg-[#17365D] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy?'Checking…':'Use 50 KL chart for Tank #'+tank.tankNumber}</button>}
+      {!verify && <p className="text-xs text-slate-600">Compatibility is checked automatically. The chart is linked as a draft before activation.</p>}
+      {verificationRequired && <button type="button" disabled={busy} onClick={()=>setVerify(v=>!v)} className="block rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-[#17365D]">{verify?'Cancel verification':'Verify tank certificate'}</button>}
       {verify && <form onSubmit={saveVerification} className="space-y-3 rounded-lg border border-amber-200 bg-white p-3">
         <p className="text-xs text-amber-900">Enter only actual tank-specific certificate information. Upload the official PDF/image to Document Vault first. Do not copy nominal template dimensions as proof.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -134,7 +145,7 @@ export function ExistingFiftyKlCalibration({tank,chart,points,canAssign,onChange
             className="block w-full rounded-md border border-slate-300 p-2 mt-1 text-sm"/></label>)}
         </div>
         <label className="flex gap-2 text-xs"><input type="checkbox" checked={verifiedEvidence} onChange={e=>setVerifiedEvidence(e.target.checked)}/>I have verified this physical tank against the official certificate and entered the actual details.</label>
-        <button type="submit" disabled={busy||!verifiedEvidence} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Save verification and check compatibility</button>
+        <button type="submit" disabled={busy||!verifiedEvidence} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Save verification & link chart</button>
       </form>}
     </>}
     {linked && chart && chart.status !== 'ACTIVE' && <>
