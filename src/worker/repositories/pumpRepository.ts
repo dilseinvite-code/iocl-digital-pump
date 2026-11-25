@@ -3360,7 +3360,7 @@ export class PumpRepository {
       return fail('PHYSICAL_CONFIRMATION_REQUIRED','Confirm actual dimensions, maximum dip and current approved operating limits.');
     }
     const source=await this.findGlobalTankCalibrationTemplateById(CONFIRMED_50KL_SOURCE_ID);
-    const rows=source?.points??[];
+    const rows:Array<{dipMillimetresMilliunits:number;volumeMilliunits:number}>=source?.points??[];
     if(!source || source.revisionNumber!==confirmation.sourceRevision || !validConfirmedFiftyKlSource(source,rows)){
       return fail('GLOBAL_SOURCE_NOT_READY','The saved approved 50 KL reference changed or does not match the expected complete chart.');
     }
