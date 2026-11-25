@@ -3522,8 +3522,8 @@ export const PumpInfrastructurePage: React.FC = () => {
                       {calPoints.length} stored readings{lastRecordedPoint ? ` · Highest dip / volume: ${formatCalibrationDisplay(lastRecordedPoint.dipMillimetresMilliunits / 1000)} mm / ${formatCalibrationDisplay(lastRecordedPoint.volumeMilliunits / 1000)} L` : ''}
                     </p>
                   )}
-                  {(calibratingTank.capacityLitres!==10000 && calibratingTank.capacityLitres!==20000) && (
-                    <p className="text-xs text-slate-600">Use a tank-specific, verified calibration chart. For 50 KL, use the global reference above when compatible; otherwise import the certified custom chart.</p>
+                  {(calibratingTank.capacityLitres!==10000 && calibratingTank.capacityLitres!==20000 && calibratingTank.capacityLitres!==50000) && (
+                    <p className="text-xs text-slate-600">Use a tank-specific, verified calibration chart.</p>
                   )}
                   <button type="button" data-testid="toggle-advanced-calibration"
                     aria-expanded={calShowAdvanced} aria-controls="advanced-calibration-tools"

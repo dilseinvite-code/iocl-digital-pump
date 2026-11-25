@@ -16,6 +16,11 @@ describe('Existing 50 KL global linking',()=>{
   it('uses the governed assignment API without bypass and requires separate confirmation',()=>{
     const ui=readFileSync('src/frontend/components/pump/ExistingFiftyKlCalibration.tsx','utf8');
     expect(ui).toContain("base+'/assign-preview'");
+    expect(ui).toContain('const assign = () => run(linkDraft)');
+    expect(ui.indexOf('await check();')).toBeLessThan(ui.indexOf("base+'/assign'"));
+    expect(ui).not.toContain('Check tank compatibility</button>');
+    expect(ui).toContain("res.error?.code === 'UNVERIFIED_TANK_DIMENSIONS'");
+    expect(ui).toContain('verificationRequired && <button');
     expect(ui).toContain("base+'/assign'");
     expect(ui).not.toContain('draftOnlyFromAddTank');
     expect(ui).toContain('disabled={busy||!confirmed}');
