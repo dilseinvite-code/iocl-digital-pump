@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy calibration replacement UI removal (PR 122)
+    name: Verify and deploy simplified linked calibration modal (PR 123)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
