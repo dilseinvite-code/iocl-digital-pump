@@ -259,6 +259,30 @@ tankCalibration.post('/tanks/:tankId/calibration/operator-pdf-remap',
     }
 });
 
+// Scoped existing COCO 33 reference activation, with explicit administrator attestation.
+tankCalibration.post('/tanks/:tankId/calibration/confirmed-50kl-reference',
+  requirePermission(PERMISSIONS.TANK_CALIBRATION_WRITE) as any,async(c:AppContext)=>{
+    if(!canAuthorizeCalibrationActivation(c))return c.json({success:false,data:null,error:{code:'FORBIDDEN',message:'Tank calibration and infrastructure authority required.'}},403);
+    const tankId=c.req.param('tankId')||'';
+    const db=getDb(c.env.DB),repo=new PumpRepository(db),outlets=new OutletRepository(db);
+    const tank=await repo.findTankById(tankId);
+    if(!tank)return c.json({success:false,data:null,error:{code:'NOT_FOUND',message:'Tank not found'}},404);
+    if(!await verifyOutletAuthority(c,tank.outletId,outlets))return c.json({success:false,data:null,error:{code:'FORBIDDEN',message:'Outlet access denied'}},403);
+    const body=await c.req.json().catch(()=>null);
+    if(!body || body.confirmCompatibility!==true || !Number.isInteger(body.sourceRevision)){
+      return c.json({success:false,data:null,error:{code:'PHYSICAL_CONFIRMATION_REQUIRED',message:'Explicit physical compatibility confirmation is required.'}},400);
+    }
+    try{
+      const result=await repo.activateConfirmedFiftyKlReference(tankId,c.var.user!.user.id,{
+        sourceRevision:body.sourceRevision,diameterMm:body.diameterMm,lengthMm:body.lengthMm,maxDipMm:body.maxDipMm,
+        safeFillLitres:body.safeFillLitres,minimumOperatingLitres:body.minimumOperatingLitres,confirmCompatibility:body.confirmCompatibility,
+      },{ipAddress:c.req.header('cf-connecting-ip')||null,userAgent:c.req.header('user-agent')||null});
+      return c.json({success:true,data:result,error:null});
+    }catch(e:any){
+      return c.json({success:false,data:null,error:{code:e.code||'REFERENCE_ACTIVATION_FAILED',message:e.message||'Could not activate chart.'}},409);
+    }
+});
+
 // POST /api/v1/tanks/:tankId/calibration - Create a single calibration point
 tankCalibration.post('/tanks/:tankId/calibration', requirePermission(PERMISSIONS.TANK_CALIBRATION_WRITE) as any, async (c: AppContext) => {
   const tankId = c.req.param('tankId');
