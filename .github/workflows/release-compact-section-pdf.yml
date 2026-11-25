@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy 50 KL workflow with deterministic HR tests (PR 126)
+    name: Verify and deploy confirmed COCO 33 50 KL calibration (PR 127)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
