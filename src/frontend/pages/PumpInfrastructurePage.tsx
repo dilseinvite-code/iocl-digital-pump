@@ -60,7 +60,6 @@ import {
   getTankCardCalibrationStatus,
   getCalibrationModalPhase,
   formatCalibrationDisplay,
-  formatDummyCalibrationPresetText,
   validateSingleCalibrationPoint,
   parseBulkCalibrationText,
   buildCalibrationImportPreview,
@@ -1188,15 +1187,6 @@ export const PumpInfrastructurePage: React.FC = () => {
     } finally {
       setModalSubmitting(false);
     }
-  };
-
-  const handleLoadDummyCalibrationPreset = () => {
-    if (!calibratingTank) return;
-    setCalShowBulkImport(true);
-    setCalShowPreview(true);
-    setCalBulkText(formatDummyCalibrationPresetText(calibratingTank.capacityLitres || 20000));
-    setCalSourceFileName('uat-5point-preset.csv');
-    setModalError(null);
   };
 
   const handleCalibrationCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3404,6 +3394,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   {pdfRemapPreview&&<>
                     <div className="flex flex-wrap gap-3 text-xs text-[#334155]">
                       <span>{pdfRemapPreview.sourceReadings} saved source readings</span>
+                      {pdfRemapPreview.sourceMaxVolumeLitres !== null && <span>Chart maximum: {formatCalibrationDisplay(pdfRemapPreview.sourceMaxVolumeLitres)} L</span>}
                       <span>Current: Rev #{pdfRemapPreview.previousActiveRevisionNumber??'—'}</span>
                       <span>Safe-fill: {pdfRemapPreview.safeFillCapacityLitres.toLocaleString('en-IN')} L (unchanged)</span>
                     </div>
@@ -3432,7 +3423,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   {pdfRemapNotice&&<p className="text-sm font-semibold text-emerald-800" role="status">{pdfRemapNotice}</p>}
                 </section>
               )}
-              {calSelectedChart?.sourceTemplateId && !calShowAdvanced && (
+              {calSelectedChart?.sourceTemplateId && (
                 <section className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 space-y-4" data-testid="global-calibration-linked-summary">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-2 text-[#17365D] font-semibold">
@@ -3469,6 +3460,22 @@ export const PumpInfrastructurePage: React.FC = () => {
                   <p className="text-xs text-slate-600">
                     Tank status: <strong>{calibratingTank.status}</strong>. Physical safe-fill/operating limits are separate from the calibration reference.
                   </p>
+                  {calPoints.length > 0 && (
+                    <details className="rounded-lg border border-blue-200 bg-white p-3" data-testid="linked-global-readings">
+                      <summary className="cursor-pointer text-sm font-semibold text-[#17365D]">View saved calibration readings ({calPoints.length})</summary>
+                      <div className="mt-3 max-h-60 overflow-auto">
+                        <table className="w-full text-left text-xs font-mono">
+                          <thead><tr><th className="p-2">Dip (mm)</th><th className="p-2">Volume (L)</th></tr></thead>
+                          <tbody>{calPoints.map(point=>(
+                            <tr key={point.id} className="border-t border-slate-100">
+                              <td className="p-2">{formatCalibrationDisplay(point.dipMillimetresMilliunits / 1000)}</td>
+                              <td className="p-2">{formatCalibrationDisplay(point.volumeMilliunits / 1000)}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    </details>
+                  )}
                   <div className="flex flex-wrap gap-2">
                     <button type="button" onClick={() => {
                       setInitialGlobalChartCode(calGlobalSource?.code || '');
@@ -3481,7 +3488,45 @@ export const PumpInfrastructurePage: React.FC = () => {
                   </div>
                 </section>
               )}
-              {!calSelectedChart?.sourceTemplateId && (<>
+              {!calStatus.isConfigured && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-800 text-xs rounded-xl font-mono flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>
+                    {calStatus.warningText ||
+                      'At least 2 calibration points are required before Daily Operations allows tank dip entry.'}
+                  </span>
+                </div>
+              )}
+
+              {modalError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{modalError}</span>
+                </div>
+              )}
+
+              {!calSelectedChart?.sourceTemplateId && (
+                <section className="rounded-xl border border-[#E2E8F0] bg-slate-50 p-4 space-y-3" data-testid="custom-calibration-summary">
+                  {calPoints.length > 0 && (
+                    <p className="text-sm text-slate-700">
+                      {calPoints.length} stored readings{lastRecordedPoint ? ` · Highest dip / volume: ${formatCalibrationDisplay(lastRecordedPoint.dipMillimetresMilliunits / 1000)} mm / ${formatCalibrationDisplay(lastRecordedPoint.volumeMilliunits / 1000)} L` : ''}
+                    </p>
+                  )}
+                  {(calibratingTank.capacityLitres!==10000 && calibratingTank.capacityLitres!==20000) && (
+                    <p className="text-xs text-slate-600">Use a tank-specific, verified calibration chart. The supplied 10/20 KL PDF action is not available for this capacity.</p>
+                  )}
+                  <button type="button" data-testid="toggle-advanced-calibration"
+                    aria-expanded={calShowAdvanced} aria-controls="advanced-calibration-tools"
+                    disabled={modalSubmitting}
+                    onClick={()=>setCalShowAdvanced(v=>!v)}
+                    className="flex w-full items-center justify-between gap-2 text-left text-sm font-semibold text-[#17365D] disabled:opacity-50">
+                    Advanced Calibration Settings <span aria-hidden="true">{calShowAdvanced ? '−' : '+'}</span>
+                  </button>
+                  <p className="text-xs text-slate-600">Custom chart import, revision controls, readings and verification. Use only the correct physical tank reference.</p>
+                </section>
+              )}
+              {!calSelectedChart?.sourceTemplateId && calShowAdvanced && (
+              <div id="advanced-calibration-tools" data-testid="advanced-calibration-tools" className="space-y-4">
               {/* Revision Selector & Lifecycle Controls */}
               {calCharts.length > 0 && (
                 <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl space-y-3">
@@ -3616,16 +3661,6 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </div>
               )}
 
-              {!calStatus.isConfigured && (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-800 text-xs rounded-xl font-mono flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
-                  <span>
-                    {calStatus.warningText ||
-                      'At least 2 calibration points are required before Daily Operations allows tank dip entry.'}
-                  </span>
-                </div>
-              )}
-
               {currentChartDiagnostics.missingStepWarnings.length > 0 && (
                 <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-800 text-xs rounded-xl font-mono space-y-1">
                   <div className="font-bold flex items-center gap-1.5">
@@ -3639,13 +3674,6 @@ export const PumpInfrastructurePage: React.FC = () => {
                       <li key={idx}>{w.message}</li>
                     ))}
                   </ul>
-                </div>
-              )}
-
-              {modalError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs rounded-xl flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{modalError}</span>
                 </div>
               )}
 
@@ -3670,13 +3698,6 @@ export const PumpInfrastructurePage: React.FC = () => {
                     </button>
                     {canWriteTankCalibration && (
                       <>
-                        <button
-                          type="button"
-                          onClick={handleLoadDummyCalibrationPreset}
-                          className="px-2.5 py-1 rounded-lg bg-[#F1F5F9] hover:bg-[#E8EEF5] text-amber-700 border border-[#D7E0EA] text-[11px] font-mono font-semibold transition-colors"
-                        >
-                          Load 5-Point UAT Preset (0–2000 mm)
-                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -4313,7 +4334,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                 </div>
               )}
 
-              </>)}
+              </div>)}
               </>)}
               <div className="flex justify-end pt-2 border-t border-[#E2E8F0]">
                 <button
