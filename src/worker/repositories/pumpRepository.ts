@@ -42,6 +42,7 @@ import {
 import { parseMilliunits, formatMilliunits, MILLIUNIT_SCALE } from '../../shared/precision';
 import { mapDatabaseUniqueError } from '../services/duplicateErrorMapper';
 import {matchesExactOperatorPdfRows} from '../../shared/operatorPdfSourceData';
+import { CONFIRMED_50KL_SOURCE_ID, CONFIRMED_50KL_SOURCE_MARKER, isConfirmedFiftyKlTarget, validConfirmedFiftyKlSource, validConfirmedFiftyKlLimits } from '../../shared/confirmedFiftyKlReference';
 
 export const SNAPSHOT_INSERT_CHUNK_SIZE = 5;
 
@@ -3335,6 +3336,87 @@ export class PumpRepository {
     return {chart:saved,previousActiveChartId:oldActive?.id||null,alreadyApplied:false};
   }
 
+  /**
+   * Scoped existing-tank reference activation: no certificate is created or inferred.
+   * Only the two administrator-confirmed COCO 33 tanks, with no existing usable
+   * revision, can use this route. Copy exact approved rows and audit atomically.
+   */
+  async activateConfirmedFiftyKlReference(tankId:string, actorUserId:string, confirmation:{
+    sourceRevision:number; diameterMm:number; lengthMm:number; maxDipMm:number;
+    safeFillLitres:number; minimumOperatingLitres:number; confirmCompatibility:boolean;
+  },auditContext?:{ipAddress?:string|null;userAgent?:string|null}):Promise<{chart:TankCalibrationChart;alreadyApplied:boolean}> {
+    const fail=(code:string,message:string):never=>{throw Object.assign(new Error(message),{code});};
+    const tank=await this.findTankById(tankId);
+    if(!tank) return fail('NOT_FOUND','Tank not found.');
+    const [outlet]=await this.db.select().from(schema.retailOutlets).where(eq(schema.retailOutlets.id,tank.outletId)).limit(1);
+    if(!outlet || outlet.outletType!=='COCO' || !isConfirmedFiftyKlTarget(outlet.roCode,tank)){
+      return fail('INVALID_TANK','This reference confirmation is limited to COCO 33 Tank 2 HSD and Tank 3 MS.');
+    }
+    if(confirmation.confirmCompatibility!==true || confirmation.diameterMm!==3000 ||
+       confirmation.lengthMm!==7500 || confirmation.maxDipMm!==3000 ||
+       confirmation.safeFillLitres!==tank.safeFillCapacityLitres ||
+       confirmation.minimumOperatingLitres!==tank.minimumOperatingLevelLitres ||
+       !validConfirmedFiftyKlLimits(tank)){
+      return fail('PHYSICAL_CONFIRMATION_REQUIRED','Confirm actual dimensions, maximum dip and current approved operating limits.');
+    }
+    const source=await this.findGlobalTankCalibrationTemplateById(CONFIRMED_50KL_SOURCE_ID);
+    const rows=source?.points??[];
+    if(!source || source.revisionNumber!==confirmation.sourceRevision || !validConfirmedFiftyKlSource(source,rows)){
+      return fail('GLOBAL_SOURCE_NOT_READY','The saved approved 50 KL reference changed or does not match the expected complete chart.');
+    }
+    if(await this.findActiveOperationalShift(tank.outletId)){
+      return fail('SHIFT_OPEN_CALIBRATION_REMAP_BLOCKED','Close the current shift before activating calibration.');
+    }
+    const charts=await this.db.select().from(schema.tankCalibrationCharts)
+      .where(eq(schema.tankCalibrationCharts.tankId,tankId));
+    const active=charts.find(ch=>ch.status==='ACTIVE');
+    if(active){
+      if(active.sourceTemplateId===source.id && active.sourceFileName===CONFIRMED_50KL_SOURCE_MARKER){
+        const copied=await this.listCalibrationPoints(tankId,{chartId:active.id});
+        if(validConfirmedFiftyKlSource(source,copied) && copied.every((p,i)=>p.volumeMilliunits===rows[i].volumeMilliunits)){
+          return {chart:(await this.findCalibrationChartById(active.id))!,alreadyApplied:true};
+        }
+      }
+      return fail('EXISTING_CHART_PROTECTED','An existing active chart is protected. Use the governed revision workflow.');
+    }
+    if(charts.some(ch=>ch.status==='DRAFT'||ch.status==='APPROVED')){
+      return fail('EXISTING_CHART_PROTECTED','An existing draft or approved revision is protected.');
+    }
+    const legacy=await this.db.select({id:schema.tankCalibrationPoints.id}).from(schema.tankCalibrationPoints)
+      .where(and(eq(schema.tankCalibrationPoints.tankId,tankId),isNull(schema.tankCalibrationPoints.chartId))).limit(1);
+    if(legacy.length) return fail('EXISTING_CHART_PROTECTED','Legacy calibration readings are protected.');
+    const now=new Date().toISOString();
+    const revisionNumber=charts.reduce((n,ch)=>Math.max(n,ch.revisionNumber),0)+1;
+    const chartId='tcc-'+tankId+'-r'+revisionNumber+'-'+crypto.randomUUID().slice(0,8);
+    const batch:any[]=[this.db.insert(schema.tankCalibrationCharts).values({
+      id:chartId,tankId,sourceTemplateId:source.id,revisionNumber,status:'ACTIVE',
+      chartUnitDip:'MM',chartUnitVolume:'LITRES',tankDiameterMmMilliunits:source.tankDiameterMmMilliunits,
+      tankLengthMmMilliunits:source.tankLengthMmMilliunits,maxDipMmMilliunits:source.maxDipMmMilliunits,
+      chartCapacityMilliunits:rows[rows.length-1].volumeMilliunits,
+      sourceFileName:CONFIRMED_50KL_SOURCE_MARKER,referenceDocument:null,
+      notes:'Administrator-confirmed standard reference dimensions and limits. No tank-specific certificate supplied. Operational chart activation is not statutory certification.',
+      effectiveFrom:now.slice(0,10),effectiveTo:null,approvedBy:actorUserId,approvedAt:now,
+      createdAt:now,createdBy:actorUserId,updatedAt:now,updatedBy:actorUserId,
+    })];
+    const points=rows.map((p:{dipMillimetresMilliunits:number;volumeMilliunits:number})=>({
+      id:'tcp-50kl-'+crypto.randomUUID(),chartId,tankId,dipMillimetresMilliunits:p.dipMillimetresMilliunits,
+      volumeMilliunits:p.volumeMilliunits,createdAt:now,createdBy:actorUserId,
+    }));
+    for(const part of chunkArray(points,SNAPSHOT_INSERT_CHUNK_SIZE))batch.push(this.db.insert(schema.tankCalibrationPoints).values(part));
+    batch.push(this.db.insert(schema.auditLogs).values({
+      id:'aud-'+crypto.randomUUID(),userId:actorUserId,action:'TANK_CALIBRATION_ADMIN_CONFIRMED_50KL_REFERENCE',
+      entityType:'TANK_CALIBRATION',entityId:chartId,
+      newValueJson:JSON.stringify({tankId,outletId:tank.outletId,chartId,sourceTemplateId:source.id,
+        sourceRevision:source.revisionNumber,revisionNumber,pointsCount:rows.length,confirmation,
+        certificateProvided:false,confirmationType:'ADMIN_ATTESTATION_NOT_CERTIFICATION'}),
+      ipAddress:auditContext?.ipAddress??null,userAgent:auditContext?.userAgent??null,createdAt:now,
+    }));
+    await (this.db as any).batch(batch);
+    const chart=await this.findCalibrationChartById(chartId);
+    if(!chart) return fail('CHART_NOT_FOUND','Saved chart could not be read.');
+    return {chart,alreadyApplied:false};
+  }
+
   async updateCalibrationChartStatus(
     tankId: string,
     chartId: string,
@@ -6209,6 +6291,8 @@ export class PumpRepository {
     const candidates = [activeChart, approvedChart, draftChart].filter(Boolean);
 
     for (const chart of candidates) {
+      // An administrator-confirmed reference is not evidence of certification.
+      if (chart.sourceFileName === CONFIRMED_50KL_SOURCE_MARKER) continue;
       const hasDimensions =
         typeof chart.tankDiameterMmMilliunits === 'number' &&
         chart.tankDiameterMmMilliunits > 0 &&

@@ -73,6 +73,8 @@ import { PERMISSIONS } from '../../shared/constants';
 import { SimpleGlobalCalibrationManager } from '../components/pump/SimpleGlobalCalibrationManager';
 import { reviewReusableGlobalChart } from '../components/pump/reusableGlobalChart';
 import { ExistingFiftyKlCalibration } from '../components/pump/ExistingFiftyKlCalibration';
+import { ConfirmedFiftyKlCalibration } from '../components/pump/ConfirmedFiftyKlCalibration';
+import { isConfirmedFiftyKlTarget } from '../../shared/confirmedFiftyKlReference';
 import { GLOBAL_TANK_CAPACITIES_LITRES } from '../../shared/globalTankTypes';
 import {isOperatorSuppliedReference,isOperatorSuppliedSourceMetadata} from '../../shared/operatorSuppliedCalibration';
 
@@ -3424,7 +3426,15 @@ export const PumpInfrastructurePage: React.FC = () => {
                   {pdfRemapNotice&&<p className="text-sm font-semibold text-emerald-800" role="status">{pdfRemapNotice}</p>}
                 </section>
               )}
-              {calibratingTank.capacityLitres === 50000 && !calActiveChart && (!calSelectedChart?.sourceTemplateId || calSelectedChart.sourceTemplateId === 'gtct-std-50kl') && (
+              {isConfirmedFiftyKlTarget(selectedOutlet?.roCode || '',calibratingTank) && !calActiveChart && !calSelectedChart && (
+                <ConfirmedFiftyKlCalibration key={calibratingTank.id} tank={calibratingTank} canAssign={canApproveCalibrationChart}
+                  onChanged={async chartId=>{
+                    clearApiCache();
+                    await refreshTankCalibration(calibratingTank.id,chartId);
+                    notifyCalibrationChanged(calibratingTank.id);
+                  }}/>
+              )}
+              {calibratingTank.capacityLitres === 50000 && !calActiveChart && (!isConfirmedFiftyKlTarget(selectedOutlet?.roCode || '',calibratingTank) || !!calSelectedChart) && (!calSelectedChart?.sourceTemplateId || calSelectedChart.sourceTemplateId === 'gtct-std-50kl') && (
                 <ExistingFiftyKlCalibration key={calibratingTank.id} tank={calibratingTank}
                   chart={calSelectedChart} points={calPoints} canAssign={canApproveCalibrationChart}
                   onChanged={async (chartId) => {
