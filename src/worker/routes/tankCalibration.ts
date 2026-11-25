@@ -890,6 +890,22 @@ tankCalibration.post('/tanks/:tankId/calibration/charts/:chartId/status', requir
   const previousActiveChart = allChartsBefore.find(ch => ch.status === 'ACTIVE' && ch.id !== chartId) || null;
 
   try {
+    // Existing 50 KL global-reference activation is separate from draft assignment.
+    // Do not change a shift's conversion or accept non-identical copied readings.
+    if (parseResult.data.status === 'ACTIVE' && tank.capacityLitres === 50000 && existingChart.sourceTemplateId === 'gtct-std-50kl') {
+      if (await pumpRepo.findActiveOperationalShift(tank.outletId)) {
+        return c.json({success:false,data:null,error:{code:'SHIFT_OPEN_CALIBRATION_REMAP_BLOCKED',message:'Close the current shift before activating the 50 KL chart.'}},409);
+      }
+      await pumpRepo.previewGlobalTemplateAssignment(existingChart.sourceTemplateId, [tankId]);
+      const sourceRows = await pumpRepo.listGlobalTankCalibrationTemplatePoints(existingChart.sourceTemplateId);
+      const tankRows = await pumpRepo.listCalibrationPoints(tankId, {chartId});
+      const sorted = (rows: typeof sourceRows) => [...rows].sort((a,b)=>a.dipMillimetresMilliunits-b.dipMillimetresMilliunits);
+      const a = sorted(sourceRows);
+      const z = [...tankRows].sort((x,y)=>x.dipMillimetresMilliunits-y.dipMillimetresMilliunits);
+      if (a.length < 2 || a.length !== z.length || a.some((point,i)=>point.dipMillimetresMilliunits!==z[i].dipMillimetresMilliunits || point.volumeMilliunits!==z[i].volumeMilliunits)) {
+        return c.json({success:false,data:null,error:{code:'GLOBAL_CHART_ROWS_MISMATCH',message:'The linked 50 KL readings differ from the approved source.'}},409);
+      }
+    }
     const updatedChart = await pumpRepo.updateCalibrationChartStatus(
       tankId,
       chartId,
