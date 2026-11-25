@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy existing 50 KL calibration linking (PR 124)
+    name: Verify and deploy simplified 50 KL chart workflow (PR 125)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
