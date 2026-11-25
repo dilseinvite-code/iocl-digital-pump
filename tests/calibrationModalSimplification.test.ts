@@ -14,6 +14,7 @@ describe('Linked Chart production UI', () => {
 
   it('retains the PDF action outside advanced tools and removes the dummy preset', () => {
     const advanced = modal.indexOf('data-testid="advanced-calibration-tools"');
+    expect(modal.indexOf('data-testid="apply-pdf-calibration-existing-tank"')).toBeGreaterThanOrEqual(0);
     expect(advanced).toBeGreaterThan(modal.indexOf('data-testid="apply-pdf-calibration-existing-tank"'));
     expect(modal.indexOf('CSV / Bulk Import Chart')).toBeGreaterThan(advanced);
     expect(modal.indexOf('Dry-Run vs Printed Chart')).toBeGreaterThan(advanced);
@@ -25,6 +26,6 @@ describe('Linked Chart production UI', () => {
     expect(modal).toContain('data-testid="global-calibration-linked-summary"');
     expect(modal).toContain('data-testid="linked-global-readings"');
     expect(modal.indexOf('{modalError && (')).toBeLessThan(modal.indexOf('data-testid="advanced-calibration-tools"'));
-    expect(modal.indexOf('{!calStatus.isConfigured && (')).toBeLessThan(modal.indexOf('data-testid="advanced-calibration-tools"'));
+    expect(modal.indexOf('{!linkedSuppliedReady && !calStatus.isConfigured && (')).toBeLessThan(modal.indexOf('data-testid="advanced-calibration-tools"'));
   });
 });

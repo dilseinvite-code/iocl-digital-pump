@@ -3488,7 +3488,7 @@ export const PumpInfrastructurePage: React.FC = () => {
                   </div>
                 </section>
               )}
-              {!calStatus.isConfigured && (
+              {!linkedSuppliedReady && !calStatus.isConfigured && (
                 <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-800 text-xs rounded-xl font-mono flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
                   <span>
