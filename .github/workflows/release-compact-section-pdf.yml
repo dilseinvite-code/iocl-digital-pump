@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy simplified linked calibration modal (PR 123)
+    name: Verify and deploy existing 50 KL calibration linking (PR 124)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
