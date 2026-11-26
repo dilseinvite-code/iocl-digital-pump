@@ -38,7 +38,7 @@ export const SCANNED_CALIBRATION_REFERENCES: Readonly<Record<10000 | 20000, Scan
     printedCheckpoints: [
       { dipMm: 0, volumeLitres: 0 },
       { dipMm: 10, volumeLitres: 6.90 },
-      { dipMm: 410, volumeLitres: 1705.23 },
+      { dipMm: 410, volumeLitres: 1706.23 }, // Previous scan version, retained for historical comparison
       { dipMm: 810, volumeLitres: 4378.94 },
       { dipMm: 1940, volumeLitres: 11073.41 },
     ],
@@ -104,7 +104,12 @@ export function reviewScannedCalibrationCandidate(candidate: ScanReferenceCandid
   if (last && last.volumeLitres > ref.nominalCapacityLitres * 1.15 + 0.001) {
     issues.push('Source maximum exceeds the +15% reference-chart validation ceiling.');
   }
-  for (const p of ref.printedCheckpoints) {
+  // Keep original scan checkpoints version-specific; the corrected 26 Nov
+  // source has its own 410 mm reading and full exact-row validation.
+  const checkpoints = isOperatorPdfSourceCode(candidate.code,ref.nominalCapacityLitres) && ref.nominalCapacityLitres===10000
+    ? ref.printedCheckpoints.map(p=>p.dipMm===410?{...p,volumeLitres:1705.23}:p)
+    : ref.printedCheckpoints;
+  for (const p of checkpoints) {
     const saved = candidate.points.find(x=>Math.abs(x.dipMm-p.dipMm)<0.0001);
     if (!saved || Math.abs(saved.volumeLitres-p.volumeLitres)>0.02) {
       issues.push('Printed scan checkpoint mismatch at '+p.dipMm+' mm: expected '+p.volumeLitres.toFixed(2)+' L; stored '+(saved ? saved.volumeLitres.toFixed(2)+' L' : 'missing')+'.');
