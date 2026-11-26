@@ -14,6 +14,17 @@ import {
 export class FinancialRepository {
   constructor(private db: AppDatabase) {}
 
+  // Used only by collection/handover routes after authorization and explicit
+  // deferred state lookup. The SQL rechecks state and reconciliation evidence
+  // at write-time to close the finance-finalization race.
+  private financialEntryCondition(shiftId: any, allowDeferred: boolean) {
+    return allowDeferred ? sql`EXISTS (SELECT 1 FROM operational_shifts s
+      JOIN deferred_shift_finance d ON d.operational_shift_id=s.id AND d.outlet_id=s.outlet_id
+      WHERE s.id=${shiftId} AND s.status='CLOSED' AND d.finance_status='PENDING'
+        AND NOT EXISTS (SELECT 1 FROM shift_financial_reconciliations f WHERE f.operational_shift_id=s.id))`
+      : sql`EXISTS (SELECT 1 FROM operational_shifts WHERE id=${shiftId} AND status='OPEN')`;
+  }
+
   // ==========================================
   // PRODUCT PRICES
   // ==========================================
@@ -146,7 +157,7 @@ export class FinancialRepository {
     return (row as unknown as ShiftCollection) || null;
   }
 
-  async createCollection(data: any): Promise<{ collection: ShiftCollection | null; shiftClosed: boolean }> {
+  async createCollection(data: any, allowDeferred = false): Promise<{ collection: ShiftCollection | null; shiftClosed: boolean }> {
     const inserted = await this.db.all<{ id: string }>(
       sql`INSERT INTO shift_collections (
         id, operational_shift_id, outlet_id, collection_type, amount_paise,
@@ -157,7 +168,7 @@ export class FinancialRepository {
         ${data.id}, ${data.operationalShiftId}, ${data.outletId}, ${data.collectionType}, ${data.amountPaise},
         ${data.provider}, ${data.referenceNumber}, ${data.creditPartyId}, ${data.creditPartyCodeSnapshot}, ${data.creditPartyNameSnapshot},
         ${data.collectedAt}, ${data.recordedByUserId}, ${data.notes}, ${data.createdAt}, ${data.updatedAt}
-      WHERE EXISTS (SELECT 1 FROM operational_shifts WHERE id = ${data.operationalShiftId} AND status = 'OPEN')
+      WHERE ${this.financialEntryCondition(data.operationalShiftId, allowDeferred)}
       RETURNING id`
     );
 
@@ -169,7 +180,7 @@ export class FinancialRepository {
     return { collection: col, shiftClosed: false };
   }
 
-  async updateCollection(id: string, data: any): Promise<{ collection: ShiftCollection | null; shiftClosed: boolean }> {
+  async updateCollection(id: string, data: any, allowDeferred = false): Promise<{ collection: ShiftCollection | null; shiftClosed: boolean }> {
     const updated = await this.db.all<{ id: string }>(
       sql`UPDATE shift_collections
           SET
@@ -184,7 +195,7 @@ export class FinancialRepository {
             notes = ${data.notes},
             updated_at = ${data.updatedAt}
           WHERE id = ${id}
-            AND EXISTS (SELECT 1 FROM operational_shifts WHERE id = shift_collections.operational_shift_id AND status = 'OPEN')
+            AND ${this.financialEntryCondition(sql`shift_collections.operational_shift_id`, allowDeferred)}
           RETURNING id`
     );
 
@@ -196,11 +207,11 @@ export class FinancialRepository {
     return { collection: col, shiftClosed: false };
   }
 
-  async deleteCollection(id: string): Promise<{ success: boolean; reason?: 'NOT_FOUND' | 'SHIFT_CLOSED' }> {
+  async deleteCollection(id: string, allowDeferred = false): Promise<{ success: boolean; reason?: 'NOT_FOUND' | 'SHIFT_CLOSED' }> {
     const deleted = await this.db.all<{ id: string }>(
       sql`DELETE FROM shift_collections
           WHERE id = ${id}
-            AND EXISTS (SELECT 1 FROM operational_shifts WHERE id = shift_collections.operational_shift_id AND status = 'OPEN')
+            AND ${this.financialEntryCondition(sql`shift_collections.operational_shift_id`, allowDeferred)}
           RETURNING id`
     );
 
@@ -237,7 +248,7 @@ export class FinancialRepository {
     return (row as unknown as CashHandover) || null;
   }
 
-  async createCashHandover(data: any): Promise<{ handover: CashHandover | null; shiftClosed: boolean }> {
+  async createCashHandover(data: any, allowDeferred = false): Promise<{ handover: CashHandover | null; shiftClosed: boolean }> {
     const inserted = await this.db.all<{ id: string }>(
       sql`INSERT INTO cash_handover_logs (
         id, operational_shift_id, outlet_id, amount_paise,
@@ -246,7 +257,7 @@ export class FinancialRepository {
       SELECT
         ${data.id}, ${data.operationalShiftId}, ${data.outletId}, ${data.amountPaise},
         ${data.handedOverByUserId}, ${data.handedOverAt}, 'PENDING', ${data.notes}, ${data.createdAt}, ${data.updatedAt}
-      WHERE EXISTS (SELECT 1 FROM operational_shifts WHERE id = ${data.operationalShiftId} AND status = 'OPEN')
+      WHERE ${this.financialEntryCondition(data.operationalShiftId, allowDeferred)}
       RETURNING id`
     );
 

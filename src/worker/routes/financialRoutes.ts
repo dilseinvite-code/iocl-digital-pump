@@ -1,3 +1,4 @@
+import { financeEntryAllowed } from '../services/deferredShiftFinance';
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
@@ -345,8 +346,8 @@ financialRoutes.post('/shifts/:shiftId/collections', requirePermission(PERMISSIO
     return c.json({ success: false, error: { code: 'FORBIDDEN', message: 'No authority over this shift' } }, 403);
   }
 
-  if (shift.status !== 'OPEN') {
-    return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Shift is not OPEN for collection entry' } }, 409);
+  if (!await financeEntryAllowed(db, shift)) {
+    return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Shift is not open for collection entry or explicitly awaiting finance' } }, 409);
   }
 
   const body = await c.req.json().catch(() => ({}));
@@ -394,7 +395,7 @@ financialRoutes.post('/shifts/:shiftId/collections', requirePermission(PERMISSIO
     notes: validated.notes || null,
     createdAt: now,
     updatedAt: now
-  });
+  }, shift.status === 'CLOSED');
 
   if (shiftClosed) {
     return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Shift was closed concurrently' } }, 409);
@@ -428,8 +429,8 @@ async function handleCollectionUpdate(c: AppContext, collectionId: string) {
   }
 
   const shift = await pumpRepo.findOperationalShiftById(existing.operationalShiftId);
-  if (!shift || shift.status !== 'OPEN') {
-    return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Parent shift is not OPEN' } }, 409);
+  if (!shift || !await financeEntryAllowed(db, shift)) {
+    return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Parent shift is not open for financial entry' } }, 409);
   }
 
   const body = await c.req.json().catch(() => ({}));
@@ -470,7 +471,7 @@ async function handleCollectionUpdate(c: AppContext, collectionId: string) {
     collectedAt: validated.collectedAt,
     notes: validated.notes || null,
     updatedAt: now
-  });
+  }, shift.status === 'CLOSED');
 
   if (shiftClosed) {
     return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Shift is not OPEN' } }, 409);
@@ -520,11 +521,11 @@ financialRoutes.delete('/collections/:id', requirePermission(PERMISSIONS.COLLECT
   }
 
   const shift = await pumpRepo.findOperationalShiftById(existing.operationalShiftId);
-  if (!shift || shift.status !== 'OPEN') {
+  if (!shift || !await financeEntryAllowed(db, shift)) {
     return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Shift is not OPEN' } }, 409);
   }
 
-  const delRes = await repo.deleteCollection(id);
+  const delRes = await repo.deleteCollection(id, shift.status === 'CLOSED');
   if (!delRes.success) {
     if (delRes.reason === 'NOT_FOUND') {
       return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Collection not found' } }, 404);
@@ -591,8 +592,8 @@ financialRoutes.post('/shifts/:shiftId/cash-handovers', requirePermission(PERMIS
     return c.json({ success: false, error: { code: 'FORBIDDEN', message: 'No authority over this shift' } }, 403);
   }
 
-  if (shift.status !== 'OPEN') {
-    return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Shift is not OPEN for handover entry' } }, 409);
+  if (!await financeEntryAllowed(db, shift)) {
+    return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Shift is not open for handover entry or explicitly awaiting finance' } }, 409);
   }
 
   const body = await c.req.json().catch(() => ({}));
@@ -615,7 +616,7 @@ financialRoutes.post('/shifts/:shiftId/cash-handovers', requirePermission(PERMIS
     notes: validated.notes || null,
     createdAt: now,
     updatedAt: now
-  });
+  }, shift.status === 'CLOSED');
 
   if (shiftClosed) {
     return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Shift was closed concurrently' } }, 409);

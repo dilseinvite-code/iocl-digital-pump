@@ -455,8 +455,7 @@ export const DailyOperationsPage: React.FC = () => {
   };
   const isShiftReadOnly =
     !activeWorkspace ||
-    activeWorkspace.shift.status === 'CLOSED' ||
-    activeWorkspace.shift.status === 'LOCKED';
+    activeWorkspace.shift.status !== 'OPEN';
 
   const handleOpenShift = async () => {
     if (!selectedOutletId || !selectedTemplateId || !businessDate) return;
@@ -1035,6 +1034,29 @@ export const DailyOperationsPage: React.FC = () => {
     await loadBootstrap(selectedOutletId, businessDate, true);
   };
 
+  const handleCloseOperations = async () => {
+    if (!activeWorkspace || activeWorkspace.shift.status !== 'OPEN' || hasUnsaved || closingShiftBusy ||
+        !hasPermission(PERMISSIONS.SHIFTS_CLOSE)) return;
+    if (!window.confirm('Close operational shift? Saved tank/nozzle/receipt/stock entries will be locked. The accounts team can enter and finalize real collections later.')) return;
+    setClosingShiftBusy(true);
+    setPageError(null);
+    setActionSuccess(null);
+    try {
+      const res = await apiFetch(`/api/v1/shifts/${activeWorkspace.shift.id}/close-operations`, {
+        method: 'POST', body: JSON.stringify({confirm: true}),
+      });
+      if (!res.success) {
+        setPageError(getShiftCloseErrorGuidance(res.error));
+        await loadBootstrap(selectedOutletId, businessDate, true);
+        return;
+      }
+      await loadBootstrap(selectedOutletId, businessDate, true);
+      setActionSuccess('Operational shift closed. Fuel records are locked, financial reconciliation is pending, and the next shift can open.');
+    } catch {
+      setPageError('Operational closure outcome is uncertain. Refresh saved shift status before retrying.');
+    } finally {setClosingShiftBusy(false);}
+  };
+
   const handleCloseShift = async () => {
     if (!activeWorkspace || activeWorkspace.shift.status !== 'OPEN') return;
     setClosingShiftBusy(true);
@@ -1420,7 +1442,7 @@ export const DailyOperationsPage: React.FC = () => {
             <div className="flex items-center gap-2 text-xs font-medium text-[#526477]">
               <Clock className="h-4 w-4 text-[#F47721]" />
               <span>{summary.shiftsCount === 0 ? 'No shift started for this date' :
-                summary.shifts.every(shift => shift.status === 'CLOSED') ? 'All recorded shifts are closed' :
+                summary.shifts.every(shift => shift.status === 'CLOSED') ? 'All recorded shifts are operationally closed' :
                 `${summary.shifts.filter(shift => shift.status === 'OPEN').length} shift(s) currently open`}</span>
             </div>
             <span className="text-xs text-[#64748B]">Choose a shift below to view or enter operational data</span>
@@ -1531,7 +1553,7 @@ export const DailyOperationsPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleComputeReconciliation}
-                    disabled={runningReconciliation}
+                    disabled={runningReconciliation || isShiftReadOnly}
                     className="h-8 px-3 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
                   >
                     <Calculator className="w-3.5 h-3.5" />
@@ -1555,7 +1577,19 @@ export const DailyOperationsPage: React.FC = () => {
                     </button>
                   )}
 
-                  {activeWorkspace.shift.status === 'OPEN' && (
+                  {activeWorkspace.shift.status === 'OPEN' && summary?.deferredShiftClosureAvailable && hasPermission(PERMISSIONS.SHIFTS_CLOSE) && (
+                    <button
+                      type="button" data-testid="close-operational-shift"
+                      onClick={handleCloseOperations}
+                      disabled={closingShiftBusy || hasUnsaved || !summary.shifts.find(s=>s.id===activeWorkspace.shift.id)?.reconciliationComplete}
+                      className="h-8 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
+                      title="Review and save all fuel entries and stock reconciliation before closing operations"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      {closingShiftBusy ? 'Closing...' : 'Close Operational Shift'}
+                    </button>
+                  )}
+                  {activeWorkspace.shift.status === 'OPEN' && !summary?.deferredShiftClosureAvailable && hasPermission(PERMISSIONS.SHIFTS_CLOSE) && (
                     <button
                       type="button"
                       onClick={handleCloseShift}
@@ -1591,7 +1625,7 @@ export const DailyOperationsPage: React.FC = () => {
                     <p className="mt-1 text-xs text-[#64748B]">Work in the same outlet, date and shift. Use any applicable task; existing closure rules still apply.</p>
                   </div>
                   <span className="rounded-lg bg-[#F1F5F9] px-2.5 py-1 text-xs font-medium text-[#526477]">
-                    {activeWorkspace.shift.status === 'OPEN' ? 'Shift open' : 'Read-only shift'} · Finance: {dsrStatusLabel(summary?.shifts.find(shift => shift.id === activeWorkspace.shift.id)?.financialReconciliationStatus ?? 'UNKNOWN')}
+                    {activeWorkspace.shift.status === 'OPEN' ? 'Shift open' : activeWorkspace.shift.status === 'CLOSED' ? 'Operations closed · fuel entries locked' : 'Read-only shift'} · Finance: {dsrStatusLabel(summary?.shifts.find(shift => shift.id === activeWorkspace.shift.id)?.financialReconciliationStatus ?? 'UNKNOWN')}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">

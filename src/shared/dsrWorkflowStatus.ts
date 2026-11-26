@@ -10,8 +10,12 @@ export function operationalDsrStatus(status: DailyOperationsStatus): Operational
  *  A closed shift without evidence (including an exceptional empty close) is not a
  *  financial completion. UNKNOWN never implies a zero collection or no record.
  */
-export function financialShiftStatus(shiftStatus: string, hasEvidence: boolean | null): FinancialReconciliationStatus {
+export function financialShiftStatus(shiftStatus: string, hasEvidence: boolean | null, deferred?: 'PENDING' | 'COMPLETED' | 'REVIEW_REQUIRED'): FinancialReconciliationStatus {
   if (hasEvidence === null) return 'UNKNOWN';
+  if (deferred) {
+    if (shiftStatus !== 'CLOSED' || deferred === 'REVIEW_REQUIRED') return 'REVIEW_REQUIRED';
+    return deferred === 'PENDING' ? (hasEvidence ? 'REVIEW_REQUIRED' : 'PENDING') : (hasEvidence ? 'COMPLETED' : 'REVIEW_REQUIRED');
+  }
   if (shiftStatus === 'CLOSED' || shiftStatus === 'LOCKED') {
     return hasEvidence ? 'COMPLETED' : 'REVIEW_REQUIRED';
   }
