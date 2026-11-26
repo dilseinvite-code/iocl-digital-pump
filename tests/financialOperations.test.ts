@@ -927,6 +927,15 @@ describe('Phase 2C Comprehensive Integration Suite', () => {
     expect(closeRes.status).toBe(200);
     const recon = await new FinancialRepository(getDb(localD1)).findShiftFinancialReconciliation(shiftId);
     expect(recon).not.toBeNull();
+    const reportRes = await app.fetch(
+      new Request('http://localhost/api/v1/outlets/ro-1001/fuel/daily-summary?businessDate=2026-11-20', {
+        headers: { Cookie: cookie, Origin: 'http://localhost:3000' },
+      }), env
+    );
+    expect(reportRes.status).toBe(200);
+    const summary = ((await reportRes.json()) as any).data;
+    expect(summary.financialReconciliationStatus).toBe('COMPLETED');
+    expect(summary.shifts.find((shift: any) => shift.id === shiftId).financialReconciliationStatus).toBe('COMPLETED');
   });
 
   it('31. successful close emits financial reconciliation audit', async () => {

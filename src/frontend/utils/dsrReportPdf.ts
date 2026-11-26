@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'pdf-lib';
 import type { DailyFuelSummary } from '../../shared/types';
+import { dsrStatusLabel, getDsrWorkflowStatus } from '../../shared/dsrWorkflowStatus';
 import { formatMilliunits } from '../../shared/precision';
 import { displayNozzleMeterMetric } from './dailyReadingPresentation';
 import { dsrPeriodProducts, dsrProductColumns, dsrProductValues } from './dsrReport';
@@ -31,7 +32,8 @@ function wrap(text: string, font: PDFFont, size: number, width: number): string[
   if (current) lines.push(current);
   return lines;
 }
-const status = (d: DailyFuelSummary) => d.dayEntryStatus.replaceAll('_',' ') + (d.dayEntryStatus !== 'NO_ENTRY' ? ' / '+d.status.replaceAll('_',' ') : '');
+const operationalStatus = (d: DailyFuelSummary) => dsrStatusLabel(getDsrWorkflowStatus(d).operational);
+const financialStatus = (d: DailyFuelSummary) => dsrStatusLabel(getDsrWorkflowStatus(d).financial);
 const reading = (v: number | null) => v === null ? 'Not recorded' : formatMilliunits(v);
 
 export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
@@ -91,13 +93,14 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
         p.recordedNetMilliunits===null?'Not recorded':formatMilliunits(p.recordedNetMilliunits),p.fullyRecorded?'Complete':'Incomplete subtotal']),
       [2.3,0.7,1.0,1.0,1.4,1.5],'Period overview');
     note('Incomplete subtotals exclude missing readings or dates. Units are not combined. Opening and closing stocks are daily balances, not additive.','Period overview');
-    table('Day-wise availability',['Business date','Status','Shifts','Products'],report.days.map(d=>[d.businessDate,status(d),String(d.shiftsCount),String(d.byProduct.length)]),[1,2,1,1],'Period overview');
+    table('Day-wise availability',['Business date','Operational DSR','Financial reconciliation','Shifts','Products'],report.days.map(d=>[d.businessDate,operationalStatus(d),financialStatus(d),String(d.shiftsCount),String(d.byProduct.length)]),[1.3,1.6,2.5,.8,.8],'Period overview');
   }
   for(const day of report.days){
     if(report.days.length>1 && day.dayEntryStatus==='NO_ENTRY') continue;
     const heading=day.businessDate;
     start(heading);
-    note('Status: '+status(day)+' | Shifts included: '+day.shiftsCount+' | Completed receipts: '+day.completion.completedReceipts+'/'+day.completion.totalReceipts,heading);
+    note('Operational DSR: '+operationalStatus(day)+' | Financial Reconciliation: '+financialStatus(day)+' | Shifts included: '+day.shiftsCount+' | Completed receipts: '+day.completion.completedReceipts+'/'+day.completion.totalReceipts,heading);
+    note('Operational completeness does not certify payment collections or final shift closure.',heading);
     if(day.dayEntryStatus==='NO_ENTRY'){note('No shift or DSR entry recorded for this business date. No figures are inferred.',heading);continue;}
     table('1. Product-wise daily stock and sales',['Product','Unit','Status',...dsrProductColumns],
       day.byProduct.map(p=>[p.productCode,p.unit,p.status.replaceAll('_',' '),...dsrProductValues(p)]),

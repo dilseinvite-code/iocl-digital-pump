@@ -2723,6 +2723,9 @@ export interface MonthlyOperationsReport {
 // ==========================================
 
 export type DailyOperationsStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE' | 'BLOCKED';
+// Independent report and payment-reconciliation status; neither authorizes shift closure.
+export type OperationalDsrStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'BLOCKED';
+export type FinancialReconciliationStatus = 'NOT_STARTED' | 'PENDING' | 'COMPLETED' | 'REVIEW_REQUIRED' | 'UNKNOWN';
 
 export interface DailyDispenserNozzleItem {
   operationalShiftId: string;
@@ -2848,6 +2851,7 @@ export interface DailyFuelTotals {
 }
 
 export interface DailyShiftSummaryItem {
+  financialReconciliationStatus?: FinancialReconciliationStatus;
   id: string;
   shiftTemplateId: string;
   shiftNumber: number;
@@ -2868,6 +2872,9 @@ export interface DailyShiftSummaryItem {
 }
 
 export interface DailyFuelSummary {
+  // Optional for compatibility during a rolling Worker/frontend release.
+  operationalDsrStatus?: OperationalDsrStatus;
+  financialReconciliationStatus?: FinancialReconciliationStatus;
   outletId: string;
   outletName: string;
   businessDate: string;

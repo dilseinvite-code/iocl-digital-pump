@@ -25,6 +25,7 @@ import './dailyOperationsModern.css';
 import { parseMilliunits, formatMilliunits } from '../../shared/precision';
 import { displayDsrProductMetric, displayDsrTotalMetric, displayNozzleMeterMetric, getTankSaveErrorGuidance } from '../utils/dailyReadingPresentation';
 import { getShiftCloseErrorGuidance } from '../utils/shiftCloseFeedback';
+import { dsrStatusLabel, getDsrWorkflowStatus } from '../../shared/dsrWorkflowStatus';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -1142,6 +1143,7 @@ export const DailyOperationsPage: React.FC = () => {
 
   const summary = dailySummary;
   const badge = statusBadgeConfig(summary?.status || 'NOT_STARTED');
+  const workflowStatus = summary ? getDsrWorkflowStatus(summary) : null;
 
   // Presentation-only indicators: reuse existing authoritative completion fields.
   // They never gate, reorder, or change an operation.
@@ -1302,14 +1304,14 @@ export const DailyOperationsPage: React.FC = () => {
           <div className="grid gap-4 border-b border-slate-100 pb-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,auto)] xl:items-start">
             <div className="flex items-center gap-3">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Overall Day Status:
+                Operational DSR:
               </span>
               <span
                 data-testid="daily-overall-status"
                 className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-bold border ${badge.classes}`}
               >
                 {badge.icon}
-                {badge.label}
+                {workflowStatus ? dsrStatusLabel(workflowStatus.operational) : badge.label}
               </span>
               <span className="text-xs text-slate-500 font-mono">
                 {selectedOutlet?.roCode} • {businessDate} • {summary.shiftsCount} Shift(s)
@@ -1359,6 +1361,26 @@ export const DailyOperationsPage: React.FC = () => {
               </div>
             )}
           </div>
+
+          <section aria-label="Independent DSR and financial reconciliation" className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 p-3">
+                <div className="text-xs font-semibold text-slate-600">Operational DSR · all recorded shifts</div>
+                <span className={`mt-2 inline-flex rounded-md border px-2.5 py-1 text-xs font-bold ${badge.classes}`} data-testid="operational-dsr-status">
+                  {workflowStatus && dsrStatusLabel(workflowStatus.operational)}
+                </span>
+                <p className="mt-2 text-xs text-slate-600">Completed once saved fuel readings, receipts, calibration and stock reconciliation meet existing completeness checks.</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <div className="text-xs font-semibold text-slate-600">Financial Reconciliation · all recorded shifts</div>
+                <span data-testid="financial-reconciliation-status" className={`mt-2 inline-flex rounded-md border px-2.5 py-1 text-xs font-bold ${workflowStatus?.financial === 'COMPLETED' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : workflowStatus?.financial === 'REVIEW_REQUIRED' ? 'border-red-300 bg-red-50 text-red-800' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+                  {workflowStatus && dsrStatusLabel(workflowStatus.financial)}
+                </span>
+                <p className="mt-2 text-xs text-slate-600">Finance can remain pending while the operational report is complete. Final shift closure still follows the existing financial controls.</p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-slate-600">This is a live report of saved data, not a locked or financially approved shift. The DSR remains available while finance is pending.</p>
+          </section>
 
           {/* Read-only completion overview; existing data-entry workflow remains unchanged. */}
           <section aria-label="Daily operations progress" className="option4-progress p-3 sm:p-4">
@@ -1569,7 +1591,7 @@ export const DailyOperationsPage: React.FC = () => {
                     <p className="mt-1 text-xs text-[#64748B]">Work in the same outlet, date and shift. Use any applicable task; existing closure rules still apply.</p>
                   </div>
                   <span className="rounded-lg bg-[#F1F5F9] px-2.5 py-1 text-xs font-medium text-[#526477]">
-                    {activeWorkspace.shift.status === 'OPEN' ? 'Shift open' : 'Read-only shift'}
+                    {activeWorkspace.shift.status === 'OPEN' ? 'Shift open' : 'Read-only shift'} · Finance: {dsrStatusLabel(summary?.shifts.find(shift => shift.id === activeWorkspace.shift.id)?.financialReconciliationStatus ?? 'UNKNOWN')}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
@@ -2458,7 +2480,7 @@ export const DailyOperationsPage: React.FC = () => {
               </h2>
               <div className="text-xs text-blue-100 mt-1 font-mono">
                 Business Date: {summary.businessDate} • Shifts Included: {summary.shiftsCount} •
-                DSR Status: {summary.status}
+                Operational DSR: {workflowStatus && dsrStatusLabel(workflowStatus.operational)} • Financial Reconciliation: {workflowStatus && dsrStatusLabel(workflowStatus.financial)}
               </div>
             </div>
             <div className="flex items-center gap-4">
