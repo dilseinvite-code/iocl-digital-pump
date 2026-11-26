@@ -23,6 +23,7 @@ import { ShiftCloseService } from '../services/shiftCloseService';
 import { AtomicShiftCloseFinalizer } from '../services/atomicShiftCloseFinalizer';
 import { AtomicAdminEmptyShiftCloser } from '../services/atomicAdminEmptyShiftCloser';
 import { ShiftCloseAttemptJournal } from '../services/shiftCloseAttemptJournal';
+import { DeferredShiftFinanceService, deferredFinanceStates } from '../services/deferredShiftFinance';
 import { FuelDailyOperationsService } from '../services/fuelDailyOperationsService';
 
 export const shifts = new Hono<{ Bindings: EnvBindings }>();
@@ -54,7 +55,15 @@ shifts.get('/outlets/:outletId/shifts', requirePermission(PERMISSIONS.SHIFTS_REA
   }
 
   const list = await pumpRepo.listOperationalShiftsByOutlet(outletId);
-  return c.json({ success: true, data: list, error: null });
+  // Workbench links can refer to a historical shift outside the recent list.
+  // Verify outlet scope before including that exact shift.
+  const includeShiftId = c.req.query('includeShiftId');
+  if (includeShiftId && !list.some(shift => shift.id === includeShiftId)) {
+    const historical = await pumpRepo.findOperationalShiftById(includeShiftId);
+    if (historical?.outletId === outletId) list.push(historical);
+  }
+  const states = await deferredFinanceStates(db, list.map(shift => shift.id));
+  return c.json({ success: true, data: list.map(shift => ({ ...shift, deferredFinancialStatus: states.get(shift.id) })), error: null });
 });
 
 // POST /api/v1/outlets/:outletId/shifts/open - Open a new operational shift
@@ -190,8 +199,52 @@ shifts.get('/shifts/:shiftId', requirePermission(PERMISSIONS.SHIFTS_READ) as any
     return c.json({ success: false, data: null, error: { code: 'FORBIDDEN', message: 'No authority over this shift outlet' } }, 403);
   }
 
-  return c.json({ success: true, data: shift, error: null });
+  const states = await deferredFinanceStates(db, [shift.id]);
+  return c.json({ success: true, data: { ...shift, deferredFinancialStatus: states.get(shift.id) }, error: null });
 });
+
+// Two-stage closure: preserve operational locks and continuity while deferring collections.
+shifts.post('/shifts/:shiftId/close-operations', requirePermission(PERMISSIONS.SHIFTS_CLOSE) as any, async (c: AppContext) => {
+  const db = getDb(c.env.DB);
+  const pump = new PumpRepository(db);
+  const shift = await pump.findOperationalShiftById(c.req.param('shiftId') || '');
+  if (!shift) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Shift not found' } }, 404);
+  if (!await verifyOutletAuthority(c, shift.outletId, new OutletRepository(db)))
+    return c.json({ success: false, error: { code: 'FORBIDDEN', message: 'No authority over this outlet' } }, 403);
+  const body = await c.req.json().catch(() => ({}));
+  if (body.confirm !== true)
+    return c.json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Confirm that operational entries are final and finance will be completed later.' } }, 400);
+  const repo = new FinancialRepository(db);
+  const financial = new FinancialService(repo, pump, new CngRepository(db), new LubeRepository(db));
+  const service = new DeferredShiftFinanceService(db, c.env.DB, pump, repo, financial);
+  const error = await service.closeOperations(shift, c.var.user!.user.id, c.req.header('cf-connecting-ip'), c.req.header('user-agent'));
+  if (error) return c.json({ success: false, error }, 409);
+  const closed = await pump.findOperationalShiftById(shift.id);
+  return c.json({ success: true, data: { ...closed, deferredFinancialStatus: 'PENDING' }, error: null });
+});
+
+// Finance finalization never puts a historically closed shift back into CLOSING.
+shifts.post('/shifts/:shiftId/finalize-finance',
+  requirePermission(PERMISSIONS.SHIFTS_CLOSE) as any,
+  requirePermission(PERMISSIONS.COLLECTIONS_WRITE) as any,
+  requirePermission(PERMISSIONS.FINANCIAL_RECONCILIATION_READ) as any,
+  async (c: AppContext) => {
+    const db = getDb(c.env.DB);
+    const pump = new PumpRepository(db);
+    const shift = await pump.findOperationalShiftById(c.req.param('shiftId') || '');
+    if (!shift) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Shift not found' } }, 404);
+    if (!await verifyOutletAuthority(c, shift.outletId, new OutletRepository(db)))
+      return c.json({ success: false, error: { code: 'FORBIDDEN', message: 'No authority over this outlet' } }, 403);
+    const body = await c.req.json().catch(() => ({}));
+    if (body.confirm !== true || (body.varianceReason != null && (typeof body.varianceReason !== 'string' || body.varianceReason.length > 500)))
+      return c.json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Confirm reviewed real collections and supply a valid variance reason if required.' } }, 400);
+    const repo = new FinancialRepository(db);
+    const financial = new FinancialService(repo, pump, new CngRepository(db), new LubeRepository(db));
+    const service = new DeferredShiftFinanceService(db, c.env.DB, pump, repo, financial);
+    const error = await service.finalizeFinance(shift, c.var.user!.user.id, body.varianceReason, c.req.header('cf-connecting-ip'), c.req.header('user-agent'));
+    if (error) return c.json({ success: false, error }, 409);
+    return c.json({ success: true, data: { ...shift, deferredFinancialStatus: 'COMPLETED' }, error: null });
+  });
 
 // POST /api/v1/shifts/:shiftId/close - Transactionally close operational shift with centralized orchestration
 shifts.post('/shifts/:shiftId/close', requirePermission(PERMISSIONS.SHIFTS_CLOSE) as any, async (c: AppContext) => {

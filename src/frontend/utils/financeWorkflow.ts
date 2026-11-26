@@ -23,6 +23,6 @@ export function financeStageDetails(summary:ShiftFinancialSummary|null, shift:Op
     collections:'Review recorded payment totals',
     handovers:money(summary.cashHandoverSummary.totalPendingStr)+' awaiting acknowledgement',
     deposits:summary.cashDepositControl.pendingCashDepositPaise>0?'Pending cash deposit':'No pending cash per summary',
-    reconciliation:preview?'Incomplete sales evidence':shift.status==='OPEN'?'Preview · finalizes at shift close':summary.varianceStatus?'Review '+summary.varianceStatus.toLowerCase():'Review saved variance',
+    reconciliation:preview?'Incomplete sales evidence':shift.deferredFinancialStatus==='PENDING'?'Pending · operations closed':shift.deferredFinancialStatus==='COMPLETED'?'Completed':shift.deferredFinancialStatus==='REVIEW_REQUIRED'?'Review required':shift.status==='OPEN'?'Preview · finalizes at shift close':summary.varianceStatus?'Review '+summary.varianceStatus.toLowerCase():'Review saved variance',
   };
 }

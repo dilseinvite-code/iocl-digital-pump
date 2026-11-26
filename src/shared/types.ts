@@ -360,6 +360,7 @@ export interface ShiftTemplate {
 }
 
 export interface OperationalShift {
+  deferredFinancialStatus?: 'PENDING' | 'COMPLETED' | 'REVIEW_REQUIRED';
   id: string;
   outletId: string;
   shiftTemplateId: string;
@@ -2872,6 +2873,7 @@ export interface DailyShiftSummaryItem {
 }
 
 export interface DailyFuelSummary {
+  deferredShiftClosureAvailable?: boolean;
   // Optional for compatibility during a rolling Worker/frontend release.
   operationalDsrStatus?: OperationalDsrStatus;
   financialReconciliationStatus?: FinancialReconciliationStatus;

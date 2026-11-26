@@ -115,6 +115,9 @@ export const FinancialOperationsPage: React.FC = () => {
   const [showHandoverModal, setShowHandoverModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [varianceReason, setVarianceReason] = useState('');
+  const [financeConfirmed, setFinanceConfirmed] = useState(false);
+  const canEnterFinance = selectedShift?.status === 'OPEN' || (selectedShift?.status === 'CLOSED' && selectedShift.deferredFinancialStatus === 'PENDING');
+  const financeDeferred = selectedShift?.status === 'CLOSED' && selectedShift.deferredFinancialStatus === 'PENDING';
 
   const chooseShift = (shift: OperationalShift | null) => {
     if(shift && shift.outletId!==selectedOutletId)return;
@@ -124,7 +127,7 @@ export const FinancialOperationsPage: React.FC = () => {
       setSelectedShift(null);setCollections([]);setHandovers([]);setDeposits([]);setSummary(null);
       setLoadedSections(prev=>({...prev,collections:false,handovers:false,deposits:false}));
       setShowCollectionModal(false);setShowHandoverModal(false);setShowDepositModal(false);
-      setVarianceReason('');setActionError(null);setActionSuccess(null);
+      setFinanceConfirmed(false);setVarianceReason('');setActionError(null);setActionSuccess(null);
     }
     setSelectedShiftId(id);
     if(shift){initialSelection.current=toWorkbenchSelection(shift);remember(toWorkbenchSelection(shift));}
@@ -136,7 +139,8 @@ export const FinancialOperationsPage: React.FC = () => {
     const loadShifts = async () => {
       setShiftListLoading(true);setShiftListError('');
       try {
-        const res=await apiFetch<OperationalShift[]>(`/api/v1/outlets/${selectedOutletId}/shifts`,{cache:'no-store'});
+        const rememberedId = selectedRef.current || (initialSelection.current?.outletId===selectedOutletId ? initialSelection.current.shiftId : null);
+        const res=await apiFetch<OperationalShift[]>(`/api/v1/outlets/${selectedOutletId}/shifts${rememberedId?'?includeShiftId='+encodeURIComponent(rememberedId):''}`,{cache:'no-store'});
         if(cancelled)return;
         if(!res.success||!res.data){setShiftsList([]);chooseShift(null);setShiftListError(res.error?.message||'Could not verify shifts.');return;}
         const available=res.data.filter(s=>s.outletId===selectedOutletId);
@@ -157,6 +161,7 @@ export const FinancialOperationsPage: React.FC = () => {
     const request=++requestRef.current;
     const current=()=>mounted.current && request===requestRef.current && selectedRef.current===selectedShiftId;
     setLoadingData(true);
+    setFinanceConfirmed(false);
     setActionError(null);
 
     const promises: Promise<any>[] = [];
@@ -190,6 +195,7 @@ export const FinancialOperationsPage: React.FC = () => {
         }
         const shift=results[3].data as OperationalShift;
         setSelectedShift(shift);
+        setShiftsList(prev=>prev.map(s=>s.id===shift.id?shift:s));
         setCollections(results[4].success && results[4].data ? results[4].data : []);
         setHandovers(results[5].success && results[5].data ? results[5].data : []);
         setDeposits(results[6].success && results[6].data ? results[6].data : []);
@@ -250,7 +256,7 @@ export const FinancialOperationsPage: React.FC = () => {
       notes: formData.get('notes') || null,
     };
 
-    if(selectedShift?.status !== 'OPEN' || !hasPermission(PERMISSIONS.COLLECTIONS_WRITE))return;
+    if(!canEnterFinance || !hasPermission(PERMISSIONS.COLLECTIONS_WRITE))return;
     await withFinancialAction(async()=>{
     const res = await apiFetch(`/api/v1/shifts/${selectedShiftId}/collections`, {
       method: 'POST',
@@ -276,7 +282,7 @@ export const FinancialOperationsPage: React.FC = () => {
       notes: formData.get('notes') || null,
     };
 
-    if(selectedShift?.status !== 'OPEN' || !hasPermission(PERMISSIONS.CASH_HANDOVER_WRITE))return;
+    if(!canEnterFinance || !hasPermission(PERMISSIONS.CASH_HANDOVER_WRITE))return;
     await withFinancialAction(async()=>{
     const res = await apiFetch(`/api/v1/shifts/${selectedShiftId}/cash-handovers`, {
       method: 'POST',
@@ -355,6 +361,27 @@ export const FinancialOperationsPage: React.FC = () => {
     });
   };
 
+  const canFinalizeFinance = financeDeferred && hasPermission(PERMISSIONS.SHIFTS_CLOSE) &&
+    hasPermission(PERMISSIONS.COLLECTIONS_WRITE) && hasPermission(PERMISSIONS.FINANCIAL_RECONCILIATION_READ);
+  const finalizeFinance = async () => {
+    if (!canFinalizeFinance || !summary || financeSalesProvisional(summary) || !financeConfirmed ||
+        (summary.variancePaise !== 0 && varianceReason.trim().length < 3)) return;
+    await withFinancialAction(async () => {
+      const res = await apiFetch(`/api/v1/shifts/${selectedShiftId}/finalize-finance`, {
+        method: 'POST', body: JSON.stringify({confirm:true, varianceReason:varianceReason.trim() || null}),
+      });
+      if (!res.success) {
+        const message = res.error?.message || 'Financial finalization could not be confirmed. Refresh before retrying.';
+        await refreshData();
+        setActionError(message);
+        return;
+      }
+      setFinanceConfirmed(false);
+      setVarianceReason('');
+      await refreshData();
+      setActionSuccess('Financial reconciliation finalized. Fuel and collection records are locked.');
+    });
+  };
   const workflowBusy = savingAction || loadingData || shiftListLoading || showCollectionModal || showHandoverModal || showDepositModal || showPartyModal || showPriceModal || showEditPriceModal;
   const goBackToShift = () => { if(!workflowBusy && selectedShift){remember(toWorkbenchSelection(selectedShift));navigate('daily-ops');} };
   const stageDetails=financeStageDetails(summary,selectedShift);
@@ -403,7 +430,7 @@ export const FinancialOperationsPage: React.FC = () => {
             >
               <option value="">{shiftListLoading?'Loading shifts…':'Select Shift...'}</option>
               {shiftsList.map(s => (
-                <option key={s.id} value={s.id}>{s.businessDate} · {s.shiftTemplateName || s.shiftTemplateCode || s.shiftTemplateId} ({s.status})</option>
+                <option key={s.id} value={s.id}>{s.businessDate} · {s.shiftTemplateName || s.shiftTemplateCode || s.shiftTemplateId} ({s.deferredFinancialStatus === 'PENDING' ? 'OPERATIONS CLOSED · FINANCE PENDING' : s.status})</option>
               ))}
             </select>
 
@@ -489,7 +516,7 @@ export const FinancialOperationsPage: React.FC = () => {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-[#17365D]">Shift Collections</h2>
-              {selectedShift?.status === 'OPEN' && hasPermission(PERMISSIONS.COLLECTIONS_WRITE) && (
+              {canEnterFinance && hasPermission(PERMISSIONS.COLLECTIONS_WRITE) && (
                 <button
                   disabled={savingAction || loadingData} onClick={() => {setActionError(null);setCollectionType('CASH');setShowCollectionModal(true);}}
                   className="px-3 py-1.5 bg-[#17365D] text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
@@ -528,10 +555,10 @@ export const FinancialOperationsPage: React.FC = () => {
                       {c.provider} {c.referenceNumber && `• ${c.referenceNumber}`}
                     </div>
                   )}
-                  {selectedShift?.status === 'OPEN' && hasPermission(PERMISSIONS.COLLECTIONS_WRITE) && (
+                  {canEnterFinance && hasPermission(PERMISSIONS.COLLECTIONS_WRITE) && (
                     <button
                       onClick={async () => {
-                        if (selectedShift?.status !== 'OPEN' || !hasPermission(PERMISSIONS.COLLECTIONS_WRITE)) return;
+                        if (!canEnterFinance || !hasPermission(PERMISSIONS.COLLECTIONS_WRITE)) return;
                         if (confirm('Delete this collection?')) await withFinancialAction(async()=>{
                           const res=await apiFetch(`/api/v1/collections/${c.id}`, {method:'DELETE'});
                           if(res.success){setActionSuccess('Collection deleted');await refreshData();}
@@ -724,7 +751,7 @@ export const FinancialOperationsPage: React.FC = () => {
                     ₹ {summary.varianceStr}
                   </div>
                   <div className="text-xs font-bold text-[#64748B] uppercase tracking-widest mt-1">
-                    Status: {provisional ? 'PROVISIONAL' : selectedShift?.status==='OPEN' ? 'PREVIEW — '+(summary.varianceStatus||'PENDING') : summary.varianceStatus || 'PENDING'}
+                    Status: {provisional ? 'PROVISIONAL' : canEnterFinance ? 'PREVIEW — '+(summary.varianceStatus||'PENDING') : summary.varianceStatus || 'PENDING'}
                   </div>
                 </div>
               </div>
@@ -735,12 +762,30 @@ export const FinancialOperationsPage: React.FC = () => {
                   <span>Authoritative Finalization</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-[#64748B]">
-                  Authoritative financial reconciliation is finalized during Shift Close. If this shift is open, complete operational entries and finalize in Shift &amp; Readings.
+                  {financeDeferred ? 'Operational records are locked. Review real collection entries, explain any difference, then finalize financial reconciliation.' : selectedShift?.deferredFinancialStatus === 'COMPLETED' ? 'Financial reconciliation is completed and collections are locked.' : selectedShift?.deferredFinancialStatus === 'REVIEW_REQUIRED' ? 'Financial closure evidence requires authorized review. Collection edits are locked.' : 'For an open shift, complete operational entries in Daily Operations. Previously finalized shifts remain read-only.'}
                 </p>
               </div>
             </div>
 
             }
+            {activeTab==='reconciliation' && financeDeferred && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                <h3 className="font-semibold text-[#17365D]">Operations closed · financial reconciliation pending</h3>
+                <p className="text-xs text-slate-600">Record actual collections in the Collections tab. Do not enter dummy payments. The next operational shift can continue independently.</p>
+                {canFinalizeFinance && <>
+                  {summary.variancePaise !== 0 && <label className="block text-sm font-semibold">Verified variance reason
+                    <textarea value={varianceReason} onChange={e=>setVarianceReason(e.target.value)} maxLength={500}
+                      className="mt-1 block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" placeholder="Explain the actual shortage or excess" />
+                  </label>}
+                  <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={financeConfirmed} onChange={e=>setFinanceConfirmed(e.target.checked)} />
+                    I have reviewed the actual recorded collections and the variance, and confirm finalization.</label>
+                  <button type="button" data-testid="finalize-deferred-finance" disabled={savingAction || loadingData || provisional || !financeConfirmed || (summary.variancePaise !== 0 && varianceReason.trim().length < 3)}
+                    onClick={finalizeFinance} className="rounded-lg bg-[#17365D] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                    {savingAction?'Finalizing…':'Finalize Financial Reconciliation'}
+                  </button>
+                </>}
+              </div>
+            )}
             {activeTab==='reconciliation' && summary.varianceReason && (
               <div className="bg-[#F8FAFC] border border-[#E2E8F0] p-4 rounded-xl">
                  <div className="text-[10px] font-bold text-[#64748B] uppercase font-mono mb-1">Variance Reason</div>
@@ -754,7 +799,7 @@ export const FinancialOperationsPage: React.FC = () => {
           <div className="space-y-4">
              <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-[#17365D]">Cash Handovers</h2>
-              {selectedShift?.status === 'OPEN' && hasPermission(PERMISSIONS.CASH_HANDOVER_WRITE) && (
+              {canEnterFinance && hasPermission(PERMISSIONS.CASH_HANDOVER_WRITE) && (
                 <button
                   disabled={savingAction || loadingData} onClick={() => {setActionError(null);setShowHandoverModal(true);}}
                   className="px-3 py-1.5 bg-[#17365D] text-white rounded-xl text-xs font-bold flex items-center gap-1.5"

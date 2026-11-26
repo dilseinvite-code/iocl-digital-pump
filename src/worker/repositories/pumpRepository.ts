@@ -4630,7 +4630,7 @@ export class PumpRepository {
 
   async calculateAndSaveShiftStockReconciliation(
     shiftId: string,
-    options: { failOnExisting?: boolean; persist?: boolean } = {},
+    options: { failOnExisting?: boolean; persist?: boolean; requireOpen?: boolean } = {},
   ): Promise<ShiftStockReconciliation[]> {
     const shift = await this.findOperationalShiftById(shiftId);
     if (!shift) throw new Error('Shift not found');
@@ -4709,7 +4709,22 @@ export class PumpRepository {
       // Read-only preview recomputes the same exact stock figures for
       // comparison with an earlier explicitly computed reconciliation.
       // It must not rewrite any pre-existing DB evidence.
-      if (options.persist !== false) {
+      if (options.persist !== false && options.requireOpen) {
+        const written = await this.db.all(sql`INSERT INTO shift_stock_reconciliations
+          (id,operational_shift_id,outlet_id,tank_id,product_id,opening_stock_milliunits,receipt_quantity_milliunits,
+           sales_quantity_milliunits,theoretical_closing_stock_milliunits,physical_closing_stock_milliunits,
+           variance_milliunits,variance_status,calculated_at,created_at,updated_at)
+          SELECT ${reconId},${shiftId},${shift.outletId},${ts.tankId},${ts.productId},${openingStockMilli},${receiptMilli},
+            ${salesMilli},${theoreticalClosingMilli},${physicalClosingMilli},${varianceMilli},${varianceStatus},${nowIso},${nowIso},${nowIso}
+          WHERE EXISTS (SELECT 1 FROM operational_shifts WHERE id=${shiftId} AND status='OPEN')
+          ON CONFLICT(operational_shift_id,tank_id) DO UPDATE SET
+            opening_stock_milliunits=excluded.opening_stock_milliunits, receipt_quantity_milliunits=excluded.receipt_quantity_milliunits,
+            sales_quantity_milliunits=excluded.sales_quantity_milliunits, theoretical_closing_stock_milliunits=excluded.theoretical_closing_stock_milliunits,
+            physical_closing_stock_milliunits=excluded.physical_closing_stock_milliunits, variance_milliunits=excluded.variance_milliunits,
+            variance_status=excluded.variance_status, calculated_at=excluded.calculated_at, updated_at=excluded.updated_at
+          RETURNING id`);
+        if (!written.length) throw Object.assign(new Error('Shift is no longer open for stock reconciliation.'), {code:'SHIFT_CLOSED'});
+      } else if (options.persist !== false) {
         const insert = this.db.insert(schema.shiftStockReconciliations).values(reconData);
         if (options.failOnExisting) {
           await insert;

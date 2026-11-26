@@ -32,6 +32,7 @@ import {
 } from '../../shared/types';
 import { formatMilliunits } from '../../shared/precision';
 import { PumpRepository } from '../repositories/pumpRepository';
+import { deferredFinanceAvailable, deferredFinanceStates } from './deferredShiftFinance';
 import { financialDayStatus, financialShiftStatus, operationalDsrStatus } from '../../shared/dsrWorkflowStatus';
 
 export interface ProductDailyComputationInput {
@@ -464,6 +465,7 @@ export class FuelDailyOperationsService {
       throw new Error('Outlet not found');
     }
 
+    const deferredShiftClosureAvailable = await deferredFinanceAvailable(db).catch(() => false);
     const shiftsRaw = await db
       .select()
       .from(operationalShifts)
@@ -488,6 +490,7 @@ export class FuelDailyOperationsService {
         outletName: outlet.name,
         businessDate,
         status: 'NOT_STARTED',
+        deferredShiftClosureAvailable,
         operationalDsrStatus: 'NOT_STARTED',
         financialReconciliationStatus: 'NOT_STARTED',
         dayEntryStatus: 'NO_ENTRY',
@@ -598,6 +601,8 @@ export class FuelDailyOperationsService {
       .where(and(eq(shiftFinancialReconciliations.outletId, outletId),
         inArray(shiftFinancialReconciliations.operationalShiftId, shiftIds)))
       .then(rows => new Set(rows.map(row => row.shiftId)), () => null);
+
+    const deferredStates = await deferredFinanceStates(db, shiftIds).catch(() => null);
 
     // Check active calibration points for all unique tanks in snapshots
     const repo = new PumpRepository(db);
@@ -963,7 +968,7 @@ export class FuelDailyOperationsService {
         unavailableNozzles: sUnavailable,
         reconciliationComplete: sReconComplete && !reconStale,
         financialReconciliationStatus: financialShiftStatus(shift.status,
-          financialEvidence === null ? null : financialEvidence.has(shift.id)),
+          financialEvidence === null || deferredStates === null ? null : financialEvidence.has(shift.id), deferredStates?.get(shift.id)),
         grossSalesMilliunits: sGrossMilli,
         testingMilliunits: sTestMilli,
         netSalesMilliunits: sNetMilli,
@@ -1054,6 +1059,7 @@ export class FuelDailyOperationsService {
       outletName: outlet.name,
       businessDate,
       status: overallStatus,
+      deferredShiftClosureAvailable,
       operationalDsrStatus: operationalDsrStatus(overallStatus),
       financialReconciliationStatus: financialDayStatus(shiftSummaries.map(s => s.financialReconciliationStatus ?? 'UNKNOWN')),
       dayEntryStatus,

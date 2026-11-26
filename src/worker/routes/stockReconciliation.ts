@@ -59,8 +59,11 @@ stockReconciliation.post('/shifts/:shiftId/stock-reconciliation/compute', requir
     return c.json({ success: false, data: null, error: { code: 'FORBIDDEN', message: 'No authority over this shift outlet' } }, 403);
   }
 
+  if (shift.status !== 'OPEN')
+    return c.json({ success: false, error: { code: 'SHIFT_CLOSED', message: 'Stock reconciliation cannot be changed after operational closure.' } }, 409);
+
   try {
-    const results = await pumpRepo.calculateAndSaveShiftStockReconciliation(shiftId);
+    const results = await pumpRepo.calculateAndSaveShiftStockReconciliation(shiftId, { requireOpen: true });
 
     await auditRepo.logAction({
       id: `aud-${crypto.randomUUID()}`,

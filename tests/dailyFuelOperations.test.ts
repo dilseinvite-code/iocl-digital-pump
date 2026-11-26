@@ -7,6 +7,7 @@ import { seedDatabase } from '../src/db/seed';
 import { MonthlyOperationsReportService } from '../src/worker/services/monthlyOperationsReportService';
 import app from '../src/worker/app';
 import * as schema from '../src/db/schema';
+import { deferredShiftFinance } from '../src/db/deferredShiftFinanceTable';
 
 describe('Phase 3: Daily Fuel Operations + DSR Workflow', () => {
   let localD1: any;
@@ -170,6 +171,23 @@ describe('Phase 3: Daily Fuel Operations + DSR Workflow', () => {
     expect(json.data.byDispenser).toEqual([]);
   });
 
+  it('keeps historical closed shifts immutable and disables deferred closure without additive schema', async () => {
+    const legacy = await req('/api/v1/shifts/shift-seed-closed-1');
+    expect((await legacy.json() as any).data.deferredFinancialStatus).toBeUndefined();
+    expect((await req('/api/v1/shifts/shift-seed-closed-1/collections','POST',{collectionType:'CASH',amount:'100',collectedAt:nowIso})).status).toBe(409);
+    expect((await req('/api/v1/shifts/shift-seed-closed-1/finalize-finance','POST',{confirm:true})).status).toBe(409);
+    await localD1.exec('DROP TABLE deferred_shift_finance;');
+    const open = await req('/api/v1/outlets/ro-1001/shifts/open','POST',{shiftTemplateId:'st-ro1-1',businessDate:'2026-10-15'});
+    expect(open.status).toBe(201);
+    const shift = (await open.json() as any).data;
+    const noMigration = await req(`/api/v1/shifts/${shift.id}/close-operations`,'POST',{confirm:true});
+    expect(noMigration.status).toBe(409);
+    expect((await noMigration.json() as any).error.code).toBe('DEFERRED_FINANCE_UNAVAILABLE');
+    const summary = (await (await req('/api/v1/outlets/ro-1001/fuel/daily-summary?businessDate=2026-10-15')).json() as any).data;
+    expect(summary.deferredShiftClosureAvailable).toBe(false);
+    expect(summary.shifts[0].status).toBe('OPEN');
+  });
+
   it('2. daily-summary for open shift with partial readings -> IN_PROGRESS', async () => {
     // Open a shift on 2026-10-15
     const openRes = await req('/api/v1/outlets/ro-1001/shifts/open', 'POST', {
@@ -252,6 +270,12 @@ describe('Phase 3: Daily Fuel Operations + DSR Workflow', () => {
     });
     expect(nbRes.status).toBe(200);
 
+    // Operational closure never fabricates reconciliation or silently accepts an uncomputed stock report.
+    const premature = await req(`/api/v1/shifts/${shift.id}/close-operations`, 'POST', {confirm:true});
+    expect(premature.status).toBe(409);
+    expect((await premature.json() as any).error.code).toBe('STOCK_RECONCILIATION_REQUIRED');
+    expect((await (await req(`/api/v1/shifts/${shift.id}`)).json() as any).data.status).toBe('OPEN');
+
     // Compute reconciliation
     const reconRes = await req(`/api/v1/shifts/${shift.id}/stock-reconciliation/compute`, 'POST', {});
     expect(reconRes.status).toBe(200);
@@ -287,11 +311,79 @@ describe('Phase 3: Daily Fuel Operations + DSR Workflow', () => {
     expect(stale.completion.reconciliationComplete).toBe(false);
     expect(stale.missingFields.some((message: string) => message.includes('out of date'))).toBe(true);
 
+    const staleClose = await req(`/api/v1/shifts/${shift.id}/close-operations`, 'POST', {confirm:true});
+    expect(staleClose.status).toBe(409);
+    expect((await staleClose.json() as any).error.code).toBe('STOCK_RECONCILIATION_REQUIRED');
     const recompute = await req(`/api/v1/shifts/${shift.id}/stock-reconciliation/compute`, 'POST', {});
     expect(recompute.status).toBe(200);
     const refreshed = ((await (await req('/api/v1/outlets/ro-1001/fuel/daily-summary?businessDate=2026-10-15')).json()) as any).data;
     expect(refreshed.operationalDsrStatus).toBe('COMPLETED');
     expect(refreshed.financialReconciliationStatus).toBe('PENDING');
+
+    // Two-stage workflow: operational closure is separate, durable and auditable.
+    expect(refreshed.deferredShiftClosureAvailable).toBe(true);
+    expect((await req(`/api/v1/shifts/${shift.id}/close-operations`, 'POST', {})).status).toBe(400);
+    const competingClosures = await Promise.all([1,2].map(()=>req(`/api/v1/shifts/${shift.id}/close-operations`, 'POST', {confirm:true})));
+    expect(competingClosures.map(r=>r.status).sort()).toEqual([200,409]);
+    const closeOps = competingClosures.find(r=>r.status===200)!;
+    expect(closeOps.status, await closeOps.clone().text()).toBe(200);
+    const closed = (await closeOps.json() as any).data;
+    expect(closed.status).toBe('CLOSED');
+    expect(closed.deferredFinancialStatus).toBe('PENDING');
+    expect(await db.select().from(schema.shiftFinancialReconciliations)
+      .where(eq(schema.shiftFinancialReconciliations.operationalShiftId, shift.id))).toHaveLength(0);
+    expect(await db.select().from(schema.shiftCollections)
+      .where(eq(schema.shiftCollections.operationalShiftId, shift.id))).toHaveLength(0);
+    const pendingDay = (await (await req('/api/v1/outlets/ro-1001/fuel/daily-summary?businessDate=2026-10-15')).json() as any).data;
+    expect(pendingDay.operationalDsrStatus).toBe('COMPLETED');
+    expect(pendingDay.financialReconciliationStatus).toBe('PENDING');
+    expect((await req(`/api/v1/shifts/${shift.id}/close-operations`, 'POST', {confirm:true})).status).toBe(409);
+    expect((await req(`/api/v1/shifts/${shift.id}/tank-readings/batch`, 'POST', {readings:tankBatchPayload})).status).toBe(409);
+    expect((await req(`/api/v1/shifts/${shift.id}/readings/batch`, 'POST', {readings:nozzleBatchPayload})).status).toBe(409);
+    expect((await req(`/api/v1/shifts/${shift.id}/stock-reconciliation/compute`, 'POST', {})).status).toBe(409);
+
+    // Next shift must be allowed. Finance must not transition the old shift
+    // back to CLOSING, overwrite its closedAt, or close the new shift.
+    const next = await req('/api/v1/outlets/ro-1001/shifts/open','POST',{shiftTemplateId:'st-ro1-1',businessDate:'2026-10-16'});
+    expect(next.status, await next.clone().text()).toBe(201);
+    const nextShift = (await next.json() as any).data;
+    const nextBoot = (await (await req('/api/v1/outlets/ro-1001/daily-operations?businessDate=2026-10-16')).json() as any).data;
+    expect(nextBoot.shifts[0].nozzles[0].suggestedOpeningTotalizer).toBe(nozzleBatchPayload.find((n:any)=>n.nozzleId===nextBoot.shifts[0].nozzles[0].nozzleId)?.closingTotalizer);
+    expect((await req(`/api/v1/shifts/${shift.id}/finalize-finance`,'POST',{confirm:true},dealerToken)).status).toBe(403);
+    const payment = {collectionType:'CASH', amount:'100.00', collectedAt:nowIso};
+    expect((await req(`/api/v1/shifts/${shift.id}/collections`,'POST',payment,dealerToken)).status).toBe(403);
+    const collectionRes = await req(`/api/v1/shifts/${shift.id}/collections`,'POST',payment);
+    expect(collectionRes.status, await collectionRes.clone().text()).toBe(201);
+    const collection = (await collectionRes.json() as any).data;
+    expect((await req(`/api/v1/collections/${collection.id}`,'PATCH',{...payment,amount:'125.00'})).status).toBe(200);
+    expect((await req(`/api/v1/shifts/${shift.id}/finalize-finance`,'POST',{confirm:true})).status).toBe(409);
+    // Audit failure must roll back the reconciliation and completion marker together.
+    await localD1.exec(`CREATE TRIGGER test_deferred_finance_audit_abort BEFORE INSERT ON audit_logs
+      WHEN NEW.action='FINANCIAL_RECONCILIATION' BEGIN SELECT RAISE(ABORT,'simulated audit failure'); END;`);
+    const fault = await req(`/api/v1/shifts/${shift.id}/finalize-finance`,'POST',{confirm:true,varianceReason:'Verified test shortage'});
+    expect(fault.status).toBe(409);
+    expect(await db.select().from(schema.shiftFinancialReconciliations).where(eq(schema.shiftFinancialReconciliations.operationalShiftId,shift.id))).toHaveLength(0);
+    expect((await db.select().from(deferredShiftFinance).where(eq(deferredShiftFinance.operationalShiftId,shift.id)))[0].financeStatus).toBe('PENDING');
+    await localD1.exec('DROP TRIGGER test_deferred_finance_audit_abort;');
+    const competingFinalizations = await Promise.all([1,2].map(()=>req(`/api/v1/shifts/${shift.id}/finalize-finance`,'POST',{confirm:true,varianceReason:'Verified test shortage'})));
+    expect(competingFinalizations.map(r=>r.status).sort()).toEqual([200,409]);
+    const financial = competingFinalizations.find(r=>r.status===200)!;
+    expect(financial.status, await financial.clone().text()).toBe(200);
+    const completed = (await financial.json() as any).data;
+    expect(completed.closedAt).toBe(closed.closedAt);
+    expect(completed.deferredFinancialStatus).toBe('COMPLETED');
+    const afterFinance = (await (await req('/api/v1/outlets/ro-1001/fuel/daily-summary?businessDate=2026-10-15')).json() as any).data;
+    expect(afterFinance.financialReconciliationStatus).toBe('COMPLETED');
+    expect((await req(`/api/v1/shifts/${shift.id}/collections`,'POST',payment)).status).toBe(409);
+    expect((await req(`/api/v1/collections/${collection.id}`,'DELETE')).status).toBe(409);
+    expect((await req(`/api/v1/shifts/${shift.id}/finalize-finance`,'POST',{confirm:true})).status).toBe(409);
+    expect((await (await req(`/api/v1/shifts/${nextShift.id}`)).json() as any).data.status).toBe('OPEN');
+    const rows = await db.select().from(schema.shiftFinancialReconciliations).where(eq(schema.shiftFinancialReconciliations.operationalShiftId,shift.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cashCollectionPaise).toBe(12500);
+    const audits = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.entityId,shift.id));
+    expect(audits.filter(a=>a.action==='SHIFT_OPERATIONAL_CLOSE')).toHaveLength(1);
+    expect(audits.filter(a=>a.action==='FINANCIAL_RECONCILIATION')).toHaveLength(1);
   });
 
   it('4. tank opening dip converts to volume using calibration chart', async () => {
