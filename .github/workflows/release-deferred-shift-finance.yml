@@ -21,7 +21,7 @@ jobs:
       - name: Require exact evaluated feature revision
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "91659999646cc13253f8a37b7758acc872431c60"
+          test "$(git rev-parse HEAD^)" = "5e14d9934e2931b10813d3944bf593c4417f865e"
           test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = ".github/workflows/release-deferred-shift-finance.yml"
           test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
       - uses: oven-sh/setup-bun@v2
@@ -84,9 +84,18 @@ jobs:
             'global_tank_calibration_templates','global_tank_calibration_template_points'
           ];
           function counts() {
-            const rows = query(protectedTables.map(name => "SELECT '" + name + "' AS name, COUNT(*) AS n FROM \"" + name + "\"").join(' UNION ALL '));
-            guard(rows.length === protectedTables.length && rows.every(r => Number.isSafeInteger(r.n)), 'Could not capture all protected-table counts');
-            return Object.fromEntries(rows.map(r=>[r.name,r.n]));
+            const names = new Set(query("SELECT name FROM sqlite_master WHERE type='table'").map(r=>r.name));
+            const missing = protectedTables.filter(t=>!names.has(t));
+            guard(missing.length === 0, 'Required protected tables missing: ' + missing.join(', '));
+            const result = {};
+            for (const name of protectedTables) {
+              try {
+                const rows = query('SELECT COUNT(*) AS n FROM "' + name + '"');
+                guard(rows.length === 1 && Number.isSafeInteger(rows[0].n), 'Invalid count result');
+                result[name] = rows[0].n;
+              } catch { throw Error('Read-only count check failed for ' + name); }
+            }
+            return result;
           }
           const norm = sql => sql.replace(/--[^\n]*/g,'').replace(/\bIF\s+NOT\s+EXISTS\s+/gi,'').replace(/\s+/g,' ').replace(/;\s*$/,'').trim().toLowerCase();
           function schema() {
