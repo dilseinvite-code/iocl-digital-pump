@@ -57,6 +57,8 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
   const [approving,setApproving]=useState(false);
   const [acknowledgedApproval,setAcknowledgedApproval]=useState(false);
   const [installingPdf,setInstallingPdf]=useState(false);
+  const [upgradingIocl,setUpgradingIocl]=useState(false);
+  const [confirmIocl,setConfirmIocl]=useState(false);
   const loadTemplates=async()=>{
     const result=await apiFetch<GlobalTankCalibrationTemplate[]>('/api/v1/calibration-templates');
     if(!result.success || !result.data)throw new Error(result.error?.message || 'Could not load calibration charts');
@@ -134,6 +136,18 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
       setNotice(created.length?'Saved separate PDF-based '+created.join(' and ')+' chart versions. Existing tanks and history remain unchanged.':'Both PDF chart versions are already saved. No duplicates created.');
     }catch(e:any){setError(e.message||'Could not install operator PDF charts');}
     finally{setInstallingPdf(false);}
+  };
+  const upgradeIocl=async()=>{
+    if(!canWriteTankCalibration||!canApproveCalibrationChart||!confirmIocl||upgradingIocl)return;
+    setUpgradingIocl(true);setError('');setNotice('');
+    try{
+      const res=await apiFetch<{upgraded:number;retainedTankIds:string[]}>('/api/v1/calibration-templates/upgrade-iocl-10-20',{
+        method:'POST',body:JSON.stringify({confirm:'USE IOCL 26 NOV 2026'})
+      });
+      if(!res.success||!res.data)throw new Error(res.error?.message||'Could not upgrade references.');
+      clearApiCache();await Promise.all([loadTemplates(),loadDefaults()]);setConfirmIocl(false);
+      setNotice('Corrected 10/20 KL defaults saved. '+res.data.upgraded+' linked tank revisions upgraded. Historical data and tank status retained.'+(res.data.retainedTankIds.length?' '+res.data.retainedTankIds.length+' other tank(s) need individual chart review.':''));
+    }catch(e:any){setError(e.message||'Upgrade failed.');}finally{setUpgradingIocl(false);}
   };
   const setDefault=async()=>{
     if(!chosen||!canSetAsDefault||settingDefault)return;
@@ -377,6 +391,13 @@ export const SimpleGlobalCalibrationManager:React.FC<Props> = ({
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="simple-saved-calibrations">
       <h3 className="font-bold text-[#17365D]">Calibration library</h3>
       <p className="mt-1 text-xs text-slate-500">Save the chart for each capacity once. If multiple saved charts share a capacity, choose one as its default below. Add Underground Tank will then ask for only name and capacity.</p>
+      {canWriteTankCalibration&&canApproveCalibrationChart&&defaultsLoaded&&[10000,20000].some(capacity=>!templates.some(t=>t.code===operatorPdfSource(capacity)?.code&&t.id===defaultCharts[capacity]))&&
+        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2" data-testid="upgrade-iocl-10-20">
+          <h4 className="font-semibold text-[#17365D]">Corrected IOCL 10 / 20 KL charts — 26 Nov 2026</h4>
+          <p className="text-xs text-slate-700">Use the 406 corrected reference points (21 changed readings). Replace exact previous linked revisions; retain all historical readings, tank status and limits. Close open shifts first. Custom charts are not replaced.</p>
+          <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={confirmIocl} disabled={upgradingIocl} onChange={e=>setConfirmIocl(e.target.checked)}/>I confirm these corrected reference charts apply to the existing tanks linked to the previous supplied charts.</label>
+          <button type="button" disabled={!confirmIocl||upgradingIocl} onClick={()=>void upgradeIocl()} className="rounded-lg bg-[#17365D] text-white px-4 py-2 text-sm font-semibold disabled:opacity-50">{upgradingIocl?'Updating charts…':'Apply corrected IOCL charts'}</button>
+        </div>}
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" data-testid="capacity-calibration-picker">
         {capacityCards.map(({capacity,template})=><button key={capacity} type="button"
           onClick={()=>{if(template){setSelectedCode(template.code);setShowReadings(false);}
