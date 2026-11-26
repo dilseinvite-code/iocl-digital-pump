@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db';
 import * as schema from '../../db/schema';
 import { PumpRepository } from '../repositories/pumpRepository';
@@ -20,7 +20,7 @@ import { PERMISSIONS, ROLES } from '../../shared/constants';
 import { parseMilliunits, formatMilliunits } from '../../shared/precision';
 import {TEN_KL_TEMPLATE_CODE,limitTenKlCalibrationCurve} from '../../shared/tenKlCalibrationLimit';
 import {isOperatorSuppliedReference} from '../../shared/operatorSuppliedCalibration';
-import {isOperatorPdfSourceCode,operatorPdfCodeForCapacity,operatorPdfSource,matchesExactOperatorPdfRows} from '../../shared/operatorPdfSourceData';
+import {isOperatorPdfSourceCode,operatorPdfCodeForCapacity,operatorPdfSource,matchesExactOperatorPdfRows,previousOperatorPdfCode,matchesPreviousOperatorPdfRows} from '../../shared/operatorPdfSourceData';
 
 export const tankCalibration = new Hono<{ Bindings: EnvBindings }>();
 
@@ -1722,6 +1722,93 @@ async function getReplacementPlan(db:ReturnType<typeof getDb>){
    replacement10klPoints:195,replacement20klPoints:211,
    untouched:'15 KL, 50 KL and all other capacities'}};
 }
+// Versioned correction of the existing operator 10/20 KL references. Never purge history or deactivate tanks.
+tankCalibration.post('/calibration-templates/upgrade-iocl-10-20',
+ requirePermission(PERMISSIONS.TANK_CALIBRATION_WRITE) as any,async(c:AppContext)=>{
+  if(!canReplaceCalibration(c))return c.json({success:false,data:null,error:{code:'FORBIDDEN',message:'Administrator tank permissions are required.'}},403);
+  const body=await c.req.json().catch(()=>null);
+  if(body?.confirm!=='USE IOCL 26 NOV 2026')return c.json({success:false,data:null,error:{code:'CONFIRMATION_REQUIRED',message:'Confirm the corrected IOCL reference upgrade.'}},400);
+  const db=getDb(c.env.DB),userId=c.var.user!.user.id,now=new Date().toISOString();
+  const plan=await getReplacementPlan(db);
+  if(plan.openShifts)return c.json({success:false,data:plan.counts,error:{code:'SHIFT_OPEN',message:'Close all open or closing shifts before upgrading the references.'}},409);
+  const batch:any[]=[];const upgrades:Array<{tankId:string;oldChartId:string;newChartId:string;status:string;capacity:number}>=[];
+  const installed:Array<{capacity:number;templateId:string;points:number}>=[];
+  const retained:string[]=[];
+  const reject=(message:string)=>c.json({success:false,data:null,error:{code:'UPGRADE_REVIEW_REQUIRED',message}},409);
+  for(const capacity of REPLACED_CAPACITIES){
+   const source=operatorPdfSource(capacity)!;
+   const old=plan.templates.find(t=>t.code===previousOperatorPdfCode(capacity));
+   const existing=plan.templates.find(t=>t.code===source.code);
+   const id=existing?.id||'gtct-iocl-'+capacity+'-'+crypto.randomUUID().slice(0,8);
+   if(existing){
+    const points=await db.select().from(schema.globalTankCalibrationTemplatePoints).where(eq(schema.globalTankCalibrationTemplatePoints.templateId,id)).orderBy(schema.globalTankCalibrationTemplatePoints.dipMillimetresMilliunits);
+    if(!matchesExactOperatorPdfRows(capacity,points)||existing.nominalCapacityLitres!==capacity||
+       existing.tankDiameterMmMilliunits!==source.tankDiameterMm*1000||existing.tankLengthMmMilliunits!==source.tankLengthMm*1000||
+       existing.maxDipMmMilliunits!==source.maxDipMm*1000||!['APPROVED','ACTIVE'].includes(existing.status))return reject('Existing corrected source does not match the supplied chart. No changes applied.');
+   }else{
+    batch.push(db.insert(schema.globalTankCalibrationTemplates).values({
+     id,code:source.code,name:source.name,nominalCapacityLitres:capacity,
+     tankDiameterMmMilliunits:source.tankDiameterMm*1000,tankLengthMmMilliunits:source.tankLengthMm*1000,
+     maxDipMmMilliunits:source.maxDipMm*1000,revisionNumber:(old?.revisionNumber||0)+1,status:'APPROVED',
+     sourceFileName:'IOCL calibration chart photo '+capacity/1000+'KL',referenceDocument:'Operator-supplied IOCL chart, 26 November 2026',
+     notes:'Corrected literal photo readings. No independent tank certificate implied.',
+     createdBy:userId,createdAt:now,updatedAt:now,approvedBy:userId,approvedAt:now,
+    }));
+    for(let offset=0;offset<source.points.length;offset+=12)batch.push(db.insert(schema.globalTankCalibrationTemplatePoints).values(
+     source.points.slice(offset,offset+12).map(p=>({id:'gtcp-'+crypto.randomUUID(),templateId:id,dipMillimetresMilliunits:p.dipMm*1000,volumeMilliunits:Math.round(p.volumeLitres*1000),createdBy:userId,createdAt:now}))
+    ));
+   }
+   installed.push({capacity,templateId:id,points:source.points.length});
+   if(old){
+    // Only the exact old source and its exact copied revisions qualify for automatic upgrade.
+    const oldRows=await db.select().from(schema.globalTankCalibrationTemplatePoints).where(eq(schema.globalTankCalibrationTemplatePoints.templateId,old.id)).orderBy(schema.globalTankCalibrationTemplatePoints.dipMillimetresMilliunits);
+    const candidates=plan.allCharts.filter(ch=>ch.sourceTemplateId===old.id&&['ACTIVE','DRAFT','APPROVED'].includes(ch.status));
+    if(candidates.length&&!matchesPreviousOperatorPdfRows(capacity,oldRows))return reject('Previous global source differs from the expected prior reference. No changes applied.');
+    for(const ch of candidates){
+     const tank=plan.affected.find(t=>t.id===ch.tankId);
+     if(!tank||tank.capacity!==capacity||!['ACTIVE','INACTIVE'].includes(tank.status))return reject('A linked tank requires individual review: '+ch.tankId);
+     if(ch.status!=='ACTIVE'&&plan.historical.has(ch.id))return reject('A draft/approved revision is historically referenced: '+ch.id);
+     if(ch.tankDiameterMmMilliunits!==source.tankDiameterMm*1000||ch.tankLengthMmMilliunits!==source.tankLengthMm*1000||ch.maxDipMmMilliunits!==source.maxDipMm*1000)return reject('Tank chart dimensions differ: '+ch.tankId);
+     const copied=await db.select().from(schema.tankCalibrationPoints).where(eq(schema.tankCalibrationPoints.chartId,ch.id)).orderBy(schema.tankCalibrationPoints.dipMillimetresMilliunits);
+     if(!matchesPreviousOperatorPdfRows(capacity,copied))return reject('Tank chart contains custom or incomplete readings: '+ch.tankId);
+     const sibling=plan.allCharts.filter(x=>x.tankId===ch.tankId);
+     if(sibling.some(x=>x.id!==ch.id&&['DRAFT','APPROVED'].includes(x.status)))return reject('A protected parallel draft/approved revision exists: '+ch.tankId);
+     const nextRev=Math.max(0,...sibling.map(x=>x.revisionNumber),...upgrades.filter(x=>x.tankId===ch.tankId).map(()=>0))+1;
+     const nextId='tcc-'+ch.tankId+'-r'+nextRev+'-'+crypto.randomUUID().slice(0,8);
+     batch.push(db.update(schema.tankCalibrationCharts).set({status:ch.status==='ACTIVE'?'SUPERSEDED':'ARCHIVED',effectiveTo:now.slice(0,10),updatedAt:now,updatedBy:userId}).where(eq(schema.tankCalibrationCharts.id,ch.id)));
+     batch.push(db.insert(schema.tankCalibrationCharts).values({
+      id:nextId,tankId:ch.tankId,sourceTemplateId:id,revisionNumber:nextRev,status:ch.status,
+      chartUnitDip:'MM',chartUnitVolume:'LITRES',tankDiameterMmMilliunits:source.tankDiameterMm*1000,
+      tankLengthMmMilliunits:source.tankLengthMm*1000,maxDipMmMilliunits:source.maxDipMm*1000,chartCapacityMilliunits:Math.round(source.maxVolumeLitres*1000),
+      sourceFileName:'IOCL corrected calibration chart photo',referenceDocument:source.code,
+      notes:'Versioned correction of the previous exact supplied chart; tank status and limits unchanged. Historical readings retained.',
+      effectiveFrom:now.slice(0,10),effectiveTo:null,approvedBy:ch.status==='DRAFT'?null:userId,approvedAt:ch.status==='DRAFT'?null:now,
+      createdAt:now,createdBy:userId,updatedAt:now,updatedBy:userId,
+     }));
+     // One INSERT SELECT per tank; exact source values, no per-tank recalculation.
+     batch.push(db.insert(schema.tankCalibrationPoints).select(db.select({
+      id:sql<string>`${nextId} || '-' || ${schema.globalTankCalibrationTemplatePoints.dipMillimetresMilliunits}`,
+      chartId:sql<string>`${nextId}`,tankId:sql<string>`${ch.tankId}`,
+      dipMillimetresMilliunits:schema.globalTankCalibrationTemplatePoints.dipMillimetresMilliunits,
+      volumeMilliunits:schema.globalTankCalibrationTemplatePoints.volumeMilliunits,
+      createdAt:sql<string>`${now}`,createdBy:sql<string>`${userId}`,
+     }).from(schema.globalTankCalibrationTemplatePoints).where(eq(schema.globalTankCalibrationTemplatePoints.templateId,id))));
+     upgrades.push({tankId:ch.tankId,oldChartId:ch.id,newChartId:nextId,status:ch.status,capacity});
+    }
+    batch.push(db.update(schema.globalTankCalibrationTemplates).set({status:'ARCHIVED',updatedAt:now}).where(eq(schema.globalTankCalibrationTemplates.id,old.id)));
+   }
+   // Do not silently replace custom/nonmatching charts; report them for review.
+   for(const ch of plan.allCharts.filter(ch=>['ACTIVE','DRAFT','APPROVED'].includes(ch.status)&&ch.sourceTemplateId!==old?.id&&ch.sourceTemplateId!==id&&plan.affected.some(t=>t.id===ch.tankId&&t.capacity===capacity)))retained.push(ch.tankId);
+   batch.push(db.insert(schema.globalTankCapacityDefaults).values({capacityLitres:capacity,templateId:id,updatedAt:now,updatedBy:userId}).onConflictDoUpdate({target:schema.globalTankCapacityDefaults.capacityLitres,set:{templateId:id,updatedAt:now,updatedBy:userId}}));
+   batch.push(db.update(schema.pendingUndergroundTanks).set({templateId:id,updatedAt:now}).where(and(eq(schema.pendingUndergroundTanks.capacityLitres,capacity),eq(schema.pendingUndergroundTanks.status,'PENDING_FUEL'))));
+  }
+  batch.push(db.insert(schema.auditLogs).values({id:'aud-'+crypto.randomUUID(),userId,action:'UPGRADE_IOCL_10_20_2026_11_26',entityType:'GLOBAL_TANK_CALIBRATION_RESET',entityId:'10KL_20KL',newValueJson:JSON.stringify({installed,upgrades,retained,historicalRowsPreserved:true,tankStatusUnchanged:true}),createdAt:now,ipAddress:c.req.header('cf-connecting-ip')||null,userAgent:c.req.header('user-agent')||null}));
+  try{
+   await (db as any).batch(batch);
+   return c.json({success:true,data:{installed,upgraded:upgrades.length,retainedTankIds:[...new Set(retained)],historicalRowsPreserved:true},error:null});
+  }catch(e:any){return c.json({success:false,data:null,error:{code:'UPGRADE_FAILED',message:'No changes applied. '+(e.message||'Atomic chart upgrade failed.')}},500);}
+});
+
 tankCalibration.get('/calibration-templates/replace-10-20-preview',
  requirePermission(PERMISSIONS.TANK_CALIBRATION_READ) as any,async(c:AppContext)=>{
   if(!canReplaceCalibration(c))return c.json({success:false,data:null,error:{code:'FORBIDDEN',message:'Administrator tank permissions are required.'}},403);

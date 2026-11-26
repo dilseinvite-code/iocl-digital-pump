@@ -38,7 +38,7 @@ export const SCANNED_CALIBRATION_REFERENCES: Readonly<Record<10000 | 20000, Scan
     printedCheckpoints: [
       { dipMm: 0, volumeLitres: 0 },
       { dipMm: 10, volumeLitres: 6.90 },
-      { dipMm: 410, volumeLitres: 1706.23 },
+      { dipMm: 410, volumeLitres: 1705.23 },
       { dipMm: 810, volumeLitres: 4378.94 },
       { dipMm: 1940, volumeLitres: 11073.41 },
     ],
