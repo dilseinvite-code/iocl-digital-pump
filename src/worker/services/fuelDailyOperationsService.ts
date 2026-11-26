@@ -13,6 +13,7 @@ import {
   fuelReceipts,
   fuelReceiptTankLines,
   shiftStockReconciliations,
+  shiftFinancialReconciliations,
   retailOutlets,
 } from '../../db/schema';
 import {
@@ -31,6 +32,7 @@ import {
 } from '../../shared/types';
 import { formatMilliunits } from '../../shared/precision';
 import { PumpRepository } from '../repositories/pumpRepository';
+import { financialDayStatus, financialShiftStatus, operationalDsrStatus } from '../../shared/dsrWorkflowStatus';
 
 export interface ProductDailyComputationInput {
   businessDate: string;
@@ -486,6 +488,8 @@ export class FuelDailyOperationsService {
         outletName: outlet.name,
         businessDate,
         status: 'NOT_STARTED',
+        operationalDsrStatus: 'NOT_STARTED',
+        financialReconciliationStatus: 'NOT_STARTED',
         dayEntryStatus: 'NO_ENTRY',
         shiftsCount: 0,
         shifts: [],
@@ -584,6 +588,16 @@ export class FuelDailyOperationsService {
         .innerJoin(fuelReceipts, eq(fuelReceiptTankLines.fuelReceiptId, fuelReceipts.id))
         .where(inArray(fuelReceipts.operationalShiftId, shiftIds)),
     ]);
+
+    // Only fetch the presence of persisted financial reconciliation evidence.
+    // No collection amounts or finance details are exposed through this DSR.
+    // If this lookup fails, keep the operational report available and mark finance unknown.
+    const financialEvidence = await db
+      .select({ shiftId: shiftFinancialReconciliations.operationalShiftId })
+      .from(shiftFinancialReconciliations)
+      .where(and(eq(shiftFinancialReconciliations.outletId, outletId),
+        inArray(shiftFinancialReconciliations.operationalShiftId, shiftIds)))
+      .then(rows => new Set(rows.map(row => row.shiftId)), () => null);
 
     // Check active calibration points for all unique tanks in snapshots
     const repo = new PumpRepository(db);
@@ -895,9 +909,34 @@ export class FuelDailyOperationsService {
           ? sTanks.every((t) => sRecons.some((r) => r.tankId === t.tankId))
           : sRecons.length > 0 || shift.status === 'CLOSED' || shift.status === 'LOCKED';
 
-      if (!sReconComplete) {
+      // An open shift may have edited readings after stock reconciliation was saved.
+      // Compare the persisted quantities with the current, already loaded source values
+      // using the same measured receipt and net meter sales convention as the repository.
+      const reconStale = sReconComplete && shift.status === 'OPEN' && sTanks.some(t => {
+        const saved = sRecons.find(r => r.tankId === t.tankId);
+        const opening = sTankReadings.find(r => r.tankId === t.tankId && r.readingType === 'OPENING');
+        const closing = sTankReadings.find(r => r.tankId === t.tankId && r.readingType === 'CLOSING');
+        if (!saved || !opening || !closing) return true;
+        const receipts = completedReceiptLines.filter(r => r.operationalShiftId === shift.id && r.tankId === t.tankId)
+          .reduce((sum, r) => sum + (r.measuredReceivedQuantityMilliunits ?? 0), 0);
+        const sales = sNozzles.filter(n => n.tankId === t.tankId)
+          .reduce((sum, n) => sum + (sNozzleReadings.find(r => r.nozzleId === n.nozzleId)?.netSalesQuantityMilliunits ?? 0), 0);
+        const book = opening.netProductVolumeMilliunits + receipts - sales;
+        const variance = closing.netProductVolumeMilliunits - book;
+        return saved.productId !== t.productId ||
+          saved.openingStockMilliunits !== opening.netProductVolumeMilliunits ||
+          saved.physicalClosingStockMilliunits !== closing.netProductVolumeMilliunits ||
+          saved.receiptQuantityMilliunits !== receipts ||
+          saved.salesQuantityMilliunits !== sales ||
+          saved.theoreticalClosingStockMilliunits !== book ||
+          saved.varianceMilliunits !== variance ||
+          saved.varianceStatus !== (variance > 0 ? 'GAIN' : variance < 0 ? 'LOSS' : 'BALANCED');
+      });
+      if (!sReconComplete || reconStale) {
         allShiftsReconciled = false;
-        const msg = `Shift #${shiftNumber} stock reconciliation pending`;
+        const msg = reconStale
+          ? `Shift #${shiftNumber} saved stock reconciliation is out of date; review and recompute`
+          : `Shift #${shiftNumber} stock reconciliation pending`;
         if (!globalMissingFields.includes(msg)) globalMissingFields.push(msg);
       }
 
@@ -922,7 +961,9 @@ export class FuelDailyOperationsService {
         expectedNozzles: sNozzles.length,
         nozzleMeterReadings: sMeterReadings,
         unavailableNozzles: sUnavailable,
-        reconciliationComplete: sReconComplete,
+        reconciliationComplete: sReconComplete && !reconStale,
+        financialReconciliationStatus: financialShiftStatus(shift.status,
+          financialEvidence === null ? null : financialEvidence.has(shift.id)),
         grossSalesMilliunits: sGrossMilli,
         testingMilliunits: sTestMilli,
         netSalesMilliunits: sNetMilli,
@@ -1013,6 +1054,8 @@ export class FuelDailyOperationsService {
       outletName: outlet.name,
       businessDate,
       status: overallStatus,
+      operationalDsrStatus: operationalDsrStatus(overallStatus),
+      financialReconciliationStatus: financialDayStatus(shiftSummaries.map(s => s.financialReconciliationStatus ?? 'UNKNOWN')),
       dayEntryStatus,
       shiftsCount: shifts.length,
       shifts: shiftSummaries,

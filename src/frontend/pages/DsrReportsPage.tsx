@@ -6,6 +6,7 @@ import { useShiftWorkbench } from '../context/ShiftWorkbenchContext';
 import { apiFetch } from '../services/api';
 import { PERMISSIONS } from '../../shared/constants';
 import type { DailyFuelSummary } from '../../shared/types';
+import { dsrStatusLabel, getDsrWorkflowStatus } from '../../shared/dsrWorkflowStatus';
 import { getLocalDateInputValue, getLocalMonthInputValue } from '../../shared/utils/dateUtils';
 import { formatMilliunits } from '../../shared/precision';
 import { dsrDates, dsrPeriodProducts, dsrProductColumns, dsrProductValues, type DsrPeriod } from '../utils/dsrReport';
@@ -108,11 +109,11 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <h3 className="p-4 font-semibold text-[#17365D]">Day-wise DSR records</h3>
         {days.map(d=><details key={d.businessDate} className="border-t border-slate-200" open={days.length===1?true:undefined}>
-          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#17365D]">{d.businessDate} · {d.dayEntryStatus.replaceAll('_',' ')} · {d.shiftsCount} shift(s)</summary>
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#17365D]">{d.businessDate} · Operational DSR: {dsrStatusLabel(getDsrWorkflowStatus(d).operational)} · Financial Reconciliation: {dsrStatusLabel(getDsrWorkflowStatus(d).financial)} · {d.shiftsCount} shift(s)</summary>
           {d.dayEntryStatus==='NO_ENTRY'?<p className="px-4 pb-4 text-sm text-slate-500">No saved DSR data for this date.</p>:<div className="p-4 overflow-x-auto"><table className="min-w-[1040px] w-full text-xs text-left"><thead className="bg-slate-100"><tr>{['Product','Unit','Status',...dsrProductColumns].map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead><tbody>{d.byProduct.map(p=><tr key={p.productId} className="border-b border-slate-100">{[p.productCode,p.unit,p.status,...dsrProductValues(p)].map((v,i)=><td key={i} className="p-2 whitespace-nowrap">{v}</td>)}</tr>)}</tbody></table>{d.missingFields.length>0&&<p className="mt-2 text-xs text-amber-800">{d.missingFields.join('; ')}</p>}<p className="mt-2 text-xs text-slate-500">Full dispenser and nozzle meter statement is included in the PDF.</p></div>}
         </details>)}
       </div>
-      <p className="text-xs text-slate-500">Retrieved {retrievedAt}. This report reflects currently saved operational data, not an immutable historical snapshot. No data is written.</p>
+      <p className="text-xs text-slate-500">Retrieved {retrievedAt}. This report reflects currently saved operational data, not an immutable historical snapshot. Operational completeness does not certify collections or final shift closure. No data is written.</p>
     </>}
   </div>;
 }

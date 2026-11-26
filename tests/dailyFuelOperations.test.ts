@@ -162,6 +162,8 @@ describe('Phase 3: Daily Fuel Operations + DSR Workflow', () => {
     const json: any = await res.json();
     expect(json.success).toBe(true);
     expect(json.data.status).toBe('NOT_STARTED');
+    expect(json.data.operationalDsrStatus).toBe('NOT_STARTED');
+    expect(json.data.financialReconciliationStatus).toBe('NOT_STARTED');
     expect(json.data.dayEntryStatus).toBe('NO_ENTRY');
     expect(json.data.shiftsCount).toBe(0);
     expect(json.data.byProduct).toEqual([]);
@@ -190,6 +192,8 @@ describe('Phase 3: Daily Fuel Operations + DSR Workflow', () => {
     expect(sumRes.status).toBe(200);
     const summary = ((await sumRes.json()) as any).data;
     expect(summary.status).toBe('IN_PROGRESS');
+    expect(summary.operationalDsrStatus).toBe('IN_PROGRESS');
+    expect(summary.financialReconciliationStatus).toBe('PENDING');
     expect(summary.shiftsCount).toBe(1);
     expect(summary.completion.nozzleMeterReadings).toBe(1);
     expect(summary.completion.expectedNozzles).toBeGreaterThan(1);
@@ -259,6 +263,35 @@ describe('Phase 3: Daily Fuel Operations + DSR Workflow', () => {
     expect(summary.dayEntryStatus).toBe('COMPLETE');
     expect(summary.completion.reconciliationComplete).toBe(true);
     expect(summary.missingFields).toEqual([]);
+
+    // Operational completion must not imply finance completion, write collections,
+    // or change shift status. A later changed reading must invalidate stale stock evidence.
+    expect(summary.operationalDsrStatus).toBe('COMPLETED');
+    expect(summary.financialReconciliationStatus).toBe('PENDING');
+    expect(summary.shifts[0].financialReconciliationStatus).toBe('PENDING');
+    expect(summary.shifts[0].status).toBe('OPEN');
+    const db = getDb(localD1);
+    expect(await db.select().from(schema.shiftFinancialReconciliations)
+      .where(eq(schema.shiftFinancialReconciliations.operationalShiftId, shift.id))).toHaveLength(0);
+    expect(await db.select().from(schema.shiftCollections)
+      .where(eq(schema.shiftCollections.operationalShiftId, shift.id))).toHaveLength(0);
+
+    const revisedTank = tankBatchPayload.find((r: any) => r.readingType === 'CLOSING');
+    const changed = await req(`/api/v1/shifts/${shift.id}/tank-readings/batch`, 'POST', {
+      readings: [{ ...revisedTank, productDipMm: '901.000' }],
+    });
+    expect(changed.status).toBe(200);
+    const stale = ((await (await req('/api/v1/outlets/ro-1001/fuel/daily-summary?businessDate=2026-10-15')).json()) as any).data;
+    expect(stale.operationalDsrStatus).toBe('IN_PROGRESS');
+    expect(stale.financialReconciliationStatus).toBe('PENDING');
+    expect(stale.completion.reconciliationComplete).toBe(false);
+    expect(stale.missingFields.some((message: string) => message.includes('out of date'))).toBe(true);
+
+    const recompute = await req(`/api/v1/shifts/${shift.id}/stock-reconciliation/compute`, 'POST', {});
+    expect(recompute.status).toBe(200);
+    const refreshed = ((await (await req('/api/v1/outlets/ro-1001/fuel/daily-summary?businessDate=2026-10-15')).json()) as any).data;
+    expect(refreshed.operationalDsrStatus).toBe('COMPLETED');
+    expect(refreshed.financialReconciliationStatus).toBe('PENDING');
   });
 
   it('4. tank opening dip converts to volume using calibration chart', async () => {
@@ -362,6 +395,8 @@ describe('Phase 3: Daily Fuel Operations + DSR Workflow', () => {
     expect(sumRes.status).toBe(200);
     const summary = ((await sumRes.json()) as any).data;
     expect(summary.status).toBe('BLOCKED');
+    expect(summary.operationalDsrStatus).toBe('BLOCKED');
+    expect(summary.financialReconciliationStatus).toBe('PENDING');
     expect(summary.completion.uncalibratedTanksCount).toBe(1);
     expect(summary.missingFields.some((m: string) => m.includes('TANK CALIBRATION REQUIRED'))).toBe(
       true
