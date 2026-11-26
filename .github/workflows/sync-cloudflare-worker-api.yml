@@ -1,6 +1,6 @@
 name: Sync Cloudflare Worker API (code only)
 
-# One-time Worker deployment when this workflow file reaches main.
+# Code-only production release: independent operational DSR and financial reconciliation (PR #129).
 # No migrations, reset, purge or data writes happen in this workflow.
 on:
   push:
@@ -47,6 +47,10 @@ jobs:
         run: |
           grep -q "blockingShifts:shifts.map" src/worker/routes/tankCalibration.ts
           grep -q "replace-10-20-preview" src/worker/routes/tankCalibration.ts
+      - name: Confirm independent DSR and financial reconciliation status support
+        run: |
+          grep -q 'operationalDsrStatus' src/worker/services/fuelDailyOperationsService.ts
+          grep -q 'financialReconciliationStatus' src/worker/services/fuelDailyOperationsService.ts
       - name: Read-only remote D1 compatibility check
         shell: bash
         run: |
@@ -73,4 +77,4 @@ jobs:
         if: success()
         run: |
           echo "Worker API code synchronized. No D1 reset/deletion/migration performed." >> "$GITHUB_STEP_SUMMARY"
-          echo "The authenticated admin must still trigger the 10/20 KL PDF replacement." >> "$GITHUB_STEP_SUMMARY"
+          echo "Independent operational DSR and financial reconciliation status support is released (PR #129)." >> "$GITHUB_STEP_SUMMARY"
