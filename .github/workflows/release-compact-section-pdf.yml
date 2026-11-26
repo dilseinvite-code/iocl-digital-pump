@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Verify and deploy confirmed COCO 33 50 KL calibration (PR 127)
+    name: Verify and deploy corrected IOCL 10/20 KL reference (PR 128)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
