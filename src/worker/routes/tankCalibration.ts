@@ -1787,11 +1787,11 @@ tankCalibration.post('/calibration-templates/upgrade-iocl-10-20',
      }));
      // One INSERT SELECT per tank; exact source values, no per-tank recalculation.
      batch.push(db.insert(schema.tankCalibrationPoints).select(db.select({
-      id:sql<string>`${nextId} || '-' || ${schema.globalTankCalibrationTemplatePoints.dipMillimetresMilliunits}`,
-      chartId:sql<string>`${nextId}`,tankId:sql<string>`${ch.tankId}`,
+      id:sql<string>`${nextId} || '-' || ${schema.globalTankCalibrationTemplatePoints.dipMillimetresMilliunits}`.as('id'),
+      chartId:sql<string>`${nextId}`.as('chart_id'),tankId:sql<string>`${ch.tankId}`.as('tank_id'),
       dipMillimetresMilliunits:schema.globalTankCalibrationTemplatePoints.dipMillimetresMilliunits,
       volumeMilliunits:schema.globalTankCalibrationTemplatePoints.volumeMilliunits,
-      createdAt:sql<string>`${now}`,createdBy:sql<string>`${userId}`,
+      createdAt:sql<string>`${now}`.as('created_at'),createdBy:sql<string>`${userId}`.as('created_by'),
      }).from(schema.globalTankCalibrationTemplatePoints).where(eq(schema.globalTankCalibrationTemplatePoints.templateId,id))));
      upgrades.push({tankId:ch.tankId,oldChartId:ch.id,newChartId:nextId,status:ch.status,capacity});
     }
