@@ -9,7 +9,8 @@ describe('Phase 3 enterprise-light Financial Operations and Monthly Reports', ()
   it('scopes the new light theme without mutating workflow or form input behavior', () => {
     expect(financial).toContain("import './financialReportsModern.css'");
     expect(reports).toContain("import './financialReportsModern.css'");
-    expect(financial).toContain('className="finance-modern space-y-6 pb-10"');
+    expect(financial).toContain('className="finance-modern daily-command finance-command ');
+    expect(financial).toContain("import './financeCommandCentre.css'");
     expect(reports).toContain('className="reports-modern mx-auto max-w-7xl space-y-6 pb-10"');
     expect(styles).toContain('.finance-modern .phase3-data-table');
     expect(styles).toContain('.reports-modern .phase3-surface');

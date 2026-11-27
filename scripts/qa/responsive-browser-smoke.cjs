@@ -67,6 +67,19 @@ const stockReport=shift=>{
   return {operationalShiftId:shift.id,outletId:shift.outletId,businessDate:shift.businessDate,byTank:rows,byProduct:rows};
 };
 const pendingStockReceipt={id:'fixture-receipt',operationalShiftId:historical.id,outletId:historical.outletId,ttNumber:'FIXTURE-TT',invoiceNumber:'FIXTURE-INV',invoiceDate:historical.businessDate,arrivalAt:historical.businessDate+'T07:00:00Z',sealVerified:true,status:'ARRIVED',lines:[]};
+const financeClosed={...dsrShift,deferredFinancialStatus:'PENDING'};
+const financeCompleted={...dsrShift,id:'fixture-finance-completed',businessDate:'2000-01-03',deferredFinancialStatus:'COMPLETED'};
+const financeSummary=shift=>{
+  const provisional=shift.status==='OPEN', completed=shift.deferredFinancialStatus==='COMPLETED';
+  return {operationalShiftId:shift.id,outletId:shift.outletId,
+    salesRevenue:{byProduct:[{productId:'ms',productName:'Motor Spirit',quantityStr:'100.000',unit:'LITRE',pricePerUnitStr:'100.00',revenuePaise:1000000,revenueStr:'10000.00'}],fuelTotalPaise:1000000,fuelTotalStr:'10000.00',
+      readingCoverage:{status:provisional?'INCOMPLETE':'COMPLETE',expectedNozzles:2,recordedNozzles:provisional?1:2,unavailableNozzles:0,missingNozzleIds:provisional?['fixture-n2']:[]},cngApplicable:false,cngComplete:false,cngTotalPaise:null,cngTotalStr:null,lubeTotalPaise:0,lubeTotalStr:'0.00',lubeBySku:[],includedComponents:['FUEL','LUBE'],pendingComponents:[],authoritativeTotalPaise:1000000,authoritativeTotalStr:'10000.00'},
+    collections:{cashPaise:300000,cashStr:'3000.00',posCardPaise:completed?700000:650000,posCardStr:completed?'7000.00':'6500.00',upiPaise:0,upiStr:'0.00',fleetCardPaise:0,fleetCardStr:'0.00',creditSalesPaise:0,creditSalesStr:'0.00',directBankDropPaise:0,directBankDropStr:'0.00',totalPaise:completed?1000000:950000,totalStr:completed?'10000.00':'9500.00'},
+    creditSalesByParty:[],cashHandoverSummary:{totalPendingPaise:200000,totalPendingStr:'2000.00',totalAcknowledgedPaise:0,totalAcknowledgedStr:'0.00'},
+    bankDepositSummary:{totalSubmittedPaise:0,totalSubmittedStr:'0.00',totalVerifiedPaise:0,totalVerifiedStr:'0.00',totalRejectedPaise:0,totalRejectedStr:'0.00'},
+    cashDepositControl:{cashCollectedPaise:300000,cashCollectedStr:'3000.00',verifiedCashDepositedPaise:0,verifiedCashDepositedStr:'0.00',pendingCashDepositPaise:300000,pendingCashDepositStr:'3000.00'},
+    variancePaise:completed?0:50000,varianceStr:completed?'0.00':'500.00',varianceStatus:completed?'BALANCED':'SHORTAGE',varianceReason:null};
+};
 const ok=data=>({success:true,data,error:null});
 const fail=message=>({success:false,data:null,error:{code:'FIXTURE_FAILURE',message}});
 async function main(){
@@ -77,7 +90,7 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false;
+    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false;
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -92,6 +105,17 @@ async function main(){
       if(path==='/api/v1/auth/me')return route.fulfill({json:ok(auth)});
       if(path==='/api/v1/outlets')return route.fulfill({json:ok(outlets)});
       if(path==='/api/v1/users'||path==='/api/v1/hierarchy/states')return route.fulfill({json:ok([])});
+      if(financeUi){
+        const outlet='/api/v1/outlets/fixture-b';
+        if(path===outlet+'/shifts')return route.fulfill({json:ok([financeClosed,financeCompleted,historical])});
+        if([outlet+'/product-prices',outlet+'/credit-parties',outlet+'/products'].includes(path))return route.fulfill({json:ok([])});
+        for(const shift of [financeClosed,financeCompleted,historical]){
+          const prefix='/api/v1/shifts/'+shift.id;
+          if(path===prefix)return route.fulfill({json:ok(shift)});
+          if(path===prefix+'/financial-summary')return route.fulfill({json:ok(financeSummary(shift))});
+          if([prefix+'/collections',prefix+'/cash-handovers',prefix+'/bank-deposits'].includes(path))return route.fulfill({json:ok([])});
+        }
+      }
       if(lubeUi){
         const sku={id:'fixture-lube-sku',outletId:'fixture-b',skuCode:'LUBE-001',name:'Fixture Engine Oil',category:'Lubricant',stockUnit:'LITRE',reorderThreshold:'5.000',reorderThresholdSubunits:5000,status:'ACTIVE'};
         const stock={lubeSkuId:sku.id,skuCode:sku.skuCode,skuName:sku.name,category:sku.category,stockUnit:sku.stockUnit,currentStock:'3.500',currentStockSubunits:3500,reorderThreshold:'5.000',reorderThresholdSubunits:5000,isLowStock:true,status:'ACTIVE'};
@@ -616,6 +640,67 @@ async function main(){
       await page.getByRole('dialog',{name:'Lubricant sale'}).waitFor({state:'hidden'});
       await checkViewport(390,844);
       await capture('lube-open-sales-mobile',lubeContent);
+      // Finance command centre: exact saved totals, independent operational/financial states, and finalization guards.
+      financeUi=true;
+      auth.permissions.push('financial_reconciliation.read','collections.read','collections.write','cash_handover.read','cash_handover.write','bank_deposits.read','bank_deposits.write','bank_deposits.verify','credit_parties.read','product_prices.read','shifts.close');
+      await page.goto(base+'/financials');
+      await page.getByRole('heading',{name:'Financial Operations',exact:true}).waitFor();
+      const financeShift=page.getByRole('combobox',{name:'Finance operational shift'});
+      const financeHero=page.getByRole('region',{name:'Current financial shift'});
+      const financeAttention=page.getByRole('region',{name:'Financial attention centre'});
+      const financeTasks=page.getByRole('region',{name:'Financial workflow'});
+      const financeOverview=page.getByRole('region',{name:'Financial shift overview'});
+      const financeTask=i=>financeTasks.locator('.finance-task').nth(i);
+      await financeShift.selectOption(financeClosed.id);
+      await financeHero.getByText('OPERATIONS CLOSED',{exact:true}).waitFor();
+      await financeHero.getByText('FINANCE PENDING',{exact:true}).waitFor();
+      await financeAttention.getByRole('heading',{name:'Financial reconciliation pending',exact:true}).waitFor();
+      await page.getByRole('list',{name:'Selected outlet hierarchy'}).getByText(outlets[1].name+' · '+outlets[1].roCode,{exact:true}).waitFor();
+      await financeOverview.locator('.finance-metric').nth(0).getByText('₹ 10000.00',{exact:true}).waitFor();
+      await financeOverview.locator('.finance-metric').nth(1).getByText('₹ 9500.00',{exact:true}).waitFor();
+      await financeOverview.locator('.finance-metric').nth(2).getByText('₹ 500.00',{exact:true}).waitFor();
+      await financeTask(0).click();
+      await page.getByRole('heading',{name:'Authoritative Sales Revenue',exact:true}).waitFor();
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1024,768],[1440,900]]){
+        await checkViewport(w,h);
+        for(const panel of [financeHero,financeTasks,financeOverview,page.locator('.finance-detail-panel').first()]){
+          const b=await panel.boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1,'Finance panel clipped at '+w);
+        }
+        if(w===390||w===1440){await page.evaluate(()=>window.scrollTo(0,0));await capture('finance-command-'+w);}
+      }
+      await capture('finance-sales-desktop',page.locator('.finance-detail-panel').first());
+      await financeTask(1).click();
+      await page.getByRole('heading',{name:'Shift Collections',exact:true}).waitFor();
+      assert.equal(await page.getByRole('button',{name:'Add Collection',exact:true}).count(),1);
+      await capture('finance-collections-desktop',page.locator('.finance-detail-panel').first());
+      await financeTask(4).click();
+      const finalize=page.getByTestId('finalize-deferred-finance');
+      await finalize.waitFor();
+      assert(await finalize.isDisabled(),'Finance finalization missing confirmation guard');
+      const confirmed=page.getByRole('checkbox',{name:/I have reviewed the actual recorded collections/});
+      await confirmed.check();
+      assert(await finalize.isDisabled(),'Finance finalization missing variance explanation guard');
+      await page.getByLabel('Verified variance reason').fill('Fixture shortage review');
+      assert(!(await finalize.isDisabled()),'Verified finance finalization control unexpectedly locked');
+      await confirmed.uncheck();
+      assert(await finalize.isDisabled());
+      await checkViewport(390,844);
+      await capture('finance-reconciliation-mobile',page.locator('.finance-finalization'));
+      await checkViewport(1440,900);
+      await capture('finance-reconciliation-desktop',page.locator('.finance-finalization'));
+      await financeShift.selectOption(financeCompleted.id);
+      await financeHero.getByText('FINANCE COMPLETED',{exact:true}).waitFor();
+      await financeAttention.getByRole('heading',{name:'Financial reconciliation completed',exact:true}).waitFor();
+      assert.equal(await finalize.count(),0);
+      await financeTask(1).click();
+      assert.equal(await page.getByRole('button',{name:'Add Collection',exact:true}).count(),0);
+      await financeShift.selectOption(historical.id);
+      await financeHero.getByText('OPERATIONS OPEN',{exact:true}).waitFor();
+      await financeAttention.getByRole('heading',{name:'Sales evidence incomplete',exact:true}).waitFor();
+      await page.getByRole('status',{name:'Incomplete sales evidence'}).waitFor();
+      await financeTask(0).click();
+      await page.getByRole('heading',{name:'Sales revenue (provisional)',exact:true}).waitFor();
+      await capture('finance-provisional-desktop');
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
       console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, populated operational detail panels and exact totals, closed-shift controls, no mutation or real backend requests.');
