@@ -40,4 +40,11 @@ jobs:
             sleep 1
           done
           curl --fail --silent http://127.0.0.1:4173/ > /dev/null
-          node scripts/qa/responsive-browser-smoke.cjs
+          QA_SCREENSHOT_DIR="$RUNNER_TEMP/iocl-ui-screenshots" node scripts/qa/responsive-browser-smoke.cjs
+      - name: Upload fixture UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: responsive-ui-screenshots
+          path: ${{ runner.temp }}/iocl-ui-screenshots
+          if-no-files-found: ignore

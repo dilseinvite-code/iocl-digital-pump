@@ -22,6 +22,12 @@ const dsrDay={outletId:'fixture-b',outletName:outlets[1].name,businessDate:dsrSh
   operationalDsrStatus:'COMPLETED',financialReconciliationStatus:'PENDING',shiftsCount:1,shifts:[{...dsrShift,shiftNumber:1,financialReconciliationStatus:'PENDING'}],
   byProduct:[dsrProduct],byDispenser:[{dispenserNumber:1,nozzles:[{shiftNumber:1,nozzleNumber:1,productId:'ms',productCode:'MS',openingTotalizerMilliunits:1000000,closingTotalizerMilliunits:1200000,grossSalesMilliunits:200000,testingQuantityMilliunits:5000,netSalesMilliunits:195000,hasReading:true,isUnavailable:false}]}],
   missingFields:[],completion:{expectedTanks:0,openingTankReadings:0,closingTankReadings:0,expectedNozzles:1,nozzleMeterReadings:1,totalReceipts:0,completedReceipts:0,reconciliationComplete:true}};
+const workbenchDay=date=>({...dsrDay,businessDate:date,shifts:[{...dsrDay.shifts[0],businessDate:date,reconciliationComplete:true}],
+  deferredShiftClosureAvailable:true,totals:dsrProduct,byDispenser:[],completion:{...dsrDay.completion,expectedTanks:1,openingTankReadings:1,closingTankReadings:1,unavailableNozzles:0,pendingReceipts:0}});
+const workbenchBootstrap=date=>({outletId:'fixture-b',outletName:outlets[1].name,businessDate:date,
+  shiftTemplates:[{id:dsrShift.shiftTemplateId,code:'GENERAL',name:'General Shift',startTime:'06:00',endTime:'06:00'}],
+  shifts:[{shift:{...dsrShift,businessDate:date},shiftTemplateName:'General Shift',shiftTemplateCode:'GENERAL',tanks:[],nozzles:[],receipts:[],reconciliations:[]}],
+  dailySummary:workbenchDay(date)});
 const ok=data=>({success:true,data,error:null});
 const fail=message=>({success:false,data:null,error:{code:'FIXTURE_FAILURE',message}});
 async function main(){
@@ -32,7 +38,10 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0;
+    let shiftAttempts=0, operationsUi=false;
+    const screenshotDir=process.env.QA_SCREENSHOT_DIR;
+    if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
+    const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
     await page.route('**/*',async route=>{
       const req=route.request(),url=new URL(req.url());
       if(['blob:','data:'].includes(url.protocol))return route.continue();
@@ -49,8 +58,10 @@ async function main(){
         if(shiftAttempts===1){await firstResponse;return route.fulfill({status:503,json:fail('Fixture shift list unavailable')});}
         return route.fulfill({json:ok([historical])});
       }
+      if(path==='/api/v1/outlets/fixture-b/daily-operations'&&operationsUi)return route.fulfill({json:ok(workbenchBootstrap(url.searchParams.get('businessDate')))});
       if(path==='/api/v1/outlets/fixture-b/fuel/daily-summary'){
         const date=url.searchParams.get('businessDate');
+        if(operationsUi)return route.fulfill({json:ok(workbenchDay(date))});
         if(date===dsrShift.businessDate)return route.fulfill({json:ok(dsrDay)});
         if(/^2000-01-\d{2}$/.test(date||''))return route.fulfill({json:ok({...dsrDay,businessDate:date,
           status:'NOT_STARTED',dayEntryStatus:'NO_ENTRY',operationalDsrStatus:'NOT_STARTED',financialReconciliationStatus:'NOT_STARTED',
@@ -106,6 +117,7 @@ async function main(){
       await page.goto(base+'/dsr-reports');
       await page.getByRole('heading',{name:'Daily Sales Reports (DSR)',exact:true}).waitFor();
       await page.getByLabel('Business date',{exact:true}).fill(dsrShift.businessDate);
+      assert(await page.getByRole('button',{name:'Download PDF',exact:true}).isDisabled(),'Report must be retrieved before export');
       await page.getByRole('button',{name:'Retrieve DSR',exact:true}).click();
       await page.getByText('Shift: General Shift',{exact:false}).waitFor();
       const remark=page.getByRole('textbox',{name:'Operator remarks for '+dsrShift.businessDate});
@@ -146,6 +158,19 @@ async function main(){
       assert.equal(await consolidatedButton.getAttribute('aria-pressed'),'true');
       await page.getByRole('button',{name:'Retrieve DSR',exact:true}).click();
       await page.getByRole('heading',{name:'Product-wise consolidated quantities',exact:true}).waitFor();
+      await page.getByRole('img',{name:'1 complete, 0 partial, 30 no-entry business dates'}).waitFor();
+      assert.equal(await page.locator('.ops-record[data-empty="true"]').count(),2,'No-entry dates must be grouped into two exact ranges');
+      await page.getByRole('region',{name:'Recorded quantities LITRE'}).getByText('195.000',{exact:true}).waitFor();
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1440,900]])await checkViewport(w,h);
+      await page.evaluate(()=>window.scrollTo(0,0));
+      await capture('dsr-selection-desktop');
+      await capture('dsr-coverage-desktop',page.getByRole('region',{name:'Report coverage'}));
+      await capture('dsr-quantities-desktop',page.getByRole('region',{name:'Recorded quantities LITRE'}));
+      await capture('dsr-table-desktop',page.getByRole('region',{name:'Consolidated product quantities'}));
+      await checkViewport(390,844);
+      await page.evaluate(()=>window.scrollTo(0,0));
+      await capture('dsr-selection-mobile');
+      await capture('dsr-coverage-mobile',page.getByRole('region',{name:'Report coverage'}));
       async function downloadReport(){
         const pending=page.waitForEvent('download');
         await page.getByRole('button',{name:'Download PDF',exact:true}).click();
@@ -163,10 +188,34 @@ async function main(){
       const detail=await readPdf(detailFile);
       assert(detail.pdf.getPageCount()>month.pdf.getPageCount(),'Detailed monthly PDF should include the day-level evidence');
       assert(detail.has('GRAND TOTAL LITRE'),'Detailed export lost meter totals');
-      await checkViewport(390,844);
+      // Test the actual dashboard and daily workspace UI with isolated saved statuses.
+      operationsUi=true;
+      await page.goto(base+'/dashboard');
+      await page.getByRole('heading',{name:'What would you like to do?',exact:true}).waitFor();
+      const todayPanel=page.getByRole('region',{name:"Today's operational status"});
+      await todayPanel.getByText('COMPLETED',{exact:true}).waitFor();
+      await todayPanel.getByText('CLOSED',{exact:true}).waitFor();
+      await todayPanel.getByText('PENDING',{exact:true}).waitFor();
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1440,900]])await checkViewport(w,h);
+      await page.evaluate(()=>window.scrollTo(0,0));await capture('dashboard-desktop');
+      await checkViewport(390,844);await page.evaluate(()=>window.scrollTo(0,0));await capture('dashboard-mobile');
+      await page.goto(base+'/daily-operations');
+      await page.getByRole('heading',{name:'Three independent statuses',exact:true}).waitFor();
+      assert.equal((await page.getByTestId('operational-dsr-status').textContent()).trim(),'COMPLETED');
+      assert.equal((await page.getByTestId('financial-reconciliation-status').textContent()).trim(),'PENDING');
+      await page.getByRole('heading',{name:'Shift workbench',exact:true}).waitFor();
+      assert(await page.getByRole('button',{name:'Compute Stock Reconciliation',exact:true}).isDisabled(),'Closed shift must remain read-only');
+      assert.equal(await page.getByTestId('close-operational-shift').count(),0,'Closed shift must not offer close again');
+      const opsProgress=page.getByRole('region',{name:'Daily operations progress'});
+      await opsProgress.getByText('None recorded',{exact:true}).waitFor();
+      assert((await opsProgress.textContent()).includes('no entries / not expected'),'No receipts must be distinguished from pending work');
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1440,900]])await checkViewport(w,h);
+      await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-desktop');
+      await capture('daily-status-desktop',page.getByRole('region',{name:'Independent DSR and financial reconciliation'}));
+      await checkViewport(390,844);await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-mobile');
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
-      console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, no mutation or real backend requests.');
+      console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, closed-shift controls, no mutation or real backend requests.');
     }finally{releaseFirst();}
   }finally{await browser.close();}
 }
