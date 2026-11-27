@@ -22,11 +22,35 @@ const dsrDay={outletId:'fixture-b',outletName:outlets[1].name,businessDate:dsrSh
   operationalDsrStatus:'COMPLETED',financialReconciliationStatus:'PENDING',shiftsCount:1,shifts:[{...dsrShift,shiftNumber:1,financialReconciliationStatus:'PENDING'}],
   byProduct:[dsrProduct],byDispenser:[{dispenserNumber:1,nozzles:[{shiftNumber:1,nozzleNumber:1,productId:'ms',productCode:'MS',openingTotalizerMilliunits:1000000,closingTotalizerMilliunits:1200000,grossSalesMilliunits:200000,testingQuantityMilliunits:5000,netSalesMilliunits:195000,hasReading:true,isUnavailable:false}]}],
   missingFields:[],completion:{expectedTanks:0,openingTankReadings:0,closingTankReadings:0,expectedNozzles:1,nozzleMeterReadings:1,totalReceipts:0,completedReceipts:0,reconciliationComplete:true}};
+// Populated, internally consistent saved data for the three operational detail sections.
+const detailNozzles=[
+  {nozzleId:'fixture-n1',nozzleNumber:1,dispenserId:'disp-1',dispenserNumber:1,dispenserName:'DU 1',productId:'ms',productCode:'MS',productName:'Motor Spirit',tankId:'t-ms',tankNumber:1,openingTotalizerMilliunits:1000000,closingTotalizerMilliunits:1105000,testingQuantityMilliunits:5000,grossSalesMilliunits:105000,netSalesMilliunits:100000},
+  {nozzleId:'fixture-n2',nozzleNumber:2,dispenserId:'disp-1',dispenserNumber:1,dispenserName:'DU 1',productId:'ms',productCode:'MS',productName:'Motor Spirit',tankId:'t-ms',tankNumber:1,openingTotalizerMilliunits:2000000,closingTotalizerMilliunits:2095000,testingQuantityMilliunits:0,grossSalesMilliunits:95000,netSalesMilliunits:95000},
+  {nozzleId:'fixture-n3',nozzleNumber:1,dispenserId:'disp-2',dispenserNumber:2,dispenserName:'DU 2',productId:'hsd',productCode:'HSD',productName:'High Speed Diesel',tankId:'t-hsd',tankNumber:2,openingTotalizerMilliunits:3000000,closingTotalizerMilliunits:3155000,testingQuantityMilliunits:5000,grossSalesMilliunits:155000,netSalesMilliunits:150000}
+].map(n=>({...n,operationalShiftId:dsrShift.id,shiftNumber:1,hasReading:true,isUnavailable:false}));
+const detailHsd={...dsrProduct,productId:'hsd',productCode:'HSD',productName:'High Speed Diesel',
+  openingStockMilliunits:1000000,availableStockMilliunits:1000000,grossSalesMilliunits:155000,testingMilliunits:5000,netSalesMilliunits:150000,
+  theoreticalClosingMilliunits:850000,physicalClosingMilliunits:853000,varianceMilliunits:3000};
+const detailTotals=Object.fromEntries(Object.entries(dsrProduct).filter(([key])=>key.endsWith('Milliunits')).map(([key,val])=>[key,val+detailHsd[key]]));
+const detailDispensers=[1,2].map(dispenserNumber=>{
+  const nozzles=detailNozzles.filter(n=>n.dispenserNumber===dispenserNumber),n=nozzles[0];
+  const subtotal={productId:n.productId,productCode:n.productCode,productName:n.productName,netSalesMilliunits:nozzles.reduce((sum,item)=>sum+item.netSalesMilliunits,0)};
+  return {dispenserId:n.dispenserId,dispenserNumber,dispenserName:n.dispenserName,netSalesMilliunits:subtotal.netSalesMilliunits,byProduct:[subtotal],nozzles};
+});
+const metricStr=milli=>(milli/1000).toFixed(3);
+const detailEntries=detailNozzles.map((n,index)=>({...n,productUnit:'LITRE',snapshotStatus:'ACTIVE',unavailability:null,
+  suggestedOpeningTotalizerMilliunits:n.openingTotalizerMilliunits+(index===0?5000:0),
+  suggestedOpeningTotalizer:metricStr(n.openingTotalizerMilliunits+(index===0?5000:0)),
+  reading:{...n,openingTotalizerStr:metricStr(n.openingTotalizerMilliunits),closingTotalizerStr:metricStr(n.closingTotalizerMilliunits),
+    testingQuantityStr:metricStr(n.testingQuantityMilliunits),grossSalesQuantityStr:metricStr(n.grossSalesMilliunits),netSalesQuantityStr:metricStr(n.netSalesMilliunits),
+    grossSalesQuantityMilliunits:n.grossSalesMilliunits,netSalesQuantityMilliunits:n.netSalesMilliunits,
+    varianceReason:index===0?'Fixture continuity review':null}}));
 const workbenchDay=date=>({...dsrDay,businessDate:date,shifts:[{...dsrDay.shifts[0],businessDate:date,reconciliationComplete:true}],
-  deferredShiftClosureAvailable:true,totals:dsrProduct,byDispenser:[],completion:{...dsrDay.completion,expectedTanks:1,openingTankReadings:1,closingTankReadings:1,unavailableNozzles:0,pendingReceipts:0}});
+  deferredShiftClosureAvailable:true,totals:detailTotals,byProduct:[dsrProduct,detailHsd],byDispenser:detailDispensers,
+  completion:{...dsrDay.completion,expectedTanks:1,openingTankReadings:1,closingTankReadings:1,expectedNozzles:3,nozzleMeterReadings:3,unavailableNozzles:0,pendingReceipts:0}});
 const workbenchBootstrap=date=>({outletId:'fixture-b',outletName:outlets[1].name,businessDate:date,
   shiftTemplates:[{id:dsrShift.shiftTemplateId,code:'GENERAL',name:'General Shift',startTime:'06:00',endTime:'06:00'}],
-  shifts:[{shift:{...dsrShift,businessDate:date},shiftTemplateName:'General Shift',shiftTemplateCode:'GENERAL',tanks:[],nozzles:[],receipts:[],reconciliations:[]}],
+  shifts:[{shift:{...dsrShift,businessDate:date},shiftTemplateName:'General Shift',shiftTemplateCode:'GENERAL',tanks:[],nozzles:detailEntries,receipts:[],reconciliations:[]}],
   dailySummary:workbenchDay(date)});
 const emptyWorkbenchDay=date=>({...workbenchDay(date),outletId:'fixture-a',outletName:outlets[0].name,status:'NOT_STARTED',
   dayEntryStatus:'NO_ENTRY',operationalDsrStatus:'NOT_STARTED',financialReconciliationStatus:'NOT_STARTED',shiftsCount:0,shifts:[],byProduct:[],byDispenser:[],
@@ -280,6 +304,40 @@ async function main(){
       assert.equal(await page.locator('.dc-admin-tools').count(),0,'Non-global admin has reset tools');
       await checkViewport(1440,900);
       await capture('daily-workbench',page.getByRole('navigation',{name:'Jump to daily entry task'}));
+      // Populated meter grid, dispenser subtotal cards and stock summary retain exact values.
+      const meters=page.locator('#daily-nozzle-readings');
+      const dispensers=page.locator('.dc-dispensers');
+      const stock=page.locator('.dc-stock-summary');
+      await meters.getByRole('heading',{name:'2. Nozzle Meter Entry Grid (3 Configured Nozzles)',exact:true}).waitFor();
+      assert.equal(await meters.locator('tbody tr').count(),3);
+      assert.equal(await meters.getByText('Saved',{exact:true}).count(),3);
+      assert.equal(await meters.locator('tr[data-dispenser-start="true"]').count(),1);
+      assert.equal(await meters.locator('input:not(:disabled)').count(),0,'Closed meter readings became editable');
+      assert.equal(await meters.getByRole('button',{name:'Save',exact:true}).count(),0);
+      await meters.getByText('Prev: 1005.000 | Curr: 1000.000 | Diff: -5.000',{exact:true}).waitFor();
+      await dispensers.locator('.dc-dispenser-total').getByText('195.000 L',{exact:true}).waitFor();
+      await dispensers.locator('.dc-dispenser-total').getByText('150.000 L',{exact:true}).waitFor();
+      assert.equal((await stock.locator('.dc-variance-value[data-tone="negative"]').textContent()).trim(),'-10.000');
+      assert.equal((await stock.locator('.dc-variance-value[data-tone="positive"]').textContent()).trim(),'+3.000');
+      await stock.locator('tfoot').getByText('345.000',{exact:true}).waitFor();
+      await stock.locator('tfoot').getByText('-7.000',{exact:true}).waitFor();
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1024,768],[1440,900]]){
+        await checkViewport(w,h);
+        for(const panel of [meters,dispensers,stock]){
+          const bounds=await panel.boundingBox();
+          assert(bounds&&bounds.x>=0&&bounds.x+bounds.width<=w+1,'Operational detail panel clipped at '+w);
+        }
+        if(w===390||w===1440){
+          await capture('daily-meter-grid-'+w,meters);
+          await capture('daily-dispenser-sales-'+w,dispensers);
+          await capture('daily-stock-summary-'+w,stock);
+        }
+      }
+      await stock.getByRole('button',{name:'Open Full DSR',exact:false}).click();
+      await page.getByTestId('dsr-summary-view').waitFor();
+      await page.getByRole('button',{name:'Daily Entry',exact:true}).click();
+      await stock.waitFor();
+
       await page.locator('#daily-outlet').selectOption('fixture-a');
       await dailyPath.getByText(outlets[0].name+' · '+outlets[0].roCode,{exact:true}).waitFor();
       await page.getByRole('heading',{name:'Start daily operations',exact:true}).waitFor();
@@ -325,7 +383,7 @@ async function main(){
       await checkViewport(390,844);await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-no-shift-mobile');
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
-      console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, closed-shift controls, no mutation or real backend requests.');
+      console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, populated operational detail panels and exact totals, closed-shift controls, no mutation or real backend requests.');
     }finally{releaseFirst();}
   }finally{await browser.close();}
 }
