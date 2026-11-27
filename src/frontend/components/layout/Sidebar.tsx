@@ -174,7 +174,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'reports',
-      label: 'Monthly Reports',
+      label: 'Outlet Performance Reports',
       icon: FileText,
       perm: PERMISSIONS.REPORTS_READ,
     },
@@ -229,7 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     'stock-ops': 'stock decantation fuel receipt tanker',
     'financials': 'financials sales revenue cash bank credit payment price',
     'dsr-reports': 'daily sales report pdf historical week month date',
-    'reports': 'monthly reports performance pdf',
+    'reports': 'monthly reports outlet performance pdf',
     'documents': 'document vault r2 statutory licence agreement evidence claims pdf',
     'pump-infra': 'pump infrastructure tanks nozzles calibration',
   };
