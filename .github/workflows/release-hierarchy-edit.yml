@@ -1,4 +1,4 @@
-name: Release hierarchy editing to production Worker
+name: Release hierarchy maintenance to production Worker
 
 # Code-only release, triggered by the reviewed workflow reaching main.
 # Existing production D1 rows, R2 objects, migrations and bindings remain intact.
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Validate hierarchy editing and deploy Worker code only
+    name: Validate hierarchy maintenance and deploy Worker code only
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -53,11 +53,11 @@ jobs:
           if(!data.success||data.result?.uuid!==binding.database_id||data.result?.name!==binding.database_name||data.result?.version!=='production')throw Error('Production D1 identity mismatch.');
           console.log('Production database identity verified; no records accessed.');
           JS
-          result=$(npx wrangler d1 execute iocl-pump-manager-d1 --remote --config wrangler.jsonc --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('states','divisions','sales_areas','retail_outlets','user_scope_assignments','audit_logs');" --json --yes)
-          printf '%s\n' "$result" | jq -e '.[0].results | length == 6' >/dev/null
+          result=$(npx wrangler d1 execute iocl-pump-manager-d1 --remote --config wrangler.jsonc --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('states','divisions','sales_areas','retail_outlets','user_scope_assignments','audit_logs','org_officer_postings');" --json --yes)
+          printf '%s\n' "$result" | jq -e '.[0].results | length == 7' >/dev/null
           echo 'Existing hierarchy tables verified. No migrations or data changes.'
       - name: Deploy reviewed Worker source
         run: npx wrangler deploy --config wrangler.jsonc
       - name: Report release
         if: success()
-        run: echo 'Hierarchy editing Worker code deployed; no D1 record or schema changes.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'Hierarchy maintenance Worker code deployed; no D1 record or schema changes.' >> "$GITHUB_STEP_SUMMARY"

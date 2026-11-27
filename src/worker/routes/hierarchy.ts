@@ -247,9 +247,9 @@ const hierarchyEditSchema = z.object({
 }).strict();
 
 const hierarchyEditTargets = {
-  states: { table: 'states', entity: 'STATE' },
-  divisions: { table: 'divisions', entity: 'DIVISION' },
-  'sales-areas': { table: 'sales_areas', entity: 'SALES_AREA' },
+  states: { table: 'states', entity: 'STATE', linkColumn: 'state_id', child: { table: 'divisions', column: 'state_id', label: 'Divisional Offices' } },
+  divisions: { table: 'divisions', entity: 'DIVISION', linkColumn: 'division_id', child: { table: 'sales_areas', column: 'division_id', label: 'Sales Areas' } },
+  'sales-areas': { table: 'sales_areas', entity: 'SALES_AREA', linkColumn: 'sales_area_id', child: null },
 } as const;
 
 function editHierarchyUnit(kind: keyof typeof hierarchyEditTargets) {
@@ -312,5 +312,74 @@ function editHierarchyUnit(kind: keyof typeof hierarchyEditTargets) {
 hierarchy.patch('/states/:id', requirePermission(PERMISSIONS.HIERARCHY_WRITE) as any, editHierarchyUnit('states'));
 hierarchy.patch('/divisions/:id', requirePermission(PERMISSIONS.HIERARCHY_WRITE) as any, editHierarchyUnit('divisions'));
 hierarchy.patch('/sales-areas/:id', requirePermission(PERMISSIONS.HIERARCHY_WRITE) as any, editHierarchyUnit('sales-areas'));
+
+
+// Never rely on cascading foreign keys to delete an organizational unit.
+// Even inactive or historical assignments must continue to reference their unit.
+const hierarchyDeleteSchema = z.object({ expectedUpdatedAt: z.string().min(1) }).strict();
+
+function deleteHierarchyUnit(kind: keyof typeof hierarchyEditTargets) {
+  return async (c: AppContext) => {
+    const id = c.req.param('id')!;
+    const repo = new HierarchyRepository(getDb(c.env.DB));
+    const target = hierarchyEditTargets[kind];
+    const current = kind === 'states' ? await repo.findStateById(id)
+      : kind === 'divisions' ? await repo.findDivisionById(id)
+      : await repo.findSalesAreaById(id);
+    if (!current) return c.json({ success: false, data: null, error: { code: 'NOT_FOUND', message: 'Hierarchy unit not found.' } }, 404);
+    const allowed = kind === 'states' ? await ScopeService.canAccessState(c.var.user, id)
+      : kind === 'divisions' ? await ScopeService.canAccessDivision(c.var.user, id, repo)
+      : await ScopeService.canAccessSalesArea(c.var.user, id, repo);
+    if (!allowed) return c.json({ success: false, data: null, error: { code: 'FORBIDDEN', message: 'Cannot delete a hierarchy unit outside your assigned scope.' } }, 403);
+    const parsed = hierarchyDeleteSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ success: false, data: null, error: { code: 'VALIDATION_ERROR', message: 'A current unit version is required to confirm deletion.' } }, 400);
+    const version = parsed.data.expectedUpdatedAt;
+    if (current.updatedAt !== version) return c.json({ success: false, data: null, error: { code: 'STALE_HIERARCHY_UNIT', message: 'This unit changed elsewhere. Close the dialog, refresh the list and review before deleting.' } }, 409);
+
+    // Static table and column names only. Check all references, including
+    // ones outside the user's visible list and inactive/historical records.
+    const dependencies = [
+      ...(target.child ? [target.child] : []),
+      { table: 'retail_outlets', column: target.linkColumn, label: 'Retail Outlets' },
+      { table: 'user_scope_assignments', column: target.linkColumn, label: 'user scope assignments' },
+      { table: 'org_officer_postings', column: target.linkColumn, label: 'officer postings (including history)' },
+    ];
+    const d1 = c.env.DB;
+    try {
+      const linked = await d1.prepare(
+        'SELECT ' + dependencies.map((dep, i) => `EXISTS (SELECT 1 FROM ${dep.table} WHERE ${dep.column}=?) AS linked_${i}`).join(', ')
+      ).bind(...dependencies.map(() => id)).first<Record<string, number>>();
+      const blockers = dependencies.filter((_, i) => linked?.['linked_' + i]).map(dep => dep.label);
+      if (blockers.length) return c.json({ success: false, data: null, error: { code: 'HIERARCHY_UNIT_IN_USE', message: 'Cannot delete this unit because it has linked ' + blockers.join(', ') + '. Resolve these links first; no records have been removed.' } }, 409);
+
+      // Recheck the dependencies INSIDE the same D1 transaction as the audit
+      // and deletion, so a newly assigned outlet/child cannot be cascaded.
+      const guard = dependencies.map(dep => `NOT EXISTS (SELECT 1 FROM ${dep.table} WHERE ${dep.column}=unit.id)`).join(' AND ');
+      const auditId = `aud-${crypto.randomUUID()}`;
+      const results = await d1.batch([
+        d1.prepare(`INSERT INTO audit_logs
+          (id,user_id,action,entity_type,entity_id,old_value_json,new_value_json,ip_address,user_agent,created_at)
+          SELECT ?,?,?,?,?,?,?,?,?,? FROM ${target.table} AS unit
+          WHERE unit.id=? AND unit.updated_at=? AND ${guard}
+          RETURNING id`)
+          .bind(auditId, c.var.user.user.id, target.entity + '_DELETE', target.entity, id,
+            JSON.stringify(current), null, c.req.header('cf-connecting-ip') || null,
+            c.req.header('user-agent') || null, new Date().toISOString(), id, version),
+        d1.prepare(`DELETE FROM ${target.table} WHERE id=? AND updated_at=?
+          AND EXISTS (SELECT 1 FROM audit_logs WHERE id=?) RETURNING id`)
+          .bind(id, version, auditId),
+      ]);
+      if (results[0].results?.length !== 1 || results[1].results?.length !== 1) {
+        return c.json({ success: false, data: null, error: { code: 'HIERARCHY_CONFLICT', message: 'The unit or its links changed before deletion. Refresh the list and try again.' } }, 409);
+      }
+      return c.json({ success: true, data: { id }, error: null });
+    } catch {
+      return c.json({ success: false, data: null, error: { code: 'HIERARCHY_DELETE_FAILED', message: 'Unable to delete this hierarchy unit safely. Refresh before trying again.' } }, 503);
+    }
+  };
+}
+hierarchy.delete('/states/:id', requirePermission(PERMISSIONS.HIERARCHY_WRITE) as any, deleteHierarchyUnit('states'));
+hierarchy.delete('/divisions/:id', requirePermission(PERMISSIONS.HIERARCHY_WRITE) as any, deleteHierarchyUnit('divisions'));
+hierarchy.delete('/sales-areas/:id', requirePermission(PERMISSIONS.HIERARCHY_WRITE) as any, deleteHierarchyUnit('sales-areas'));
 
 export default hierarchy;

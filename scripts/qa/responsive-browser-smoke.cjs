@@ -92,7 +92,7 @@ async function main(){
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
     let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false, performanceUi=false, remainingUi=false, signedOut=false, hierarchyEditUi=false;
     const editedUnits={states:[{id:"fixture-state",code:"ST-01",name:"Fixture State",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"},{id:"fixture-other-state",code:"ST-02",name:"Other State",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}],divisions:[{id:"fixture-division",stateId:"fixture-state",stateName:"Fixture State",code:"DIV-01",name:"Fixture Division",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}],"sales-areas":[{id:"fixture-area",divisionId:"fixture-division",divisionName:"Fixture Division",stateId:"fixture-state",code:"SA-01",name:"Fixture Area",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}]};
-    const hierarchyPatches=[];
+    const hierarchyPatches=[], hierarchyDeletes=[];
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -102,12 +102,22 @@ async function main(){
       if(url.origin!==base){if(!['fonts.googleapis.com','fonts.gstatic.com'].includes(url.hostname))blocked.push(req.url());return route.abort();}
       if(!url.pathname.startsWith('/api/'))return route.continue();
       requests.push(url.pathname);
-      // Only the explicit hierarchy fixture edit test may perform an intercepted PATCH.
+      // Only the explicit hierarchy fixture maintenance test may perform intercepted PATCH/DELETE.
       // All other mutations remain blocked and nothing is sent to a real API.
       if(hierarchyEditUi && url.pathname.startsWith('/api/v1/hierarchy/')){
         const [kind,id]=url.pathname.slice('/api/v1/hierarchy/'.length).split('/');
         const units=editedUnits[kind];
         if(units && !id && req.method()==='GET')return route.fulfill({json:ok(units)});
+        if(units && id && req.method()==='DELETE'){
+          const current=units.find(x=>x.id===id),body=req.postDataJSON();
+          assert(current,'Unknown hierarchy deletion fixture');
+          assert.deepEqual(Object.keys(body),['expectedUpdatedAt']);
+          assert.equal(body.expectedUpdatedAt,current.updatedAt);
+          if(id==='fixture-state'||id==='fixture-division'||id==='fixture-area')return route.fulfill({status:409,json:{success:false,data:null,error:{code:'HIERARCHY_UNIT_IN_USE',message:'Cannot delete this unit because it has linked Retail Outlets.'}}});
+          hierarchyDeletes.push({kind,id});
+          units.splice(units.indexOf(current),1);
+          return route.fulfill({json:ok({id})});
+        }
         if(units && id && req.method()==='PATCH'){
           const current=units.find(x=>x.id===id),body=req.postDataJSON();
           assert(current,'Unknown hierarchy fixture');
@@ -893,11 +903,50 @@ async function main(){
       await page.goto(base+'/hierarchy');
       await page.getByRole('button',{name:'Edit Updated State',exact:true}).waitFor();
       assert.equal(await page.getByRole('button',{name:'Edit Other State',exact:true}).count(),0);
+      await page.getByRole('button',{name:'Delete Updated State',exact:true}).waitFor();
+      assert.equal(await page.getByRole('button',{name:'Delete Other State',exact:true}).count(),0);
       auth.permissions=['hierarchy.read','outlets.read'];
       await page.goto(base+'/hierarchy');
       await page.getByRole('heading',{name:'Updated State',exact:true}).waitFor();
       assert.equal(await page.getByRole('button',{name:/^Edit /}).count(),0);
+      assert.equal(await page.getByRole('button',{name:/^Delete /}).count(),0);
       console.log('PASS hierarchy editing: prefill, validation/error, cancel, scoped edit permissions, save all three levels and responsive dialog.');
+      // Deletion is confirmed, safe on linked-unit conflicts, and updates list
+      // and counts at each level. All requests remain local fixture interception.
+      Object.assign(auth,{isGlobalAdmin:true,isGlobalScope:true,primaryScope:'GLOBAL',roles:['ADMIN'],permissions:['*','hierarchy.read','hierarchy.write','outlets.read']});
+      editedUnits.divisions.push({...editedUnits.divisions[0],id:'fixture-empty-division',stateId:'fixture-other-state',stateName:'Other State',name:'Empty Division',code:'DIV-02'});
+      editedUnits['sales-areas'].push({...editedUnits['sales-areas'][0],id:'fixture-empty-area',divisionId:'fixture-empty-division',divisionName:'Empty Division',stateId:'fixture-other-state',name:'Empty Area',code:'SA-02'});
+      await page.goto(base+'/hierarchy');
+      await page.getByRole('button',{name:'Delete Updated State',exact:true}).click();
+      let deleteDialog=page.getByRole('dialog',{name:'Delete State Office'});
+      await deleteDialog.getByText('Updated State',{exact:true}).waitFor();
+      assert.equal(await deleteDialog.getByRole('button',{name:'Cancel',exact:true}).evaluate(el=>el===document.activeElement),true);
+      for(const [w,h] of [[320,640],[390,844],[1440,900]]){
+        await page.setViewportSize({width:w,height:h});
+        const b=await deleteDialog.boundingBox();
+        assert(b&&b.x>=0&&b.x+b.width<=w+1&&b.y>=0&&b.y+b.height<=h+1,'Hierarchy delete dialog clipped at '+w);
+        if(w===390||w===1440)await capture('hierarchy-delete-dialog-'+w);
+      }
+      await deleteDialog.getByRole('button',{name:'Cancel',exact:true}).click();
+      await deleteDialog.waitFor({state:'hidden'});
+      assert.equal(hierarchyDeletes.length,0);
+      await page.getByRole('button',{name:'Delete Updated State',exact:true}).click();
+      await deleteDialog.getByRole('button',{name:'Delete Unit',exact:true}).click();
+      await deleteDialog.getByRole('alert').getByText('Cannot delete this unit because it has linked Retail Outlets.').waitFor();
+      assert.equal(hierarchyDeletes.length,0);
+      await deleteDialog.getByRole('button',{name:'Cancel',exact:true}).click();
+      for(const [tab,unit,label] of [['Sales Areas','Empty Area','Sales Area'],['Divisional Offices','Empty Division','Divisional Office'],['State Offices','Other State','State Office']]){
+        await page.getByRole('button',{name:new RegExp(tab)}).click();
+        const deleteButton=page.getByRole('button',{name:'Delete '+unit,exact:true});
+        await deleteButton.click();
+        deleteDialog=page.getByRole('dialog',{name:'Delete '+label});
+        await deleteDialog.getByRole('button',{name:'Delete Unit',exact:true}).click();
+        await page.getByText(label+' deleted successfully.',{exact:true}).waitFor();
+        await deleteButton.waitFor({state:'hidden'});
+        await page.getByRole('button',{name:tab+' (1)',exact:true}).waitFor();
+      }
+      assert.deepEqual(hierarchyDeletes.map(x=>x.id),['fixture-empty-area','fixture-empty-division','fixture-other-state']);
+      console.log('PASS hierarchy deletion: scoped permissions, cancel, linked-unit conflict, three-level confirmed deletion, refreshed counts and responsive dialog.');
       // Production login is a separate public surface; do not attempt to sign in.
       signedOut=true;
       await page.goto(base+'/');
