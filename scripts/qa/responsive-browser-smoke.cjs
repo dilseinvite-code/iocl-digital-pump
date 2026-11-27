@@ -77,7 +77,7 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false;
+    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false;
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -92,6 +92,26 @@ async function main(){
       if(path==='/api/v1/auth/me')return route.fulfill({json:ok(auth)});
       if(path==='/api/v1/outlets')return route.fulfill({json:ok(outlets)});
       if(path==='/api/v1/users'||path==='/api/v1/hierarchy/states')return route.fulfill({json:ok([])});
+      if(lubeUi){
+        const sku={id:'fixture-lube-sku',outletId:'fixture-b',skuCode:'LUBE-001',name:'Fixture Engine Oil',category:'Lubricant',stockUnit:'LITRE',reorderThreshold:'5.000',reorderThresholdSubunits:5000,status:'ACTIVE'};
+        const stock={lubeSkuId:sku.id,skuCode:sku.skuCode,skuName:sku.name,category:sku.category,stockUnit:sku.stockUnit,currentStock:'3.500',currentStockSubunits:3500,reorderThreshold:'5.000',reorderThresholdSubunits:5000,isLowStock:true,status:'ACTIVE'};
+        const item={lubeSkuId:sku.id,skuCode:sku.skuCode,skuName:sku.name,category:sku.category,stockUnit:sku.stockUnit,quantitySubunits:2500,quantity:'2.500',saleCount:1,revenuePaise:87500,revenueStr:'875.00'};
+        const totals={bySku:[item],totalRevenuePaise:87500,totalRevenueStr:'875.00',quantitiesByUnit:{litre:'2.500',pack:'0'}};
+        const outlet='/api/v1/outlets/fixture-b';
+        if(path===outlet+'/shifts')return route.fulfill({json:ok([dsrShift,historical])});
+        if(path===outlet+'/lube/skus')return route.fulfill({json:ok([sku])});
+        if(path===outlet+'/lube/prices')return route.fulfill({json:ok([{id:'fixture-price',outletId:'fixture-b',lubeSkuId:sku.id,pricePaisePerUnit:35000,pricePerUnitStr:'350.00',effectiveFrom:'2000-01-01',effectiveTo:null,status:'ACTIVE'}])});
+        if(path===outlet+'/lube/stock-summary'||path===outlet+'/lube/low-stock')return route.fulfill({json:ok([stock])});
+        if(path===outlet+'/lube/stock-transactions')return route.fulfill({json:ok([{id:'fixture-transaction',outletId:'fixture-b',lubeSkuId:sku.id,transactionType:'RECEIPT',quantity:'6.000',quantitySubunits:6000,occurredAt:'2000-01-02T08:00:00Z',referenceNumber:'FIXTURE-RECEIPT'}])});
+        if(path===outlet+'/lube/daily-summary')return route.fulfill({json:ok({...totals,outletId:'fixture-b',businessDate:url.searchParams.get('businessDate'),shiftCountWithLubeSales:1,saleLineCount:1})});
+        for(const shift of [dsrShift,historical]){
+          const prefix='/api/v1/shifts/'+shift.id;
+          if(path===prefix)return route.fulfill({json:ok(shift)});
+          if(path===prefix+'/lube-sales')return route.fulfill({json:ok(shift.status==='CLOSED'?[{...item,id:'fixture-lube-sale',operationalShiftId:shift.id,outletId:'fixture-b',unitPricePaise:35000,unitPriceStr:'350.00',soldAt:'2000-01-02T09:00:00Z'}]:[])});
+          if(path===prefix+'/lube-summary')return route.fulfill({json:ok({...totals,operationalShiftId:shift.id,outletId:'fixture-b',businessDate:shift.businessDate,...(shift.status==='OPEN'?{bySku:[],totalRevenuePaise:0,totalRevenueStr:'0.00',quantitiesByUnit:{litre:'0.000',pack:'0'}}:{})})});
+          if(path===prefix+'/financial-summary')return route.fulfill({json:ok(null)});
+        }
+      }
       if(cngUi){
         if(path==='/api/v1/outlets/fixture-b/shifts')return route.fulfill({json:ok([dsrShift,historical])});
         for(const shift of [dsrShift,historical]){
@@ -535,6 +555,67 @@ async function main(){
       await page.getByRole('button',{name:'Cancel',exact:true}).click();
       await page.getByRole('dialog').waitFor({state:'hidden'});
       await capture('cng-open-missing-1440',mfm);
+      // Lubricant command centre: no shift, inventory without shift, all tasks and shift lock guards.
+      lubeUi=true;
+      auth.permissions.push('lube_operations.read','lube_sales.write','lube_inventory.write','lube_prices.write');
+      await page.goto(base+'/lube');
+      await page.getByRole('heading',{name:'Lube & Auxiliary Inventory',exact:true}).waitFor();
+      const lubeShift=page.getByRole('combobox',{name:'Lube operational shift'});
+      await lubeShift.selectOption('');
+      const lubeHero=page.getByRole('region',{name:'Current lubricant shift'});
+      const lubeNav=page.getByRole('navigation',{name:'Lube workspace navigation'});
+      const lubeContent=page.locator('.lube-content');
+      await lubeHero.getByText('NO SHIFT SELECTED',{exact:true}).waitFor();
+      await lubeContent.getByRole('heading',{name:'No Shift Selected',exact:true}).waitFor();
+      await page.getByRole('list',{name:'Selected outlet hierarchy'}).getByText(outlets[1].name+' · '+outlets[1].roCode,{exact:true}).waitFor();
+      await capture('lube-no-shift-desktop');
+      await lubeNav.getByRole('button',{name:'Inventory & Stock',exact:true}).click();
+      await lubeContent.getByRole('heading',{name:'Current Inventory',exact:true}).waitFor();
+      await lubeContent.getByRole('heading',{name:'Low Stock Alert (1)',exact:true}).waitFor();
+      assert.equal(await lubeContent.locator('.lube-stock-card').count(),1);
+      assert.equal(await lubeContent.locator('.lube-stock-card').getAttribute('data-color'),'orange');
+      await lubeContent.locator('.lube-stock-card').getByText('3.500',{exact:false}).waitFor();
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1024,768],[1440,900]]){
+        await checkViewport(w,h);
+        for(const panel of [lubeHero,lubeNav,lubeContent]){
+          const b=await panel.boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1,'Lube panel clipped at '+w);
+        }
+        if(w===390||w===1440){await page.evaluate(()=>window.scrollTo(0,0));await capture('lube-command-'+w);await capture('lube-inventory-'+w,lubeContent);}
+      }
+      await lubeNav.getByRole('button',{name:'Transaction Ledger',exact:true}).click();
+      await lubeContent.getByRole('heading',{name:'Stock Transactions Ledger',exact:true}).waitFor();
+      await lubeContent.getByText('6.000',{exact:false}).waitFor();
+      await lubeNav.getByRole('button',{name:'Product Setup',exact:true}).click();
+      await lubeContent.getByRole('heading',{name:'SKU Catalog',exact:true}).waitFor();
+      await lubeContent.getByText('LUBE-001',{exact:true}).waitFor();
+      await lubeNav.getByRole('button',{name:'Selling Prices',exact:true}).click();
+      await lubeContent.getByRole('heading',{name:'Selling Prices',exact:true}).waitFor();
+      await lubeContent.getByText('₹350.00',{exact:true}).waitFor();
+      await lubeShift.selectOption(dsrShift.id);
+      await lubeHero.getByText('CLOSED',{exact:true}).waitFor();
+      await lubeNav.getByRole('button',{name:'Daily Sales',exact:true}).click();
+      await lubeContent.getByRole('heading',{name:'Shift Sales Records',exact:true}).waitFor();
+      await lubeContent.getByText('₹875.00',{exact:true}).waitFor();
+      assert.equal(await lubeContent.getByRole('button',{name:/Record Sale|Edit Sale|Delete Sale/}).count(),0,'Closed lube shift offered sales mutation');
+      await capture('lube-closed-sales',lubeContent);
+      await lubeNav.getByRole('button',{name:'Shift Summary',exact:true}).click();
+      await lubeContent.getByRole('heading',{name:'Shift Summary',exact:true}).waitFor();
+      await lubeContent.locator('.lube-metric').getByText('₹875.00',{exact:true}).waitFor();
+      await capture('lube-shift-summary',lubeContent);
+      await lubeNav.getByRole('button',{name:'Daily Summary',exact:true}).click();
+      await lubeContent.getByRole('heading',{name:'Daily Summary',exact:true}).waitFor();
+      await lubeContent.locator('.lube-revenue').getByText('₹875.00',{exact:true}).waitFor();
+      await capture('lube-daily-summary',lubeContent);
+      await lubeShift.selectOption(historical.id);
+      await lubeHero.getByText('OPEN',{exact:true}).waitFor();
+      await lubeNav.getByRole('button',{name:'Shift Sales Log',exact:true}).click();
+      await lubeContent.getByRole('heading',{name:'No Sales Logged',exact:true}).waitFor();
+      await lubeContent.getByRole('button',{name:'Record Sale',exact:true}).click();
+      await page.getByRole('dialog',{name:'Lubricant sale'}).waitFor();
+      await page.getByRole('button',{name:'Cancel',exact:true}).click();
+      await page.getByRole('dialog',{name:'Lubricant sale'}).waitFor({state:'hidden'});
+      await checkViewport(390,844);
+      await capture('lube-open-sales-mobile',lubeContent);
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
       console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, populated operational detail panels and exact totals, closed-shift controls, no mutation or real backend requests.');

@@ -71,17 +71,20 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
   }, [outletId, businessDate]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h3 className="text-base font-semibold text-white">Daily Summary</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Aggregated lube sales metrics and revenue across the selected business date</p>
+    <div className="lube-panel space-y-4">
+      <div className="dc-detail-heading lube-panel-heading">
+        <div className="dc-detail-title">
+          <span className="dc-detail-icon" data-color="blue"><TrendingUp size={20} aria-hidden="true"/></span>
+          <div>
+            <h3>Daily Summary</h3>
+          <p>Aggregated lube sales metrics and revenue across the selected business date</p>
+        </div>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
             <Calendar className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
             <input
-              type="date"
+              type="date" aria-label="Lube summary business date"
               value={businessDate}
               onChange={(e) => setBusinessDate(e.target.value)}
               className="pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 text-white rounded-lg text-xs font-semibold focus:outline-none focus:border-orange-500 font-mono w-40"
@@ -89,7 +92,7 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
           </div>
           <button
             onClick={fetchDailySummary}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
+            className="lube-refresh" aria-label="Refresh daily lube summary"
             disabled={loading}
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -107,7 +110,7 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
           <span>{error}</span>
         </div>
       ) : !summary ? (
-        <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+        <div className="lube-empty space-y-3">
           <AlertCircle className="w-8 h-8 text-slate-500 mx-auto" />
           <h4 className="text-sm font-semibold text-white">No Summary Data</h4>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
@@ -117,8 +120,8 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
       ) : (
         <div className="space-y-6">
           {/* Summary KPIs */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between space-y-2">
+          <div className="lube-metric-grid lube-daily-metrics">
+            <div className="lube-metric space-y-2" data-color="blue">
               <div className="text-[10px] text-slate-500 font-semibold tracking-wider font-mono uppercase">
                 Active Shifts with Sales
               </div>
@@ -127,7 +130,7 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
               </div>
             </div>
 
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between space-y-2">
+            <div className="lube-metric space-y-2" data-color="purple">
               <div className="text-[10px] text-slate-500 font-semibold tracking-wider font-mono uppercase">
                 Total Sales Lines
               </div>
@@ -136,7 +139,7 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
               </div>
             </div>
 
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between space-y-2">
+            <div className="lube-metric space-y-2" data-color="cyan">
               <div className="text-[10px] text-slate-500 font-semibold tracking-wider font-mono uppercase">
                 Litre Volume Sold
               </div>
@@ -145,7 +148,7 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
               </div>
             </div>
 
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between space-y-2">
+            <div className="lube-metric space-y-2" data-color="orange">
               <div className="text-[10px] text-slate-500 font-semibold tracking-wider font-mono uppercase">
                 Pack Units Sold
               </div>
@@ -155,7 +158,7 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
             </div>
           </div>
 
-          <div className="p-4 bg-gradient-to-r from-orange-500/10 to-amber-500/5 border border-orange-500/20 rounded-2xl flex items-center justify-between">
+          <div className="lube-revenue">
             <div className="flex items-center gap-2.5">
               <TrendingUp className="w-5 h-5 text-orange-400 shrink-0" />
               <div>
@@ -177,7 +180,7 @@ export const LubeDailySummaryPanel: React.FC<LubeDailySummaryPanelProps> = ({
           <div className="space-y-3">
             <h4 className="text-xs font-bold text-white tracking-wider uppercase font-mono">SKU-Wise Sales breakdown</h4>
             {summary.bySku && summary.bySku.length > 0 ? (
-              <div className="overflow-x-auto border border-slate-800 rounded-xl">
+              <div className="lube-table overflow-x-auto border rounded-xl">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-slate-950 border-b border-slate-800 text-[10px] font-mono text-slate-400 uppercase tracking-wider">

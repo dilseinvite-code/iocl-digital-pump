@@ -106,16 +106,19 @@ export const LubeTransactionsPanel: React.FC<LubeTransactionsPanelProps> = ({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-white">Stock Transactions Ledger</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Historical ledger of all receipts, opening balances, and manual inventory adjustments</p>
+    <div className="lube-panel space-y-4">
+      <div className="dc-detail-heading lube-panel-heading">
+        <div className="dc-detail-title">
+          <span className="dc-detail-icon" data-color="blue"><Clipboard size={20} aria-hidden="true"/></span>
+          <div>
+            <h3>Stock Transactions Ledger</h3>
+          <p>Historical ledger of all receipts, opening balances, and manual inventory adjustments</p>
+        </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onRefresh}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
+            className="lube-refresh" aria-label="Refresh transaction ledger"
             disabled={loading}
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -143,7 +146,7 @@ export const LubeTransactionsPanel: React.FC<LubeTransactionsPanelProps> = ({
           <RefreshCw className="w-8 h-8 text-orange-500 animate-spin" />
         </div>
       ) : transactions.length === 0 ? (
-        <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+        <div className="lube-empty space-y-3">
           <Clipboard className="w-8 h-8 text-slate-500 mx-auto" />
           <h4 className="text-sm font-semibold text-white">No Transactions Recorded</h4>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
@@ -165,7 +168,7 @@ export const LubeTransactionsPanel: React.FC<LubeTransactionsPanelProps> = ({
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto border border-slate-800 rounded-xl">
+        <div className="lube-table overflow-x-auto border rounded-xl">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-950 border-b border-slate-800 text-[10px] font-mono text-slate-400 uppercase tracking-wider">
@@ -213,7 +216,7 @@ export const LubeTransactionsPanel: React.FC<LubeTransactionsPanelProps> = ({
       {/* Create Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-xl p-6 space-y-4">
+          <div role="dialog" aria-modal="true" aria-label="Inventory transaction" className="lube-dialog relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-white">Record Inventory Transaction</h3>
               <button
