@@ -1,10 +1,11 @@
 import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { User, RoleCode } from '../../shared/types';
-import { PERMISSIONS, ROLES } from '../../shared/constants';
+import { User, RoleCode, RetailOutlet } from '../../shared/types';
+import { PERMISSIONS, ROLES, isOutletManager, OUTLET_MANAGER_PARENT } from '../../shared/constants';
 import { SectionSearchBar } from '../components/common/SectionSearchBar';
 import { filterUsersForSearch } from '../utils/sectionSearchHelpers';
 import { Users, UserPlus, Shield, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
@@ -35,6 +36,23 @@ export const UsersPage = () => {
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE' | 'SUSPENDED',
   };
   const [form, setForm] = useState(initialForm);
+  const selectedManagerRole = isOutletManager(form.roleCodes[0]) ? form.roleCodes[0] : null;
+  const [managerOutletId,setManagerOutletId]=useState('');
+  const [managerOutlets,setManagerOutlets]=useState<RetailOutlet[]>([]);
+  const [managerOutletsLoading,setManagerOutletsLoading]=useState(false);
+  const [managerOutletsError,setManagerOutletsError]=useState('');
+  useEffect(()=>{
+    if(!modalOpen || !selectedManagerRole) return;
+    let active=true;
+    setManagerOutletsLoading(true);setManagerOutletsError('');
+    apiFetch<RetailOutlet[]>('/api/v1/outlets',{cache:'no-store'}).then(res=>{
+      if(!active)return;
+      setManagerOutlets(res.success&&Array.isArray(res.data)?res.data.filter(o=>o.status==='ACTIVE'&&!o.isArchived&&!o.directoryHidden&&o.lifecycleStatus!=='ARCHIVED'):[]);
+      if(!res.success)setManagerOutletsError(res.error?.message||'Unable to load accessible outlets.');
+      setManagerOutletsLoading(false);
+    });
+    return ()=>{active=false;};
+  },[modalOpen,selectedManagerRole]);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -59,18 +77,21 @@ export const UsersPage = () => {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (createLock.current || statusLock.current || !hasPermission(PERMISSIONS.USERS_CREATE)) return;
+    if(selectedManagerRole && (!managerOutletId || !managerOutlets.some(o=>o.id===managerOutletId))){
+      setErrorMsg('Select an authorized retail outlet for the manager.');return;
+    }
     createLock.current=true;
     setCreatingUser(true);
     setErrorMsg(null);
     try {
       const res = await apiFetch('/api/v1/users', {
         method: 'POST',
-        body: JSON.stringify(form),
+        body: JSON.stringify({...form,...(selectedManagerRole?{initialScope:{scopeLevel:'OUTLET',outletId:managerOutletId}}:{})}),
       });
       if (res.success) {
         setModalOpen(false);
         setForm(initialForm);
-        setStatusFeedback({kind:'success',message:'User created. Assign the appropriate access scope if needed.'});
+        setStatusFeedback({kind:'success',message:selectedManagerRole?'Manager created with assigned outlet access.':'User created. Assign the appropriate access scope if needed.'});
         await fetchUsers();
       } else {
         setErrorMsg(res.error?.message || 'Failed to create user');
@@ -125,6 +146,7 @@ export const UsersPage = () => {
             onClick={() => {
               setErrorMsg(null);
               setForm(initialForm);
+              setManagerOutletId('');
               setModalOpen(true);
             }}
             className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-[#17365D] text-xs font-bold rounded-lg shadow-lg shadow-orange-500/20 flex items-center gap-2 self-start sm:self-auto"
@@ -192,7 +214,7 @@ export const UsersPage = () => {
                         <div className="flex flex-wrap gap-1">
                           {u.roles?.map((r: string) => (
                             <span key={r} className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-blue-500/10 text-blue-800 border border-blue-500/30">
-                              {r}
+                              {isOutletManager(r)?r.replaceAll('_',' '):r}
                             </span>
                           ))}
                         </div>
@@ -230,7 +252,7 @@ export const UsersPage = () => {
       )}
 
       {/* Provision User Modal */}
-      {modalOpen && (
+      {modalOpen && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
           <div role="dialog" aria-modal="true" aria-labelledby="create-user-title" className="bg-white border border-[#E2E8F0] rounded-xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90dvh] overflow-y-auto">
             <h2 id="create-user-title" className="text-lg font-bold text-[#17365D]">Create User</h2>
@@ -305,17 +327,37 @@ export const UsersPage = () => {
                 <label htmlFor="create-user-roleCodes" className="block text-[#475569] font-semibold mb-1">Assign System Role</label>
                 <select
                   id="create-user-roleCodes" value={form.roleCodes[0]}
-                  onChange={e => setForm({ ...form, roleCodes: [e.target.value as RoleCode] })}
+                  onChange={e => {setForm({ ...form, roleCodes: [e.target.value as RoleCode] });setManagerOutletId('');setErrorMsg(null);}}
                   className="w-full px-3 py-2 bg-[#F1F5F9] border border-[#D7E0EA] rounded-lg text-[#17365D] font-mono"
                 >
                   <option value={ROLES.ADMIN}>ADMIN (Global)</option>
                   <option value={ROLES.STATE_OFFICE}>STATE_OFFICE</option>
                   <option value={ROLES.DIVISIONAL_OFFICE}>DIVISIONAL_OFFICE</option>
                   <option value={ROLES.FIELD_OFFICER}>FIELD_OFFICER</option>
-                  <option value={ROLES.DEALER}>DEALER</option>
-                  <option value={ROLES.CSP}>CSP</option>
+                  <optgroup label="Dealer hierarchy">
+                    <option value={ROLES.DEALER}>DEALER</option>
+                    <option value={ROLES.DEALER_MANAGER}>Dealer Manager</option>
+                  </optgroup>
+                  <optgroup label="CSP hierarchy">
+                    <option value={ROLES.CSP}>CSP</option>
+                    <option value={ROLES.CSP_MANAGER}>CSP Manager</option>
+                  </optgroup>
                 </select>
               </div>
+              {selectedManagerRole && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 space-y-2">
+                  <p className="font-bold text-[#17365D]">{OUTLET_MANAGER_PARENT[selectedManagerRole]} → {selectedManagerRole.replaceAll('_',' ')}</p>
+                  <p className="text-[#475569]">Outlet-level manager. No automatic access to other outlets or organizational administration.</p>
+                  <label htmlFor="create-manager-outlet" className="block font-semibold text-[#17365D]">Assigned retail outlet</label>
+                  <select id="create-manager-outlet" required value={managerOutletId} onChange={e=>setManagerOutletId(e.target.value)}
+                    disabled={managerOutletsLoading||creatingUser} className="w-full px-3 py-2 bg-white border border-[#D7E0EA] rounded-lg text-[#17365D]">
+                    <option value="">{managerOutletsLoading?'Loading outlets…':'-- Select outlet --'}</option>
+                    {managerOutlets.map(o=><option key={o.id} value={o.id}>{o.name} ({o.roCode})</option>)}
+                  </select>
+                  {managerOutletsError && <p role="alert" className="text-red-700">{managerOutletsError}</p>}
+                  {!managerOutletsError && !managerOutletsLoading && !managerOutlets.length && <p>No active outlets available within your scope.</p>}
+                </div>
+              )}
               <div className="pt-3 flex items-center justify-end gap-3">
                 <button
                   type="button"
@@ -327,7 +369,7 @@ export const UsersPage = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={creatingUser}
+                  disabled={creatingUser||!!selectedManagerRole&&(!managerOutletId||managerOutletsLoading)}
                   className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-bold shadow-md disabled:opacity-50"
                 >
                   {creatingUser ? 'Provisioning...' : 'Provision User'}
@@ -335,7 +377,7 @@ export const UsersPage = () => {
               </div>
             </form>
           </div>
-        </div>
+        </div>, document.body
       )}
     </div>
   );

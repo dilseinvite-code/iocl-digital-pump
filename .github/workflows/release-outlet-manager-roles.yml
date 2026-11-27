@@ -1,0 +1,80 @@
+name: Release outlet manager hierarchy to production Worker
+
+# Apply only the idempotent 0043 RBAC inserts and deploy reviewed Worker code.
+# No existing user, hierarchy, operational or permission grant is updated.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-outlet-manager-roles.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iocl-worker-production-releases
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Install manager RBAC roles and deploy Worker
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Validate typecheck and hierarchy/security regression tests
+        run: |
+          bun run typecheck
+          bun test --timeout 15000 tests/outletManagerRoles.test.ts tests/security.test.ts tests/hierarchyEditing.test.ts
+      - name: Verify existing production Worker and D1 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const config=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          const binding=config.d1_databases?.[0];
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          if(!token||account!=='93888554ef9d9e0b8c18b322683a9652'||config.name!=='iocl-digital-pump-manager'||config.vars?.ENVIRONMENT!=='production'||config.d1_databases?.length!==1||binding?.binding!=='DB'||binding?.database_name!=='iocl-pump-manager-d1'||binding?.database_id!=='305f76c6-c940-443f-86a9-33c309a55578') throw Error('Production identity or credentials mismatch.');
+          const url='https://api.cloudflare.com/client/v4/accounts/'+account+'/d1/database/'+binding.database_id;
+          const headers={Authorization:'Bearer '+token,Accept:'application/json'};
+          const res=await fetch(url,{headers,signal:AbortSignal.timeout(35000)});
+          if(!res.ok)throw Error('Production D1 identity lookup failed.');
+          const data=await res.json();
+          if(!data.success||data.result?.uuid!==binding.database_id||data.result?.name!==binding.database_name||data.result?.version!=='production')throw Error('Production D1 identity mismatch.');
+          const recovery=await fetch(url+'/time_travel/bookmark',{headers,signal:AbortSignal.timeout(35000)});
+          if(!recovery.ok)throw Error('Production D1 recovery bookmark unavailable.');
+          const bookmark=await recovery.json();
+          if(!bookmark.success||typeof bookmark.result?.bookmark!=='string')throw Error('Production D1 recovery bookmark invalid.');
+          console.log('Production database identity and recovery bookmark verified.');
+          JS
+          result=$(npx wrangler d1 execute iocl-pump-manager-d1 --remote --config wrangler.jsonc --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('states','divisions','sales_areas','retail_outlets','user_scope_assignments','audit_logs','org_officer_postings');" --json --yes)
+          printf '%s\n' "$result" | jq -e '.[0].results | length == 7' >/dev/null
+          echo 'Existing hierarchy tables verified. No migrations or data changes.'
+      - name: Install and verify only the two manager roles
+        shell: bash
+        run: |
+          set -euo pipefail
+          query() { npx wrangler d1 execute iocl-pump-manager-d1 --remote --config wrangler.jsonc --command "$1" --json --yes; }
+          # Ensure exactly the expected parent roles exist and no conflicting
+          # manager ID or code is present before the narrowly scoped inserts.
+          query "SELECT COUNT(*) AS n FROM roles WHERE code IN ('DEALER','CSP')" | jq -e '.[0].results[0].n == 2' >/dev/null
+          query "SELECT COUNT(*) AS n FROM roles WHERE (id='role-dealer-manager' AND code<>'DEALER_MANAGER') OR (id='role-csp-manager' AND code<>'CSP_MANAGER') OR (code='DEALER_MANAGER' AND id<>'role-dealer-manager') OR (code='CSP_MANAGER' AND id<>'role-csp-manager')" | jq -e '.[0].results[0].n == 0' >/dev/null
+          npx wrangler d1 execute iocl-pump-manager-d1 --remote --config wrangler.jsonc --file migrations/additive/0043_outlet_manager_roles.sql --json --yes >/dev/null
+          query "SELECT COUNT(DISTINCT r.code) AS n FROM roles r JOIN role_permissions rp ON rp.role_id=r.id JOIN permissions p ON p.id=rp.permission_id WHERE r.code IN ('DEALER_MANAGER','CSP_MANAGER') AND p.code='outlets.read'" | jq -e '.[0].results[0].n == 2' >/dev/null
+          query "SELECT COUNT(*) AS n FROM roles r JOIN role_permissions rp ON rp.role_id=r.id JOIN permissions p ON p.id=rp.permission_id WHERE r.code IN ('DEALER_MANAGER','CSP_MANAGER') AND (p.code LIKE 'users.%' OR p.code LIKE 'scopes.%' OR p.code LIKE '%.manage%' OR p.code IN ('hierarchy.write','outlets.create','outlets.update','bank_deposits.verify','cash_handover.acknowledge'))" | jq -e '.[0].results[0].n == 0' >/dev/null
+          echo 'Both manager role definitions and operational grants verified.'
+      - name: Deploy reviewed Worker source
+        run: npx wrangler deploy --config wrangler.jsonc
+      - name: Report release
+        if: success()
+        run: echo 'Manager RBAC roles added and Worker code deployed. No existing user or operational records changed.' >> "$GITHUB_STEP_SUMMARY"

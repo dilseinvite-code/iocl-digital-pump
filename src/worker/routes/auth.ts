@@ -1,3 +1,4 @@
+import { hasOutletManagerRole } from '../../shared/constants';
 import { Hono } from 'hono';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import bcrypt from 'bcryptjs';
@@ -117,9 +118,11 @@ auth.post('/login', async (c) => {
   const scopeRepo = new ScopeRepository(db);
   const outletRepo = new OutletRepository(db);
   const roles = await userRepo.getUserRoles(authUser.user.id);
-  const scopes = await scopeRepo.getUserScopes(authUser.user.id);
+  const rawScopes = await scopeRepo.getUserScopes(authUser.user.id);
+  const manager = hasOutletManagerRole(roles);
+  const scopes = manager ? rawScopes.filter(s => s.scopeLevel === 'OUTLET' && s.outletId) : rawScopes;
   const allScopes = await scopeRepo.getUserScopes(authUser.user.id, { includeArchived: true });
-  const activeOutletAssignments = await outletRepo.getUserOutletAssignments(authUser.user.id);
+  const activeOutletAssignments = manager ? [] : await outletRepo.getUserOutletAssignments(authUser.user.id);
   const allOutletAssignments = await outletRepo.getUserOutletAssignments(authUser.user.id, { includeArchived: true });
 
   if (

@@ -90,9 +90,9 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false, performanceUi=false, remainingUi=false, signedOut=false, hierarchyEditUi=false;
+    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false, performanceUi=false, remainingUi=false, signedOut=false, hierarchyEditUi=false, managerUi=false;
     const editedUnits={states:[{id:"fixture-state",code:"ST-01",name:"Fixture State",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"},{id:"fixture-other-state",code:"ST-02",name:"Other State",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}],divisions:[{id:"fixture-division",stateId:"fixture-state",stateName:"Fixture State",code:"DIV-01",name:"Fixture Division",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}],"sales-areas":[{id:"fixture-area",divisionId:"fixture-division",divisionName:"Fixture Division",stateId:"fixture-state",code:"SA-01",name:"Fixture Area",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}]};
-    const hierarchyPatches=[], hierarchyDeletes=[];
+    const hierarchyPatches=[], hierarchyDeletes=[], managerRequests=[], managerUsers=[];
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -129,6 +129,18 @@ async function main(){
           if(kind==='states')for(const div of editedUnits.divisions)if(div.stateId===id)div.stateName=current.name;
           if(kind==='divisions')for(const area of editedUnits['sales-areas'])if(area.divisionId===id)area.divisionName=current.name;
           return route.fulfill({json:ok(current)});
+        }
+      }
+      if(managerUi && url.pathname==='/api/v1/users'){
+        if(req.method()==='GET')return route.fulfill({json:ok(managerUsers)});
+        if(req.method()==='POST'){
+          const body=req.postDataJSON();
+          assert(['DEALER_MANAGER','CSP_MANAGER'].includes(body.roleCodes[0]));
+          assert.deepEqual(body.initialScope,{scopeLevel:'OUTLET',outletId:'fixture-b'});
+          managerRequests.push({role:body.roleCodes[0],scope:body.initialScope});
+          const user={id:'fixture-'+body.roleCodes[0],name:body.name,empCode:body.empCode,email:body.email,status:'ACTIVE',roles:body.roleCodes,scopes:[{id:'scope-'+body.roleCodes[0],scopeLevel:'OUTLET',outletId:'fixture-b'}]};
+          managerUsers.push(user);
+          return route.fulfill({status:201,json:ok(user)});
         }
       }
       if(req.method()!=='GET'){blocked.push(req.method()+' '+url.pathname);return route.abort();}
@@ -947,6 +959,37 @@ async function main(){
       }
       assert.deepEqual(hierarchyDeletes.map(x=>x.id),['fixture-empty-area','fixture-empty-division','fixture-other-state']);
       console.log('PASS hierarchy deletion: scoped permissions, cancel, linked-unit conflict, three-level confirmed deletion, refreshed counts and responsive dialog.');
+      // Manager hierarchy and provisioning are verified using fixture-only requests.
+      managerUi=true;
+      await page.goto(base+'/hierarchy');
+      const personnel=page.getByRole('region',{name:'Outlet personnel hierarchy'});
+      await personnel.getByText('Dealer Manager',{exact:true}).waitFor();
+      await personnel.getByText('CSP Manager',{exact:true}).waitFor();
+      await personnel.getByRole('link',{name:'Manage users'}).click();
+      await page.getByRole('heading',{name:'User Directory'}).waitFor();
+      for(const [role,label] of [['DEALER_MANAGER','Dealer Manager'],['CSP_MANAGER','CSP Manager']]){
+        await page.getByRole('button',{name:'Provision New User'}).click();
+        const modal=page.getByRole('dialog',{name:'Create User'});
+        await modal.getByLabel('Assign System Role').selectOption(role);
+        await modal.getByLabel('Assigned retail outlet').locator('option[value="fixture-b"]').waitFor({state:'attached'});
+        assert.equal(await modal.getByRole('button',{name:'Provision User',exact:true}).isEnabled(),false);
+        for(const [w,h] of [[320,640],[390,844],[1440,900]]){
+          await page.setViewportSize({width:w,height:h});
+          const b=await modal.boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1&&b.y>=0&&b.y+b.height<=h+1,'Manager provisioning dialog clipped at '+w);
+          if(w===390||w===1440)await capture(role.toLowerCase()+'-provision-'+w);
+        }
+        await modal.getByLabel('Employee code').fill('FIX-'+role);
+        await modal.getByLabel('Full Name').fill('Fixture '+label);
+        await modal.getByLabel('Official Email').fill(role.toLowerCase()+'@example.invalid');
+        await modal.getByLabel('Phone Number').fill('1234567890');
+        await modal.getByLabel('Password',{exact:true}).fill('fixture-only-password');
+        await modal.getByLabel('Assigned retail outlet').selectOption('fixture-b');
+        await modal.getByRole('button',{name:'Provision User',exact:true}).click();
+        await page.getByText('Manager created with assigned outlet access.',{exact:true}).waitFor();
+        await page.getByText('Fixture '+label,{exact:true}).waitFor();
+      }
+      assert.deepEqual(managerRequests.map(x=>x.role),['DEALER_MANAGER','CSP_MANAGER']);
+      console.log('PASS outlet manager hierarchy: both branches, required assigned outlet, responsive provisioning and fixture-only creation.');
       // Production login is a separate public surface; do not attempt to sign in.
       signedOut=true;
       await page.goto(base+'/');

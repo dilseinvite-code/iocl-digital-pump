@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { parseMilliunits } from './precision';
+import { hasOutletManagerRole } from './constants';
 import { parseLubeQuantity } from './lubeUtils';
 
 export const LoginSchema = z.object({
@@ -15,6 +16,8 @@ export const RoleCodeSchema = z.enum([
   'FIELD_OFFICER',
   'DEALER',
   'CSP',
+  'DEALER_MANAGER',
+  'CSP_MANAGER',
 ]);
 
 export const ScopeLevelSchema = z.enum([
@@ -40,6 +43,12 @@ export const CreateUserSchema = z.object({
     salesAreaId: z.string().nullable().optional(),
     outletId: z.string().nullable().optional(),
   }).optional(),
+}).superRefine((data, ctx) => {
+  if (!hasOutletManagerRole(data.roleCodes)) return;
+  if (data.roleCodes.length !== 1) ctx.addIssue({ code: 'custom', path: ['roleCodes'], message: 'Managers must have exactly one manager role.' });
+  if (data.initialScope?.scopeLevel !== 'OUTLET' || !data.initialScope.outletId) {
+    ctx.addIssue({ code: 'custom', path: ['initialScope'], message: 'Managers require an explicit retail outlet assignment.' });
+  }
 });
 
 export const UpdateUserSchema = z.object({

@@ -66,7 +66,7 @@ users.post('/', requirePermission(PERMISSIONS.USERS_CREATE) as any, async (c: Ap
       data: null,
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'Invalid user payload: roleCodes must be a valid enum of known system roles and required fields must be present.',
+        message: parseResult.error.issues.find(issue => issue.code === 'custom')?.message || 'Invalid user payload: roleCodes must be a valid enum of known system roles and required fields must be present.',
         details: parseResult.error.flatten(),
       },
     }, 400);

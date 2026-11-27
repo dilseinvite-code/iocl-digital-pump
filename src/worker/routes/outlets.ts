@@ -1,3 +1,5 @@
+import { hasOutletManagerRole } from '../../shared/constants';
+import { UserRepository } from '../repositories/userRepository';
 import { Hono } from 'hono';
 import { getDb } from '../../db';
 import { OutletRepository } from '../repositories/outletRepository';
@@ -440,6 +442,12 @@ outlets.post('/:id/assignments', requirePermission(PERMISSIONS.OUTLETS_UPDATE) a
   const db = getDb(c.env.DB);
   const outletRepo = new OutletRepository(db);
   const auditRepo = new AuditRepository(db);
+
+  // Manager access is explicitly provisioned/revoked using Scopes, avoiding
+  // a second hidden grant from the generic personnel assignment endpoint.
+  if (hasOutletManagerRole(await new UserRepository(db).getUserRoles(payload.userId))) {
+    return c.json({ success: false, data: null, error: { code: 'MANAGER_OUTLET_SCOPE_REQUIRED', message: 'Assign manager access through Access Scopes (retail outlet only).' } }, 400);
+  }
 
   const nowIso = new Date().toISOString();
   let createdAssignment;

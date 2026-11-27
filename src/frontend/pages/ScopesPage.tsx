@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { UserScopeAssignment, User, State, Division, SalesArea, RetailOutlet } from '../../shared/types';
-import { PERMISSIONS, SCOPE_LEVELS, ScopeLevel } from '../../shared/constants';
+import { PERMISSIONS, SCOPE_LEVELS, ScopeLevel, hasOutletManagerRole } from '../../shared/constants';
 import { SectionSearchBar } from '../components/common/SectionSearchBar';
 import { filterScopesForSearch } from '../utils/sectionSearchHelpers';
 import { MapPin, Plus, Trash2, AlertCircle, CheckCircle2, Building2 } from 'lucide-react';
@@ -13,7 +13,7 @@ import { buildScopeAssignmentPayload } from './scopesUiHelper';
 export const ScopesPage: React.FC = () => {
   const { hasPermission } = useAuth();
   const [scopes, setScopes] = useState<UserScopeAssignment[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<(User & {roles?: string[]})[]>([]);
   const [states, setStates] = useState<State[]>([]);
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [salesAreas, setSalesAreas] = useState<SalesArea[]>([]);
@@ -42,7 +42,7 @@ export const ScopesPage: React.FC = () => {
     try {
     const [scopesRes, usersRes, statesRes, divRes, saRes, outletRes] = await Promise.all([
       apiFetch<UserScopeAssignment[]>('/api/v1/scopes'),
-      apiFetch<User[]>('/api/v1/users'),
+      apiFetch<(User & {roles?: string[]})[]>('/api/v1/users'),
       apiFetch<State[]>('/api/v1/hierarchy/states'),
       apiFetch<Division[]>('/api/v1/hierarchy/divisions'),
       apiFetch<SalesArea[]>('/api/v1/hierarchy/sales-areas'),
@@ -67,10 +67,12 @@ export const ScopesPage: React.FC = () => {
     return filterScopesForSearch(scopes, searchQuery, users, states, divisions, salesAreas, outlets).filter(s=>levelFilter==='ALL'||s.scopeLevel===levelFilter);
   }, [scopes, searchQuery, users, states, divisions, salesAreas, outlets,levelFilter]);
 
+  const selectedUserIsManager=hasOutletManagerRole(users.find(u=>u.id===selectedUserId)?.roles||[]);
   const handleCreateScope = async (e: React.FormEvent) => {
     e.preventDefault();
     if(scopeLock.current||!hasPermission(PERMISSIONS.SCOPES_ASSIGN))return;
     setErrorMsg(null);
+    if(selectedUserIsManager && scopeLevel!=='OUTLET'){setErrorMsg('Managers may only receive retail outlet access.');return;}
     const validation = buildScopeAssignmentPayload({
       userId: selectedUserId,
       scopeLevel,
@@ -237,6 +239,7 @@ export const ScopesPage: React.FC = () => {
                   value={selectedUserId}
                   onChange={e => {
                     setSelectedUserId(e.target.value);
+                    if(hasOutletManagerRole(users.find(u=>u.id===e.target.value)?.roles||[]))setScopeLevel('OUTLET');
                     setErrorMsg(null);
                   }}
                   className="w-full px-3 py-2 bg-[#F1F5F9] border border-[#D7E0EA] rounded-lg text-[#17365D] font-mono"
@@ -251,6 +254,7 @@ export const ScopesPage: React.FC = () => {
                 <label className="block text-[#475569] font-semibold mb-1">Scope Level</label>
                 <select
                   value={scopeLevel}
+                  disabled={selectedUserIsManager}
                   onChange={e => {
                     setScopeLevel(e.target.value as ScopeLevel);
                     setErrorMsg(null);
@@ -264,6 +268,7 @@ export const ScopesPage: React.FC = () => {
                   <option value="OUTLET">OUTLET (Single Outlet Boundary)</option>
                 </select>
               </div>
+              {selectedUserIsManager && <p className="rounded-lg bg-blue-50 p-2 text-[#17365D]">Manager account: only assigned retail outlets are permitted.</p>}
               {scopeLevel !== 'GLOBAL' && (
                 <div>
                   <label className="block text-[#475569] font-semibold mb-1">State Office</label>

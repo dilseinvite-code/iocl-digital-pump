@@ -1,3 +1,4 @@
+import { isOutletManager, OUTLET_MANAGER_PARENT } from '../../shared/constants';
 import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect, useMemo } from 'react';
@@ -332,6 +333,7 @@ export const RbacPage: React.FC = () => {
                   {roles.map((r) => (
                     <th key={r.id} className="p-4 text-center font-bold text-[#17365D] whitespace-nowrap">
                       {r.code}
+                      {isOutletManager(r.code)&&<span className="block text-[10px] text-[#64748B] font-normal">Under {OUTLET_MANAGER_PARENT[r.code as keyof typeof OUTLET_MANAGER_PARENT]}</span>}
                     </th>
                   ))}
                   {/* Selected User Access Column Header */}
