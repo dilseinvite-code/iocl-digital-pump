@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../services/api';
@@ -75,9 +76,9 @@ export const HierarchyPage: React.FC = () => {
   };
 
   return (
-    <div className="admin-modern space-y-6 pb-10">
+    <div className="admin-modern daily-command workspace-command pb-10">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
+      <div className="workspace-command-heading flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
         <div>
           <div className="flex items-center gap-2">
             <Layers className="w-6 h-6 text-orange-500" />
@@ -101,11 +102,13 @@ export const HierarchyPage: React.FC = () => {
           </button>
         )}
       </div>
+      <WorkspaceCommandContext module="hierarchy" />
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-[#E2E8F0] pb-2">
+      <div className="workspace-command-tabs flex items-center gap-2 border-b border-[#E2E8F0] pb-2">
         <button
-          onClick={() => setActiveTab('states')}
+          aria-pressed={activeTab === 'states'}
+              onClick={() => setActiveTab('states')}
           className={`px-3 py-1.5 rounded-lg text-xs font-semibold font-mono transition-colors ${
             activeTab === 'states' ? 'bg-orange-500 text-white' : 'text-[#64748B] hover:text-[#17365D] bg-[#F1F5F9]'
           }`}
@@ -114,7 +117,8 @@ export const HierarchyPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('divisions')}
+          aria-pressed={activeTab === 'divisions'}
+              onClick={() => setActiveTab('divisions')}
           className={`px-3 py-1.5 rounded-lg text-xs font-semibold font-mono transition-colors ${
             activeTab === 'divisions' ? 'bg-orange-500 text-white' : 'text-[#64748B] hover:text-[#17365D] bg-[#F1F5F9]'
           }`}
@@ -123,7 +127,8 @@ export const HierarchyPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('salesAreas')}
+          aria-pressed={activeTab === 'salesAreas'}
+              onClick={() => setActiveTab('salesAreas')}
           className={`px-3 py-1.5 rounded-lg text-xs font-semibold font-mono transition-colors ${
             activeTab === 'salesAreas' ? 'bg-orange-500 text-white' : 'text-[#64748B] hover:text-[#17365D] bg-[#F1F5F9]'
           }`}

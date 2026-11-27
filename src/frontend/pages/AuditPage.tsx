@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../services/api';
@@ -21,8 +22,8 @@ export const AuditPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="admin-modern space-y-6 pb-10">
-      <div className="pb-4 border-b border-[#E2E8F0]">
+    <div className="admin-modern daily-command workspace-command pb-10">
+      <div className="workspace-command-heading pb-4 border-b border-[#E2E8F0]">
         <div className="flex items-center gap-2">
           <Activity className="w-6 h-6 text-purple-400" />
           <h1 className="text-xl font-extrabold text-[#17365D]">System Audit Trail</h1>
@@ -31,6 +32,7 @@ export const AuditPage: React.FC = () => {
           Immutable system log capturing all mutations, user activities, IP addresses, and state changes.
         </p>
       </div>
+      <WorkspaceCommandContext module="audit" />
 
       {loading ? (
         <div className="py-12 text-center text-xs text-[#64748B] font-mono animate-pulse">

@@ -37,7 +37,7 @@ export const UtilitySummaryPanel: React.FC<UtilitySummaryPanelProps> = ({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="workspace-command-metrics grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Pending Bills */}
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-sm relative overflow-hidden group hover:border-amber-500/30 transition-all">
           <div className="flex items-center justify-between">

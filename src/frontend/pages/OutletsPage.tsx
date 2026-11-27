@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiFetch } from '../services/api';
@@ -548,9 +549,9 @@ export const OutletsPage: React.FC = () => {
   });
 
   return (
-    <div className="admin-modern space-y-5 pb-10 max-w-[1500px] mx-auto">
+    <div className="admin-modern daily-command workspace-command pb-10 max-w-[1500px] mx-auto">
       {/* Page Header */}
-      <div className="option4-hero flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 sm:p-7">
+      <div className="workspace-command-heading option4-hero flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 sm:p-7">
         <img className="option4-station-art" src="/option4-fuel-station.svg" alt="" aria-hidden="true" />
         <div className="option4-hero-content max-w-2xl">
           <span className="option4-eyebrow">Outlet Setup / Retail Outlets</span>
@@ -579,6 +580,7 @@ export const OutletsPage: React.FC = () => {
           </>
         )}
       </div>
+      <WorkspaceCommandContext module="outlets" />
 
       {showExcelImporter && <DealerMasterExcelImporter onCompleted={() => void fetchOutlets()} />}
 

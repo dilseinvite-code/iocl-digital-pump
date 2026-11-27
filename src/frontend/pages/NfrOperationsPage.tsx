@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './operationsModern.css';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -260,9 +261,9 @@ export const NfrOperationsPage: React.FC = () => {
     : undefined;
 
   return (
-    <div className="operations-modern p-4 sm:p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="operations-modern daily-command workspace-command p-4 sm:p-6 max-w-7xl mx-auto">
       {/* Top Header & Outlet Selector */}
-      <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
+      <div className="workspace-command-heading bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500">
@@ -328,16 +329,18 @@ export const NfrOperationsPage: React.FC = () => {
           </div>
         )}
       </div>
+      <WorkspaceCommandContext module="nfr" />
 
       {/* NFR Financial & Operational Summary */}
       <NfrSummaryPanel summary={summary} loading={isLoadingSummary} />
 
       {/* Tabs Bar */}
       <div className="bg-white border border-[#E2E8F0] rounded-2xl p-1.5 shadow-sm">
-        <div className="flex items-center gap-1 overflow-x-auto">
+        <div className="workspace-command-tabs flex items-center gap-1 overflow-x-auto">
           <button
             type="button"
-            onClick={() => handleTabChange('spaces')}
+            aria-pressed={activeTab === 'spaces'}
+              onClick={() => handleTabChange('spaces')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
               activeTab === 'spaces'
                 ? 'bg-amber-500 text-slate-950 shadow-sm'
@@ -350,7 +353,8 @@ export const NfrOperationsPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => handleTabChange('vendors')}
+            aria-pressed={activeTab === 'vendors'}
+              onClick={() => handleTabChange('vendors')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
               activeTab === 'vendors'
                 ? 'bg-amber-500 text-slate-950 shadow-sm'
@@ -363,7 +367,8 @@ export const NfrOperationsPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => handleTabChange('leases')}
+            aria-pressed={activeTab === 'leases'}
+              onClick={() => handleTabChange('leases')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
               activeTab === 'leases'
                 ? 'bg-amber-500 text-slate-950 shadow-sm'
@@ -376,7 +381,8 @@ export const NfrOperationsPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => handleTabChange('rent-dues')}
+            aria-pressed={activeTab === 'rent-dues'}
+              onClick={() => handleTabChange('rent-dues')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
               activeTab === 'rent-dues'
                 ? 'bg-amber-500 text-slate-950 shadow-sm'

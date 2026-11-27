@@ -47,7 +47,7 @@ export const EquipmentHealthPanel: React.FC<EquipmentHealthPanelProps> = ({
   return (
     <div className="space-y-4 mb-6">
       {/* 4 Key KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="workspace-command-metrics grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Active Breakdowns */}
         <div className="relative overflow-hidden rounded-2xl bg-slate-900/80 border border-slate-800 p-5 shadow-lg shadow-black/20 hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between">

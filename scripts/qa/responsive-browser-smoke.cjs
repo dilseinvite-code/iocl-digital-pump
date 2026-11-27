@@ -90,7 +90,7 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false, performanceUi=false;
+    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false, performanceUi=false, remainingUi=false, signedOut=false;
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -102,9 +102,15 @@ async function main(){
       requests.push(url.pathname);
       if(req.method()!=='GET'){blocked.push(req.method()+' '+url.pathname);return route.abort();}
       const path=url.pathname;
-      if(path==='/api/v1/auth/me')return route.fulfill({json:ok(auth)});
+      if(path==='/api/v1/auth/me')return signedOut?route.fulfill({status:401,json:fail('Signed out fixture')}):route.fulfill({json:ok(auth)});
       if(path==='/api/v1/outlets')return route.fulfill({json:ok(outlets)});
       if(path==='/api/v1/users'||path==='/api/v1/hierarchy/states')return route.fulfill({json:ok([])});
+      // Additional workspaces use explicit empty list fixtures where applicable;
+      // unknown record/summary endpoints return a controlled unavailable response.
+      if(remainingUi){
+        if(['/api/v1/products','/api/v1/scopes','/api/v1/hierarchy/divisions','/api/v1/hierarchy/sales-areas','/api/v1/org/departments','/api/v1/org/officers','/api/v1/org/service-providers','/api/v1/roles','/api/v1/roles/permissions','/api/v1/audit-logs'].includes(path))return route.fulfill({json:ok([])});
+        return route.fulfill({status:503,json:fail('Fixture module records unavailable')});
+      }
       if(performanceUi && path.includes('/reports/monthly-operations')){
         const isPdf=path.endsWith('/pdf'), id=path.split('/')[4];
         const requestedOutlet=outlets.find(o=>o.id===id);
@@ -778,6 +784,50 @@ async function main(){
       await performanceOverview.waitFor();
       assert.equal(await page.getByRole('button',{name:'Preview PDF',exact:true}).count(),0);
       assert.equal(await page.getByRole('button',{name:'Download PDF',exact:true}).count(),0);
+      // Check all remaining reachable workspaces in a controlled API-empty/error state.
+      remainingUi=true; auth.isGlobalAdmin=true;auth.isGlobalScope=true;auth.primaryScope='GLOBAL';auth.roles=['ADMIN'];
+      const remaining=[
+        ['equipment',true],['utilities',true],['municipal-taxes',true],['nfr',true],['workforce',true],['documents',true],['pump-infrastructure',true],
+        ['outlets',false],['products',false],['users',false],['scopes',false],['hierarchy',false],['organization',false],['rbac',false],['audit',false],
+      ];
+      for(const [routePath,outletScoped] of remaining){
+        await page.goto(base+'/'+routePath);
+        const workspace=page.locator('.workspace-command');
+        await workspace.waitFor();await outlet.waitFor();
+        await outlet.selectOption('fixture-b');
+        const hierarchy=workspace.getByRole('region',{name:'Workspace organization hierarchy'});
+        const hero=workspace.getByRole('region',{name:'Workspace context'});
+        const guidance=workspace.getByRole('region',{name:'Workspace guidance'});
+        await guidance.waitFor();
+        if(outletScoped){
+          await hierarchy.getByRole('list',{name:'Selected outlet hierarchy'}).getByText(outlets[1].name+' · '+outlets[1].roCode,{exact:true}).waitFor();
+          await hero.getByRole('heading',{name:outlets[1].name,exact:true}).waitFor();
+        }else{
+          await hierarchy.getByRole('list',{name:'Organizational scope levels'}).waitFor();
+          await hero.getByRole('heading',{name:'Global access',exact:true}).waitFor();
+          assert.equal(await hierarchy.getByRole('list',{name:'Selected outlet hierarchy'}).count(),0);
+        }
+        for(const [w,h] of [[320,640],[390,844],[768,1024],[1440,900]]){
+          await checkViewport(w,h);
+          for(const panel of [hierarchy,hero,guidance]){
+            const b=await panel.boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1,routePath+' hierarchy panel clipped at '+w);
+          }
+          if(w===390||w===1440){await page.evaluate(()=>window.scrollTo(0,0));await capture('workspace-'+routePath+'-'+w);}
+        }
+        console.log('PASS remaining workspace: '+routePath);
+      }
+      // Production login is a separate public surface; do not attempt to sign in.
+      signedOut=true;
+      await page.goto(base+'/');
+      await page.getByRole('heading',{name:'Sign In to Enterprise Portal'}).waitFor();
+      await page.getByRole('textbox',{name:'Official Email Address'}).waitFor();
+      await page.getByLabel('Password',{exact:true}).waitFor();
+      assert.equal(await page.getByText('1-Click Phase 1A Role Testing (Development Mode)',{exact:true}).count(),0);
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1440,900]]){
+        await page.setViewportSize({width:w,height:h});
+        assert(await page.evaluate(()=>document.documentElement.scrollWidth)<=w+1,'Login overflow at '+w);
+        if(w===390||w===1440)await capture('workspace-login-'+w);
+      }
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
       console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, populated operational detail panels and exact totals, closed-shift controls, no mutation or real backend requests.');

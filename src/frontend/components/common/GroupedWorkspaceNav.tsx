@@ -9,7 +9,7 @@ export function GroupedWorkspaceNav<T extends string>({label, groups, active, on
 }) {
   const visible=groups.filter(group=>group.items.length>0);
   const selected=visible.find(group=>group.items.some(item=>item.id===active));
-  return <nav aria-label={label} className="rounded-xl border border-[#D7E0EA] bg-white overflow-hidden">
+  return <nav aria-label={label} className="workspace-group-nav rounded-xl border border-[#D7E0EA] bg-white overflow-hidden">
     <div role="group" aria-label="Work areas" className="flex flex-wrap gap-1.5 p-2 bg-[#F1F5F9] border-b border-[#D7E0EA]">
       {visible.map(group=><button key={group.id} type="button" aria-pressed={selected?.id===group.id} disabled={disabled}
         onClick={()=>{if(selected?.id!==group.id)onChange(group.items[0].id);}}

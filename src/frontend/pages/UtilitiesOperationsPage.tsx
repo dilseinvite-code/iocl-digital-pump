@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './operationsModern.css';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -306,9 +307,9 @@ export const UtilitiesOperationsPage: React.FC = () => {
   const selectedOutlet = outlets.find(o => o.id === selectedOutletId);
 
   return (
-    <div className="operations-modern p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="operations-modern daily-command workspace-command p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Top Header & Outlet Selector */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white border border-[#E2E8F0] p-5 rounded-3xl shadow-sm">
+      <div className="workspace-command-heading flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white border border-[#E2E8F0] p-5 rounded-3xl shadow-sm">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-lg shadow-orange-500/20 shrink-0">
             <Zap className="w-6 h-6" />
@@ -361,6 +362,7 @@ export const UtilitiesOperationsPage: React.FC = () => {
           </button>
         </div>
       </div>
+      <WorkspaceCommandContext module="utilities" />
 
       {/* Feedback Alerts */}
       {errorMessage && (
@@ -395,10 +397,11 @@ export const UtilitiesOperationsPage: React.FC = () => {
       <UtilitySummaryPanel summary={electricitySummary} loading={loadingData} />
 
       {/* Workspace Navigation Tabs */}
-      <div className="flex border-b border-[#E2E8F0] text-xs font-bold gap-2 overflow-x-auto">
+      <div className="workspace-command-tabs flex border-b border-[#E2E8F0] text-xs font-bold gap-2 overflow-x-auto">
         <button
           type="button"
-          onClick={() => setActiveTab('bills')}
+          aria-pressed={activeTab === 'bills'}
+              onClick={() => setActiveTab('bills')}
           className={`pb-3 px-3 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'bills'
               ? 'border-orange-500 text-[#B8530D]'
@@ -411,7 +414,8 @@ export const UtilitiesOperationsPage: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => setActiveTab('accounts')}
+          aria-pressed={activeTab === 'accounts'}
+              onClick={() => setActiveTab('accounts')}
           className={`pb-3 px-3 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'accounts'
               ? 'border-orange-500 text-[#B8530D]'
@@ -424,7 +428,8 @@ export const UtilitiesOperationsPage: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => setActiveTab('submeters')}
+          aria-pressed={activeTab === 'submeters'}
+              onClick={() => setActiveTab('submeters')}
           className={`pb-3 px-3 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'submeters'
               ? 'border-orange-500 text-[#B8530D]'
@@ -437,7 +442,8 @@ export const UtilitiesOperationsPage: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => setActiveTab('charges')}
+          aria-pressed={activeTab === 'charges'}
+              onClick={() => setActiveTab('charges')}
           className={`pb-3 px-3 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'charges'
               ? 'border-orange-500 text-[#B8530D]'
