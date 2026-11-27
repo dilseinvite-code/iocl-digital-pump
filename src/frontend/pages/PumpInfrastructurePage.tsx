@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect, useRef } from 'react';
 import { apiFetch, clearApiCache } from '../services/api';
@@ -1495,9 +1496,9 @@ export const PumpInfrastructurePage: React.FC = () => {
   }
 
   return (
-    <div className="admin-modern space-y-6 pb-10">
+    <div className="admin-modern daily-command workspace-command pb-10">
       {/* Top Header & Outlet Selector */}
-      <div className="bg-white border border-[#E2E8F0]/80 rounded-2xl p-5 shadow-sm shadow-black/20">
+      <div className="workspace-command-heading bg-white border border-[#E2E8F0]/80 rounded-2xl p-5 shadow-sm shadow-black/20">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -1555,6 +1556,7 @@ export const PumpInfrastructurePage: React.FC = () => {
           </div>
         )}
       </div>
+      <WorkspaceCommandContext module="pump" />
 
       {/* Notifications */}
       {successMsg && (

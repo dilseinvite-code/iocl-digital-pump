@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiFetch } from '../services/api';
@@ -201,9 +202,9 @@ export const RbacPage: React.FC = () => {
   };
 
   return (
-    <div className="admin-modern space-y-6 pb-10">
+    <div className="admin-modern daily-command workspace-command pb-10">
       {/* Page Header */}
-      <div className="pb-4 border-b border-[#E2E8F0] flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="workspace-command-heading pb-4 border-b border-[#E2E8F0] flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-6 h-6 text-purple-400" />
@@ -214,6 +215,7 @@ export const RbacPage: React.FC = () => {
           </p>
         </div>
       </div>
+      <WorkspaceCommandContext module="rbac" />
 
       {/* Global Admin: Manage User Permissions Section */}
       {isGlobalAdmin && (

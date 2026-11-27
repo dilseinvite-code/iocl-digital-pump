@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import { CocoDocumentationMastersPanel } from '../components/CocoDocumentationMastersPanel';
 import {DealerExcelLeaseSourcesPanel} from '../components/DealerExcelLeaseSourcesPanel';
@@ -811,16 +812,16 @@ export const DocumentsPage: React.FC = () => {
       : dueDatesAndActions.expiringWithin90Days;
 
   return (
-    <div className="admin-modern space-y-6 pb-10">
+    <div className="admin-modern daily-command workspace-command pb-10">
       {/* Top Header & COCO Outlet / Report Date Bar */}
-      <div className="bg-white border border-[#E2E8F0] rounded-xl p-5">
+      <div className="workspace-command-heading bg-white border border-[#E2E8F0] rounded-xl p-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2.5">
               <ShieldCheck className="w-6 h-6 text-orange-500" />
-              <h2 className="text-2xl font-bold text-[#17365D] tracking-tight">
+              <h1 className="text-2xl font-bold text-[#17365D] tracking-tight">
                 COCO Documentation
-              </h2>
+              </h1>
             </div>
             <p className="text-[#64748B] text-sm mt-1">
               Manage outlet compliance, supporting evidence and the section-wise PDF in one workspace.
@@ -913,6 +914,7 @@ export const DocumentsPage: React.FC = () => {
           </div>
         </div>
       </div>
+      <WorkspaceCommandContext module="documents" />
 
       {/* Feedback Banners */}
       {bannerError && (
@@ -950,34 +952,34 @@ export const DocumentsPage: React.FC = () => {
       {/* Legacy compliance summary is relevant only to its register and due-date view. */}
       {registerReady && (activeTab === 'REGISTER' || activeTab === 'DUE_DATES') && <div className="space-y-2">
       <p className="text-xs font-medium text-[#64748B]">Compliance register summary · includes linked agreements, claims and inspection records</p>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
+      <div className="workspace-command-metrics grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div data-tone="valid" className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
           <div className="text-xs font-medium text-[#64748B]">VALID</div>
           <div className="text-2xl font-bold text-emerald-700 mt-1">{summary.validCount}</div>
           <div className="text-[11px] text-[#64748B] mt-0.5">Active & compliant</div>
         </div>
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
+        <div data-tone="pending" className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
           <div className="text-xs font-medium text-[#64748B]">EXPIRING SOON</div>
           <div className="text-2xl font-bold text-amber-800 mt-1">{summary.expiringSoonCount}</div>
           <div className="text-[11px] text-[#64748B] mt-0.5">Within 30 days</div>
         </div>
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
+        <div data-tone="urgent" className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
           <div className="text-xs font-medium text-[#64748B]">EXPIRED</div>
           <div className="text-2xl font-bold text-red-700 mt-1">{summary.expiredCount}</div>
           <div className="text-[11px] text-[#64748B] mt-0.5">Past validity date</div>
         </div>
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
+        <div data-tone="pending" className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
           <div className="text-xs font-medium text-[#64748B]">PAYMENT PENDING</div>
           <div className="text-2xl font-bold text-[#B8530D] mt-1">{summary.paymentPendingCount}</div>
           <div className="text-[11px] text-[#64748B] mt-0.5">Tax, rent or utility due</div>
           <div className="text-[11px] text-[#64748B] mt-1">Pending approval: {summary.pendingApprovalCount ?? 0}</div>
         </div>
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
+        <div data-tone="urgent" className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
           <div className="text-xs font-medium text-[#64748B]">ACTION REQUIRED</div>
           <div className="text-2xl font-bold text-rose-700 mt-1">{summary.actionRequiredCount}</div>
           <div className="text-[11px] text-[#64748B] mt-0.5">Service / inspection due</div>
         </div>
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
+        <div data-tone="unknown" className="bg-white border border-[#E2E8F0] rounded-xl p-3.5">
           <div className="text-xs font-medium text-[#64748B]">NOT RECORDED</div>
           <div className="text-2xl font-bold text-[#475569] mt-1">{summary.notRecordedCount}</div>
           <div className="text-[11px] text-[#64748B] mt-0.5">Never treated as valid</div>
@@ -987,7 +989,7 @@ export const DocumentsPage: React.FC = () => {
       </div>}
 
       {/* Navigation Tabs */}
-      <div className="border-b border-[#E2E8F0] flex flex-wrap gap-2">
+      <div className="workspace-command-tabs border-b border-[#E2E8F0] flex flex-wrap gap-2">
         {([
           { id: 'REGISTER', label: 'Compliance Register', Icon: ClipboardCheck },
           { id: 'MASTERS', label: 'Masters & Evidence', Icon: ShieldCheck },

@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -451,9 +452,9 @@ export const OrganizationMastersPage: React.FC = () => {
   }
 
   return (
-    <div className="admin-modern org-light space-y-6 pb-10">
+    <div className="admin-modern daily-command workspace-command org-light pb-10">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
+      <div className="workspace-command-heading flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
         <div>
           <div className="flex items-center gap-2.5">
             <Layers className="w-6 h-6 text-orange-500" />
@@ -474,6 +475,7 @@ export const OrganizationMastersPage: React.FC = () => {
           </div>
         )}
       </div>
+      <WorkspaceCommandContext module="organization" />
 
       {/* Feedback banner with auto-dismiss */}
       {feedbackMsg && (
@@ -503,9 +505,10 @@ export const OrganizationMastersPage: React.FC = () => {
 
       {/* Tabs navigation - Only show when not in detail drilldown */}
       {!selectedOfficer && !selectedProvider && (
-        <div className="flex items-center gap-1 border-b border-[#E2E8F0] pb-px overflow-x-auto">
+        <div className="workspace-command-tabs flex items-center gap-1 border-b border-[#E2E8F0] pb-px overflow-x-auto">
           <button
-            onClick={() => setActiveTab('departments')}
+            aria-pressed={activeTab === 'departments'}
+              onClick={() => setActiveTab('departments')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-t-lg transition whitespace-nowrap border-b-2 ${
               activeTab === 'departments'
                 ? 'border-orange-500 text-[#B8530D] bg-white/60'
@@ -520,7 +523,8 @@ export const OrganizationMastersPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('officers')}
+            aria-pressed={activeTab === 'officers'}
+              onClick={() => setActiveTab('officers')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-t-lg transition whitespace-nowrap border-b-2 ${
               activeTab === 'officers'
                 ? 'border-orange-500 text-[#B8530D] bg-white/60'
@@ -535,7 +539,8 @@ export const OrganizationMastersPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('service-providers')}
+            aria-pressed={activeTab === 'service-providers'}
+              onClick={() => setActiveTab('service-providers')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-t-lg transition whitespace-nowrap border-b-2 ${
               activeTab === 'service-providers'
                 ? 'border-orange-500 text-[#B8530D] bg-white/60'
@@ -550,7 +555,8 @@ export const OrganizationMastersPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('outlet-assignments')}
+            aria-pressed={activeTab === 'outlet-assignments'}
+              onClick={() => setActiveTab('outlet-assignments')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-t-lg transition whitespace-nowrap border-b-2 ${
               activeTab === 'outlet-assignments'
                 ? 'border-orange-500 text-[#B8530D] bg-white/60'

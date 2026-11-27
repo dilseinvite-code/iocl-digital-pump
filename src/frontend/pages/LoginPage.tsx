@@ -1,3 +1,4 @@
+import '../components/common/workspaceCommandCentre.css';
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { ShieldCheck, Lock, Mail, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
@@ -45,12 +46,12 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 sm:p-6 lg:p-8">
-      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+    <div className="login-command min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 sm:p-6 lg:p-8">
+      <div className="login-layout w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
         
         {/* Left Column: IOCL Enterprise Branding & Form */}
         <div className="lg:col-span-6 space-y-6">
-          <div className="flex items-center gap-4">
+          <div className="login-brand flex items-center gap-4">
             <img
               src="/indianoil-logo.svg"
               alt="IndianOil"
@@ -66,16 +67,16 @@ export const LoginPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-5">
+          <div className="login-form-card bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-5">
             <div>
               <h2 className="text-lg font-bold text-white">Sign In to Enterprise Portal</h2>
               <p className="text-xs text-slate-400 mt-1">
-                Enter your IOCL employee credentials or select a demo role.
+                {import.meta.env.DEV && import.meta.env.MODE !== 'production' ? 'Enter your IOCL employee credentials or select a demo role.' : 'Enter your IOCL employee credentials to continue.'}
               </p>
             </div>
 
             {(error || archivedNotice) && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+              <div role="alert" className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error || archivedNotice}</span>
               </div>
@@ -83,12 +84,13 @@ export const LoginPage: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                <label htmlFor="login-email" className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Official Email Address
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
                   <input
+                    id="login-email" autoComplete="username"
                     type="email"
                     required
                     value={email}
@@ -100,12 +102,13 @@ export const LoginPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                <label htmlFor="login-password" className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Password
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
                   <input
+                    id="login-password" autoComplete="current-password"
                     type="password"
                     required
                     value={password}
@@ -126,11 +129,23 @@ export const LoginPage: React.FC = () => {
               </button>
             </form>
 
-            <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-500 text-center font-mono">
+            <div className="login-session pt-3 border-t border-slate-800/80 text-[11px] text-slate-500 text-center font-mono">
               Protected by HttpOnly Session Cookies
             </div>
           </div>
         </div>
+
+        {!(import.meta.env.DEV && import.meta.env.MODE !== 'production') && (
+          <section className="login-hero lg:col-span-6" aria-label="Enterprise workspace overview">
+            <span className="login-hero-tag"><ShieldCheck size={15} aria-hidden="true"/> INDIANOIL ENTERPRISE WORKSPACE</span>
+            <h2>One workspace. Every level of operations.</h2>
+            <p>Daily operations, compliance, outlet setup and administration in a unified, hierarchy-aware portal.</p>
+            <ol className="login-hierarchy" aria-label="Organization hierarchy levels">
+              {['Global','State office','Division','Sales area','Retail outlet'].map((level,index)=><li key={level}><span>{String(index+1).padStart(2,'0')}</span>{level}</li>)}
+            </ol>
+            <p className="login-hero-footer"><Lock size={17} aria-hidden="true"/> Access and actions are restricted to your assigned role and organizational scope.</p>
+          </section>
+        )}
 
         {/* Right Column: 1-Click Demo Accounts Picker (Development Mode Only) */}
         {import.meta.env.DEV && import.meta.env.MODE !== 'production' && (

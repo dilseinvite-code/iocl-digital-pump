@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../services/api';
@@ -153,9 +154,9 @@ export const ProductsPage: React.FC = () => {
   });
 
   return (
-    <div className="admin-modern space-y-6 pb-10">
+    <div className="admin-modern daily-command workspace-command pb-10">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
+      <div className="workspace-command-heading flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
         <div>
           <div className="flex items-center gap-2">
             <Fuel className="w-6 h-6 text-orange-500" />
@@ -187,6 +188,7 @@ export const ProductsPage: React.FC = () => {
           )}
         </div>
       </div>
+      <WorkspaceCommandContext module="products" />
 
       {/* Notifications */}
       {successMsg && (

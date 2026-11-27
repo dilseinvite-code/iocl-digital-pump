@@ -57,7 +57,7 @@ export const HrManpowerSummaryPanel: React.FC<HrManpowerSummaryPanelProps> = ({
       </div>
 
       {/* 4 Overview Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="workspace-command-metrics grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* 1. Total Sanctioned */}
         <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-4 shadow-sm relative overflow-hidden group hover:border-slate-700 transition">
           <div className="flex items-center justify-between">

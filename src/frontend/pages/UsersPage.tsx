@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { apiFetch } from '../services/api';
@@ -107,9 +108,9 @@ export const UsersPage = () => {
   };
 
   return (
-    <div className="admin-modern space-y-6 pb-10">
+    <div className="admin-modern daily-command workspace-command pb-10">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
+      <div className="workspace-command-heading flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
         <div>
           <div className="flex items-center gap-2">
             <Users className="w-6 h-6 text-blue-400" />
@@ -133,6 +134,7 @@ export const UsersPage = () => {
           </button>
         )}
       </div>
+      <WorkspaceCommandContext module="users" />
 
       {statusFeedback&&<div role={statusFeedback.kind==='error'?'alert':'status'} className={'rounded-xl border bg-white p-3 text-sm '+(statusFeedback.kind==='error'?'border-red-200 text-red-800':'border-emerald-200 text-emerald-800')}>{statusFeedback.message}</div>}
       {/* Search and filters */}

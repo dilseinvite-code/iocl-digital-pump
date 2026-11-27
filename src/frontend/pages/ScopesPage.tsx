@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiFetch } from '../services/api';
@@ -111,9 +112,9 @@ export const ScopesPage: React.FC = () => {
   const filteredOutlets = salesAreaId ? outlets.filter(o => o.salesAreaId === salesAreaId) : outlets;
 
   return (
-    <div className="admin-modern space-y-6 pb-10">
+    <div className="admin-modern daily-command workspace-command pb-10">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
+      <div className="workspace-command-heading flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
         <div>
           <div className="flex items-center gap-2">
             <MapPin className="w-6 h-6 text-[#B8530D]" />
@@ -137,6 +138,7 @@ export const ScopesPage: React.FC = () => {
           </button>
         )}
       </div>
+      <WorkspaceCommandContext module="scopes" />
 
       {scopeFeedback&&<p role="status" className="rounded-lg bg-white border border-slate-200 p-3 text-sm text-[#17365D]">{scopeFeedback}</p>}
       {/* Search Bar */}

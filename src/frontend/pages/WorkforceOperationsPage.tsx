@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './operationsModern.css';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -558,9 +559,9 @@ export const WorkforceOperationsPage: React.FC = () => {
   }
 
   return (
-    <div className="operations-modern min-h-screen bg-[#F8FAFC] text-[#17365D] p-4 sm:p-6 lg:p-8 space-y-6">
+    <div className="operations-modern daily-command workspace-command min-h-screen bg-[#F8FAFC] text-[#17365D] p-4 sm:p-6 lg:p-8">
       {/* Workspace Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#E2E8F0] pb-6">
+      <div className="workspace-command-heading flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#E2E8F0] pb-6">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-orange-500/20 shrink-0">
             <Users className="w-6 h-6" />
@@ -623,6 +624,7 @@ export const WorkforceOperationsPage: React.FC = () => {
           </button>
         </div>
       </div>
+      <WorkspaceCommandContext module="workforce" />
 
       {/* Auto-Dismiss Feedback Alert */}
       {feedback && (

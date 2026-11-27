@@ -1,3 +1,4 @@
+import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './operationsModern.css';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -263,9 +264,9 @@ export const EquipmentOperationsPage: React.FC = () => {
   const selectedOutlet = outlets.find((o) => o.id === selectedOutletId);
 
   return (
-    <div className="operations-modern p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="operations-modern daily-command workspace-command p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Top Header & Context Selection */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-[#E2E8F0] backdrop-blur-md shadow-sm">
+      <div className="workspace-command-heading flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-[#E2E8F0] backdrop-blur-md shadow-sm">
         <div className="flex items-center gap-3.5">
           <div className="w-11 h-11 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-center text-amber-500 shrink-0 shadow-inner">
             <Wrench className="w-6 h-6" />
@@ -325,6 +326,7 @@ export const EquipmentOperationsPage: React.FC = () => {
           )}
         </div>
       </div>
+      <WorkspaceCommandContext module="equipment" />
 
       {/* Global Notifications */}
       {errorMessage && (
@@ -377,8 +379,9 @@ export const EquipmentOperationsPage: React.FC = () => {
           />
 
           {/* Navigation Workspace Tabs */}
-          <div className="flex items-center gap-2 border-b border-[#E2E8F0] pb-1">
+          <div className="workspace-command-tabs flex items-center gap-2 border-b border-[#E2E8F0] pb-1">
             <button
+              aria-pressed={activeTab === 'tickets'}
               onClick={() => setActiveTab('tickets')}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'tickets'
@@ -396,6 +399,7 @@ export const EquipmentOperationsPage: React.FC = () => {
             </button>
 
             <button
+              aria-pressed={activeTab === 'assets'}
               onClick={() => setActiveTab('assets')}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'assets'
@@ -413,6 +417,7 @@ export const EquipmentOperationsPage: React.FC = () => {
             </button>
 
             <button
+              aria-pressed={activeTab === 'dg_logs'}
               onClick={() => setActiveTab('dg_logs')}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'dg_logs'

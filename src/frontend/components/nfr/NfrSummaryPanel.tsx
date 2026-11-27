@@ -118,7 +118,7 @@ export const NfrSummaryPanel: React.FC<NfrSummaryPanelProps> = ({ summary, loadi
 
       {/* Bottom Row: Secondary Operational Metrics */}
       <details className="rounded-xl border border-slate-200 bg-white"><summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#17365D]">View spaces, vendors and lease status</summary>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 p-3">
+      <div className="workspace-command-metrics grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 p-3">
         {/* Active Spaces */}
         <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
           <div className="p-2 rounded-lg bg-slate-800 text-orange-400 shrink-0">
