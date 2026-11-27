@@ -51,22 +51,30 @@ export const LubeSummaryPanel: React.FC<LubeSummaryPanelProps> = ({
 
   if (!shift) {
     return (
-      <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+      <div className="lube-panel space-y-4">
+      <div className="dc-detail-heading lube-panel-heading">
+        <div className="dc-detail-title"><span className="dc-detail-icon" data-color="blue"><BarChart3 size={20} aria-hidden="true"/></span><div><h3>Shift Summary</h3><p>Authoritative shift sales and financial reconciliation context</p></div></div>
+      </div>
+      <div className="lube-empty space-y-2">
         <AlertCircle className="w-8 h-8 text-slate-500 mx-auto" />
         <h4 className="text-sm font-semibold text-white">No Shift Selected</h4>
         <p className="text-xs text-slate-400 max-w-sm mx-auto">
           Please select an operational shift from the header context to view the shift summary.
         </p>
       </div>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="lube-panel space-y-6">
+      <div className="dc-detail-heading lube-panel-heading">
+        <div className="dc-detail-title"><span className="dc-detail-icon" data-color="blue"><BarChart3 size={20} aria-hidden="true"/></span><div><h3>Shift Summary</h3><p>Authoritative shift sales and financial reconciliation context</p></div></div>
+      </div>
       {/* Shift Lube Summary KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="lube-metric-grid">
         {/* KPI: Total Shift Revenue */}
-        <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between space-y-4">
+        <div className="lube-metric space-y-4" data-color="orange">
           <div className="space-y-1">
             <h4 className="text-[10px] text-slate-500 font-semibold tracking-wider font-mono uppercase">
               Shift Lube Sales Revenue
@@ -81,7 +89,7 @@ export const LubeSummaryPanel: React.FC<LubeSummaryPanelProps> = ({
         </div>
 
         {/* Litres Sold KPI */}
-        <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between space-y-4">
+        <div className="lube-metric space-y-4" data-color="cyan">
           <div className="space-y-1">
             <h4 className="text-[10px] text-slate-500 font-semibold tracking-wider font-mono uppercase">
               Litre Volume Sold
@@ -96,7 +104,7 @@ export const LubeSummaryPanel: React.FC<LubeSummaryPanelProps> = ({
         </div>
 
         {/* Packs Sold KPI */}
-        <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col justify-between space-y-4">
+        <div className="lube-metric space-y-4" data-color="purple">
           <div className="space-y-1">
             <h4 className="text-[10px] text-slate-500 font-semibold tracking-wider font-mono uppercase">
               Packed Units Sold
@@ -111,12 +119,12 @@ export const LubeSummaryPanel: React.FC<LubeSummaryPanelProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="lube-summary-detail grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: SKU summary list */}
         <div className="lg:col-span-2 space-y-3">
           <h4 className="text-xs font-bold text-white tracking-wider uppercase font-mono">Shift SKU-wise sales break-up</h4>
           {shiftSummary?.bySku && shiftSummary.bySku.length > 0 ? (
-            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+            <div className="lube-table overflow-x-auto border rounded-xl">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-950 border-b border-slate-800 text-[10px] font-mono text-slate-400 uppercase tracking-wider">

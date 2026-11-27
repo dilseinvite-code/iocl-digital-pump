@@ -3,7 +3,7 @@ import { LubeSku, LubeSkuPrice } from '../../../shared/types';
 import { apiFetch } from '../../services/api';
 import { PERMISSIONS } from '../../../shared/constants';
 import { useAuth } from '../../context/AuthContext';
-import { Plus, Edit2, AlertCircle, RefreshCw, X } from 'lucide-react';
+import { Plus, Edit2, AlertCircle, RefreshCw, X, Tag } from 'lucide-react';
 import { formatPaiseToMoney } from '../../../shared/financialUtils';
 
 interface LubePricePanelProps {
@@ -127,16 +127,19 @@ export const LubePricePanel: React.FC<LubePricePanelProps> = ({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-white">Selling Prices</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Configure and audit active or historical SKU unit prices</p>
+    <div className="lube-panel space-y-4">
+      <div className="dc-detail-heading lube-panel-heading">
+        <div className="dc-detail-title">
+          <span className="dc-detail-icon" data-color="orange"><Tag size={20} aria-hidden="true"/></span>
+          <div>
+            <h3>Selling Prices</h3>
+          <p>Configure and audit active or historical SKU unit prices</p>
+        </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onRefresh}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
+            className="lube-refresh" aria-label="Refresh selling prices"
             disabled={loading}
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -158,7 +161,7 @@ export const LubePricePanel: React.FC<LubePricePanelProps> = ({
           <RefreshCw className="w-8 h-8 text-orange-500 animate-spin" />
         </div>
       ) : prices.length === 0 ? (
-        <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+        <div className="lube-empty space-y-3">
           <AlertCircle className="w-8 h-8 text-slate-500 mx-auto" />
           <h4 className="text-sm font-semibold text-white">No Prices Configured</h4>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
@@ -174,7 +177,7 @@ export const LubePricePanel: React.FC<LubePricePanelProps> = ({
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto border border-slate-800 rounded-xl">
+        <div className="lube-table overflow-x-auto border rounded-xl">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-950 border-b border-slate-800 text-[10px] font-mono text-slate-400 uppercase tracking-wider">
@@ -223,7 +226,7 @@ export const LubePricePanel: React.FC<LubePricePanelProps> = ({
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-xl p-6 space-y-4">
+          <div role="dialog" aria-modal="true" aria-label="Lubricant selling price" className="lube-dialog relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-white">
                 {editingPrice ? 'Edit Price Configuration' : 'Add Lube Selling Price'}

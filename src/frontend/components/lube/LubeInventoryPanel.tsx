@@ -1,6 +1,6 @@
 import React from 'react';
 import { LubeStockSummaryItem } from '../../../shared/types';
-import { AlertTriangle, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, AlertCircle, CheckCircle, RefreshCw, Boxes } from 'lucide-react';
 
 interface LubeInventoryPanelProps {
   stockSummary: LubeStockSummaryItem[];
@@ -16,7 +16,23 @@ export const LubeInventoryPanel: React.FC<LubeInventoryPanelProps> = ({
   onRefresh,
 }) => {
   return (
-    <div className="space-y-6">
+    <div className="lube-panel space-y-6">
+        <div className="dc-detail-heading lube-panel-heading">
+        <div className="dc-detail-title">
+          <span className="dc-detail-icon" data-color="cyan"><Boxes size={20} aria-hidden="true"/></span>
+          <div>
+            <h3>Current Inventory</h3>
+            <p>Real-time authoritative stock balance for all registered SKUs</p>
+          </div>
+        </div>
+          <button
+            onClick={onRefresh}
+            className="lube-refresh" aria-label="Refresh inventory stock"
+            disabled={loading}
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       {/* Low Stock Alert Panel */}
       {lowStockItems.length > 0 && (
         <div className="p-4 bg-amber-500/10 border border-amber-500/25 rounded-2xl space-y-3">
@@ -53,26 +69,14 @@ export const LubeInventoryPanel: React.FC<LubeInventoryPanelProps> = ({
 
       {/* Stock Summary Area */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-white">Current Inventory</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Real-time authoritative stock balance for all registered SKUs</p>
-          </div>
-          <button
-            onClick={onRefresh}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
-            disabled={loading}
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
+
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <RefreshCw className="w-8 h-8 text-orange-500 animate-spin" />
           </div>
         ) : stockSummary.length === 0 ? (
-          <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+          <div className="lube-empty space-y-3">
             <AlertCircle className="w-8 h-8 text-slate-500 mx-auto" />
             <h4 className="text-sm font-semibold text-white">No Inventory Records found</h4>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
@@ -80,19 +84,15 @@ export const LubeInventoryPanel: React.FC<LubeInventoryPanelProps> = ({
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="lube-metric-grid">
             {stockSummary.map((item) => (
               <div
                 key={item.lubeSkuId}
-                className={`p-4 bg-slate-900 border rounded-2xl flex flex-col justify-between space-y-4 transition-all ${
-                  item.isLowStock
-                    ? 'border-amber-500/30 bg-gradient-to-br from-slate-900 to-amber-950/10'
-                    : 'border-slate-800 hover:border-slate-700/80'
-                }`}
+                className="lube-metric lube-stock-card space-y-4" data-color={item.isLowStock?'orange':'cyan'}
               >
                 <div className="space-y-1.5">
                   <div className="flex items-start justify-between gap-4">
-                    <h4 className="text-sm font-bold text-white tracking-tight leading-tight line-clamp-1">
+                    <h4 className="text-sm font-bold text-white tracking-tight leading-tight">
                       {item.skuName}
                     </h4>
                     {item.isLowStock ? (
@@ -118,7 +118,7 @@ export const LubeInventoryPanel: React.FC<LubeInventoryPanelProps> = ({
                       Current Stock
                     </div>
                     <div className="text-xl font-bold font-mono text-white mt-0.5 tabular-nums">
-                      {item.currentStock}
+                      {item.currentStock} <span className="text-[11px] font-normal">{item.stockUnit}</span>
                     </div>
                   </div>
                   <div className="text-right">

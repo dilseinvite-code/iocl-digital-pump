@@ -1,4 +1,6 @@
 import './operationsModern.css';
+import './dailyOperationsModern.css';
+import './lubeCommandCentre.css';
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -15,13 +17,22 @@ import {
 } from '../../shared/types';
 import {
   Package,
-  Building2,
+  GitBranch,
+  ChevronRight,
+  ArrowLeft,
+  ClipboardList,
+  ShoppingBag,
+  BarChart3,
+  Calendar,
+  Boxes,
+  ListChecks,
+  Tag,
+  AlertTriangle,
   Clock,
   RefreshCw,
   AlertCircle,
   CheckCircle2,
   Lock,
-  Unlock,
   ShieldAlert,
 } from 'lucide-react';
 import { LubeSkuPanel } from '../components/lube/LubeSkuPanel';
@@ -37,9 +48,10 @@ import { GroupedWorkspaceNav } from '../components/common/GroupedWorkspaceNav';
 import { useShiftWorkbench } from '../context/ShiftWorkbenchContext';
 import { resolveWorkbenchShift, toWorkbenchSelection } from '../utils/shiftWorkbench';
 import { getLocalDateInputValue } from '../../shared/utils/dateUtils';
+import { outletHierarchy, scopeLabel } from '../utils/commandCentre';
 
 export const LubeOperationsPage: React.FC = () => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, userCtx } = useAuth();
   const canRead = hasPermission(PERMISSIONS.LUBE_OPERATIONS_READ);
   const hasShiftsRead = hasPermission(PERMISSIONS.SHIFTS_READ);
   const hasOutletsRead = hasPermission(PERMISSIONS.OUTLETS_READ);
@@ -351,34 +363,56 @@ export const LubeOperationsPage: React.FC = () => {
     );
   }
 
-  return (
-    <div className="operations-modern space-y-6">
-      {/* Top Header & Context Selectors */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 p-5 bg-white border border-[#E2E8F0] rounded-2xl">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-500 shrink-0">
-            <Package className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-[#17365D] tracking-tight">Lube & Auxiliary Inventory</h2>
-            <div className="flex items-center gap-2 mt-0.5 text-xs text-[#64748B]">
-              <span className="font-semibold text-[#475569]">Lube Workspace</span>
-              <span aria-hidden="true" className="text-slate-700">·</span>
-              <span>Authoritative Shift Reconciliations</span>
-            </div>
-          </div>
-        </div>
+  const verifiedShift = selectedShift?.id===selectedShiftId && selectedShift.outletId===selectedOutletId && shiftRecordsReady && !loadingData && !loadingShifts ? selectedShift : null;
+  const attention = loadingShifts || loadingData
+    ? {tone:'info',title:'Loading lubricant records',detail:'Retrieving saved data for the selected outlet and shift.'}
+    : shiftListError || actionError
+    ? {tone:'attention',title:'Review operation feedback',detail:'Review the message below and refresh if any records could not be verified.'}
+    : !hasShiftsRead
+    ? {tone:'info',title:'Outlet inventory workspace',detail:'Inventory and product setup are available according to your permissions. Shift read access is required for shift sales.'}
+    : selectedShiftId && !verifiedShift
+    ? {tone:'attention',title:'Shift records not verified',detail:'Refresh and verify saved records before entering sales.'}
+    : !verifiedShift
+    ? {tone:'info',title:'Select a shift for sales',detail:'Choose an operational shift to view or record sales. Outlet inventory and product setup are available independently.'}
+    : verifiedShift.status !== 'OPEN'
+    ? {tone:'info',title:'Read-only shift',detail:'Historical or closing shift — sales records are locked/read-only.'}
+    : {tone:'info',title:'Open shift selected',detail:'Review saved sales and use the existing entry controls where your permissions allow.'};
 
-        <div className="iocl-mobile-stack flex flex-wrap items-center gap-3 min-w-0">
-          {/* Outlet Selector */}
-          <div className="relative">
-            <Building2 className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-[#64748B] pointer-events-none" />
+  return (
+    <div className="operations-modern daily-command lube-command pb-10 max-w-[1500px] mx-auto">
+      <header className="dc-heading">
+        <div>
+          <p className="dc-eyebrow"><span/> INDIANOIL WORKSPACE / DAILY WORK</p>
+          <h1>Lube &amp; Auxiliary Inventory</h1>
+          <p className="dc-muted">Shift sales, stock transactions, product setup and authoritative reconciliations.</p>
+        </div>
+        <button type="button" onClick={handleRefresh} aria-label="Refresh lube records"
+          disabled={loadingData||loadingShifts} className="lube-refresh">
+          <RefreshCw className={`w-3.5 h-3.5 ${loadingData?'animate-spin':''}`}/> Refresh
+        </button>
+      </header>
+
+      <section aria-label="Selected outlet and operational shift" className="dc-panel dc-context">
+        <div className="dc-hierarchy-head">
+          <span className="dc-hierarchy-icon"><GitBranch size={18} aria-hidden="true"/></span>
+          <div><h2>Organization hierarchy</h2><p>Primary access: <strong>{scopeLabel(userCtx?.primaryScope || 'UNKNOWN')}</strong> · Records apply to the selected retail outlet.</p></div>
+        </div>
+        {selectedOutlet && <ol aria-label="Selected outlet hierarchy" className="dc-hierarchy-path">
+          {outletHierarchy(selectedOutlet).map((part,i)=><li key={part.label}>
+            {i>0&&<ChevronRight size={14} className="dc-chevron" aria-hidden="true"/>}
+            <span data-selected={i===4}><small>{part.label}</small><strong>{part.name}{part.code?' · '+part.code:''}</strong></span>
+          </li>)}
+        </ol>}
+        <div className="lube-context-controls">
+          <div>
+            <label htmlFor="lube-outlet">Retail Outlet</label>
             <select
+              id="lube-outlet"
               aria-label="Lube retail outlet"
               value={selectedOutletId}
               onChange={(e) => setSelectedOutletId(e.target.value)}
               disabled={loadingOutlets || loadingShifts || loadingData}
-              className="pl-8 pr-3 py-2 bg-[#F8FAFC] border border-[#E2E8F0] text-[#17365D] rounded-lg text-xs font-semibold focus:outline-none focus:border-orange-500 w-52 disabled:opacity-50"
+              className="lube-select"
             >
               {loadingOutlets ? (
                 <option>Loading outlets...</option>
@@ -394,10 +428,10 @@ export const LubeOperationsPage: React.FC = () => {
             </select>
           </div>
 
-          {/* Shift Selector */}
-          <div className="relative">
-            <Clock className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-[#64748B] pointer-events-none" />
+          <div>
+            <label htmlFor="lube-shift">Operational Shift</label>
             <select
+              id="lube-shift"
               aria-label="Lube operational shift"
               value={selectedShiftId}
               onChange={(e) => {
@@ -409,7 +443,7 @@ export const LubeOperationsPage: React.FC = () => {
                 if(next)remember(toWorkbenchSelection(next));
               }}
               disabled={loadingOutlets || loadingShifts || loadingData || shiftsList.length === 0 || !hasShiftsRead}
-              className="pl-8 pr-3 py-2 bg-[#F8FAFC] border border-[#E2E8F0] text-[#17365D] rounded-lg text-xs font-semibold focus:outline-none focus:border-orange-500 w-56 disabled:opacity-50 font-mono"
+              className="lube-select"
             >
               {!hasShiftsRead ? (
                 <option>Shift permissions required</option>
@@ -427,45 +461,35 @@ export const LubeOperationsPage: React.FC = () => {
             </select>
           </div>
 
-          <button
-            onClick={handleRefresh}
-            aria-label="Refresh lube records"
-            disabled={loadingData||loadingShifts}
-            className="p-2 text-[#64748B] hover:text-[#17365D] bg-[#F8FAFC] hover:bg-[#F1F5F9] border border-[#E2E8F0] rounded-lg transition-all disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loadingData ? 'animate-spin' : ''}`} />
-          </button>
         </div>
-      </div>
+      </section>
 
-      {hasShiftsRead&&<button type="button" disabled={loadingData||loadingShifts} onClick={()=>navigate('daily-ops')} className="text-xs font-semibold text-[#17365D] underline disabled:opacity-50">Return to shift workbench</button>}
-      {/* Global Status/Context Banner */}
-      {hasShiftsRead && selectedShift && (
-        <div className={`p-4 rounded-xl flex items-center justify-between border text-xs ${
-          selectedShift.status === 'OPEN'
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700'
-            : 'bg-[#F8FAFC] border-[#E2E8F0] text-[#64748B]'
-        }`}>
-          <div className="flex items-center gap-2.5">
-            {selectedShift.status === 'OPEN' ? (
-              <Unlock className="w-4 h-4 shrink-0 text-emerald-500" />
-            ) : (
-              <Lock className="w-4 h-4 shrink-0 text-[#64748B]" />
-            )}
-            <div>
-              <span className="font-bold uppercase tracking-wider font-mono mr-1.5">{selectedShift.status}</span>
-              <span>
-                {selectedShift.status === 'OPEN'
-                  ? 'Shift is fully active. You can record, edit or delete shift lube sales.'
-                  : 'This shift is closed or in the process of closing. Sales records are locked/read-only.'}
-              </span>
+      <div className="dc-hero-grid">
+        <section className="dc-hero" aria-label="Current lubricant shift">
+          <div className="dc-hero-content">
+            <span className="dc-hero-tag"><ClipboardList size={14} aria-hidden="true"/> {verifiedShift?'SELECTED OPERATIONAL SHIFT':'LUBRICANT WORKSPACE'}</span>
+            <div className="dc-hero-title">
+              <div>
+                <h2>{verifiedShift?(verifiedShift.shiftTemplateName || verifiedShift.shiftTemplateCode || 'Shift'):(selectedOutlet?.name || 'Select an outlet')}</h2>
+                <p>{verifiedShift?verifiedShift.businessDate+' · '+(selectedOutlet?.name || 'Selected outlet'):'Outlet inventory and sales management'}</p>
+              </div>
+              <span className="dc-hero-art" aria-hidden="true"><Package size={58}/></span>
+            </div>
+            <div className="lube-hero-footer">
+              <span className="lube-shift-status" data-tone={verifiedShift?.status==='OPEN'?'open':'neutral'}>{verifiedShift && verifiedShift.status!=='OPEN'?<Lock size={13}/>:<Clock size={13}/>} {verifiedShift?.status || (loadingData||loadingShifts?'LOADING':!hasShiftsRead?'OUTLET VIEW':selectedShiftId?'SHIFT NOT VERIFIED':'NO SHIFT SELECTED')}</span>
+              {hasShiftsRead&&<button type="button" disabled={loadingData||loadingShifts} onClick={()=>navigate('daily-ops')} className="lube-back-link"><ArrowLeft size={14}/> Return to shift workbench</button>}
             </div>
           </div>
-          <div className="hidden sm:block font-mono text-[10px] text-[#64748B] uppercase tracking-wide">
-            {selectedShift.businessDate} · {selectedShift.shiftTemplateName || selectedShift.shiftTemplateCode || 'Shift'}
+        </section>
+        <section aria-label="Lubricant record status" className="dc-attention" data-tone={attention.tone}>
+          <div className="dc-attention-top">
+            <span className="dc-attention-icon">{attention.tone==='attention'?<AlertTriangle size={20}/>:verifiedShift && verifiedShift.status!=='OPEN'?<Lock size={20}/>:<ClipboardList size={20}/>}</span>
+            <div><div className="dc-attention-kicker">LUBE RECORD STATUS</div><p className="dc-attention-context">Selected outlet · shift context</p></div>
           </div>
-        </div>
-      )}
+          <h3>{attention.title}</h3><p>{attention.detail}</p>
+          <div className="dc-attention-footer"><ShieldAlert size={15}/><span>{verifiedShift && !actionError?`${sales.length} saved sales line${sales.length===1?'':'s'}. `:''}Sales and inventory records do not indicate financial approval.</span></div>
+        </section>
+      </div>
 
       {/* Global Toast Alerts */}
       {actionError && (
@@ -491,18 +515,21 @@ export const LubeOperationsPage: React.FC = () => {
       )}
 
       {/* Segmented Workspace Tabs */}
+      <section className="dc-panel lube-workspace-nav" aria-label="Lubricant work areas">
+        <div className="lube-nav-heading"><div><h2>Operations workspace</h2><p>Choose a work area and task. Inventory and setup do not require a selected shift.</p></div></div>
       <GroupedWorkspaceNav<typeof activeTab> label="Lube workspace navigation" active={activeTab} onChange={setActiveTab}
         groups={[
           {id:'daily-work',label:'Daily Sales',items:[
-            ...(hasShiftsRead?[{id:'sales' as const,label:'Shift Sales Log'},{id:'summary' as const,label:'Shift Summary'}]:[]),
-            {id:'daily',label:'Daily Summary'}]},
-          {id:'inventory',label:'Inventory & Stock',items:[{id:'inventory',label:'Inventory Stock'},{id:'transactions',label:'Transaction Ledger'}]},
-          {id:'setup',label:'Product Setup',items:[{id:'skus',label:'SKU Catalog'},{id:'prices',label:'Selling Prices'}]},
+            ...(hasShiftsRead?[{id:'sales' as const,label:'Shift Sales Log',icon:ShoppingBag},{id:'summary' as const,label:'Shift Summary',icon:BarChart3}]:[]),
+            {id:'daily',label:'Daily Summary',icon:Calendar}]},
+          {id:'inventory',label:'Inventory & Stock',items:[{id:'inventory',label:'Inventory Stock',icon:Boxes},{id:'transactions',label:'Transaction Ledger',icon:ListChecks}]},
+          {id:'setup',label:'Product Setup',items:[{id:'skus',label:'SKU Catalog',icon:Package},{id:'prices',label:'Selling Prices',icon:Tag}]},
         ]}/>
+      </section>
 
       {shiftListError&&<div role="alert" className="rounded-xl border border-red-200 bg-white p-4 text-sm text-red-800"><p>{shiftListError}</p><button type="button" disabled={loadingShifts} onClick={()=>setShiftListRevision(v=>v+1)} className="mt-3 rounded-lg bg-[#17365D] px-4 py-2 text-white disabled:opacity-50">Retry shift list</button></div>}
       {/* Main Tab Viewports */}
-      <div className="p-3 sm:p-5 bg-white border border-[#E2E8F0] rounded-xl">
+      <div className="dc-detail-panel lube-content">
         {(activeTab === 'sales' || activeTab === 'summary') && !hasShiftsRead ? (
           <div className="p-12 text-center bg-white border border-[#E2E8F0] rounded-2xl space-y-3">
             <Lock className="w-8 h-8 text-[#64748B] mx-auto" />
