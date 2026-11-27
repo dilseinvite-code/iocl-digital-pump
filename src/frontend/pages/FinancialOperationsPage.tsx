@@ -16,6 +16,12 @@ import {
 } from '../../shared/types';
 import {
   Banknote,
+  GitBranch,
+  ArrowLeft,
+  ClipboardList,
+  Scale,
+  Tag,
+  Users,
   Building2,
   Clock,
   Plus,
@@ -49,6 +55,9 @@ import { resolveWorkbenchShift, toWorkbenchSelection } from '../utils/shiftWorkb
 import { getLocalDateInputValue } from '../../shared/utils/dateUtils';
 import {consumeWorkspaceSection} from '../components/layout/workspaceTaskCatalog';
 import './financialReportsModern.css';
+import './dailyOperationsModern.css';
+import './financeCommandCentre.css';
+import { outletHierarchy, scopeLabel } from '../utils/commandCentre';
 import { financeStages, financeStageDetails, financeSalesProvisional, type FinanceStage } from '../utils/financeWorkflow';
 
 export const FinancialOperationsPage: React.FC = () => {
@@ -393,40 +402,85 @@ export const FinancialOperationsPage: React.FC = () => {
   const currentSectionLoaded=activeTab==='collections'?loadedSections.collections:activeTab==='handovers'?loadedSections.handovers:activeTab==='deposits'?loadedSections.deposits:activeTab==='prices'?loadedSections.prices:activeTab==='credit-parties'?loadedSections.parties:!!summary;
   const canRenderSection=currentSectionLoaded && !loadingData && (isMaster || !!selectedShift) && (activeTab==='sales'||activeTab==='reconciliation'||activeTab==='collections'&&hasPermission(PERMISSIONS.COLLECTIONS_READ)||activeTab==='handovers'&&hasPermission(PERMISSIONS.CASH_HANDOVER_READ)||activeTab==='deposits'&&hasPermission(PERMISSIONS.BANK_DEPOSITS_READ)||activeTab==='prices'&&hasPermission(PERMISSIONS.PRODUCT_PRICES_READ)||activeTab==='credit-parties'&&hasPermission(PERMISSIONS.CREDIT_PARTIES_READ));
   const shiftLabel=selectedShift ? selectedShift.businessDate+' · '+(selectedShift.shiftTemplateName||selectedShift.shiftTemplateCode||selectedShift.shiftTemplateId)+' · '+selectedShift.status : '';
+  const selectedOutlet=outlets.find(o=>o.id===selectedOutletId);
+  const verifiedShift = selectedShift?.id===selectedShiftId && selectedShift.outletId===selectedOutletId && !loadingData && !shiftListLoading ? selectedShift : null;
+  const financeStatus=verifiedShift?.deferredFinancialStatus;
+  const attention = loadingData||shiftListLoading
+    ? {tone:'info',title:'Loading financial records',detail:'Retrieving saved data for the selected outlet and operational shift.'}
+    : shiftListError||actionError
+    ? {tone:'attention',title:'Review operation feedback',detail:'Review the message below. Refresh before relying on records that could not be verified.'}
+    : !verifiedShift
+    ? {tone:'info',title:'Choose an operational shift',detail:'Select a verified shift to review sales, collections and reconciliation.'}
+    : financeStatus==='REVIEW_REQUIRED'
+    ? {tone:'attention',title:'Financial review required',detail:'Closure evidence requires authorized review. Collection edits remain locked.'}
+    : !summary
+    ? {tone:'attention',title:'Financial summary unavailable',detail:'Refresh to verify saved financial records before relying on figures.'}
+    : provisional
+    ? {tone:'attention',title:'Sales evidence incomplete',detail:'Revenue is provisional. Review saved operational evidence before final reconciliation.'}
+    : financeDeferred
+    ? {tone:'attention',title:'Financial reconciliation pending',detail:'Fuel operations are closed. Record actual collections and reconcile independently using the existing controls.'}
+    : financeStatus==='COMPLETED'
+    ? {tone:'clear',title:'Financial reconciliation completed',detail:'Collection records are locked. Saved financial records remain available for review.'}
+    : verifiedShift.status==='OPEN'
+    ? {tone:'info',title:'Open shift · financial preview',detail:'Review sales and record actual collections where permitted. Finalization follows the existing shift rules.'}
+    : {tone:'info',title:'Read-only shift',detail:'Review saved sales and collection records. Existing closure controls still apply.'};
+  const stageVisuals={
+    sales:{icon:TrendingUp,color:'blue'},
+    collections:{icon:CreditCard,color:'cyan'},
+    handovers:{icon:Wallet,color:'purple'},
+    deposits:{icon:Landmark,color:'indigo'},
+    reconciliation:{icon:Scale,color:'orange'},
+  } as const;
   return (
-    <div className="finance-modern space-y-6 pb-10">
-      {/* Header & Selectors */}
-      <div className="phase3-surface p-5 sm:p-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-orange-500/10 rounded-xl border border-orange-500/20">
-              <Banknote className="w-6 h-6 text-orange-500" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-[#17365D] tracking-tight">Financial Operations</h1>
-              <p className="text-xs text-[#64748B]">Revenue, collections, handovers and reconciliation</p>
-            </div>
-          </div>
-
-          <div className="iocl-mobile-stack flex flex-wrap items-center gap-3 min-w-0">
+    <div className="finance-modern daily-command finance-command pb-10 max-w-[1500px] mx-auto">
+      <header className="dc-heading">
+        <div><p className="dc-eyebrow"><span/> INDIANOIL WORKSPACE / FINANCE &amp; REPORTS</p>
+          <h1>Financial Operations</h1>
+          <p className="dc-muted">Revenue, collections, cash custody, deposits and financial reconciliation.</p>
+        </div>
+        <button type="button" disabled={workflowBusy}
+          onClick={() => {if(!selectedShiftId)setShiftListRevision(v=>v+1);else refreshData();}}
+          aria-label="Refresh financial data" className="finance-refresh">
+          <RefreshCw className={`w-3.5 h-3.5 ${loadingData ? 'animate-spin' : ''}`}/> Refresh
+        </button>
+      </header>
+      <section aria-label="Selected outlet and operational shift" className="dc-panel dc-context">
+        <div className="dc-hierarchy-head">
+          <span className="dc-hierarchy-icon"><GitBranch size={18} aria-hidden="true"/></span>
+          <div><h2>Organization hierarchy</h2><p>Primary access: <strong>{scopeLabel(userCtx?.primaryScope || 'UNKNOWN')}</strong> · Records apply only to the selected retail outlet and shift.</p></div>
+        </div>
+        {selectedOutlet && <ol aria-label="Selected outlet hierarchy" className="dc-hierarchy-path">
+          {outletHierarchy(selectedOutlet).map((part,i)=><li key={part.label}>
+            {i>0&&<ChevronRight size={14} className="dc-chevron" aria-hidden="true"/>}
+            <span data-selected={i===4}><small>{part.label}</small><strong>{part.name}{part.code?' · '+part.code:''}</strong></span>
+          </li>)}
+        </ol>}
+        <div className="finance-context-controls">
+          <div>
+            <label htmlFor="finance-outlet">Retail Outlet</label>
             <select
+              id="finance-outlet"
               aria-label="Finance retail outlet"
               value={selectedOutletId}
               disabled={workflowBusy}
               onChange={(e) => setSelectedOutletId(e.target.value)}
-              className="bg-[#F1F5F9] border border-[#D7E0EA] text-[#17365D] rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none"
+              className="finance-select"
             >
               {outlets.map(o => (
                 <option key={o.id} value={o.id}>{o.roCode} — {o.name}</option>
               ))}
             </select>
 
+          </div>
+          <div>
+            <label htmlFor="finance-shift">Operational Shift</label>
             <select
+              id="finance-shift"
               aria-label="Finance operational shift"
               value={selectedShiftId}
               disabled={workflowBusy}
               onChange={(e) => {setShiftListError('');chooseShift(shiftsList.find(s=>s.id===e.target.value)||null);}}
-              className="bg-[#F1F5F9] border border-[#D7E0EA] text-[#17365D] rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none"
+              className="finance-select"
             >
               <option value="">{shiftListLoading?'Loading shifts…':'Select Shift...'}</option>
               {shiftsList.map(s => (
@@ -434,53 +488,74 @@ export const FinancialOperationsPage: React.FC = () => {
               ))}
             </select>
 
-            <button
-              disabled={workflowBusy}
-              onClick={() => {if(!selectedShiftId)setShiftListRevision(v=>v+1);else refreshData();}}
-              aria-label="Refresh financial data"
-              className="p-2 bg-[#F1F5F9] text-[#64748B] hover:text-[#17365D] rounded-xl border border-[#D7E0EA] transition-colors"
-            >
-              <RefreshCw className={`w-5 h-5 ${loadingData ? 'animate-spin' : ''}`} />
-            </button>
           </div>
         </div>
-
-        {hasPermission(PERMISSIONS.SHIFTS_READ) && <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3"><span className="text-xs text-slate-600">{selectedShift ? 'Working on '+selectedShift.businessDate+' · '+(selectedShift.shiftTemplateName||selectedShift.shiftTemplateCode||selectedShift.shiftTemplateId) : 'Choose a verified shift to continue.'}</span><button type="button" disabled={workflowBusy} onClick={()=>{if(selectedShift)goBackToShift();else navigate('daily-ops');}} className="text-sm font-semibold text-[#17365D] underline disabled:opacity-50">Return to shift workbench</button></div>}
         {shiftListError&&<p role="alert" className="mt-3 text-sm text-amber-800">{shiftListError}</p>}
-        <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#E2E8F0] pt-3">
-          {hasPermission(PERMISSIONS.CREDIT_PARTIES_READ)&&<button type="button" aria-pressed={activeTab==='credit-parties'} disabled={workflowBusy} onClick={()=>setActiveTab('credit-parties')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-[#17365D]">Credit Customers</button>}
-          {hasPermission(PERMISSIONS.PRODUCT_PRICES_READ)&&<button type="button" aria-pressed={activeTab==='prices'} disabled={workflowBusy} onClick={()=>setActiveTab('prices')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-[#17365D]">Price Master</button>}
-          {isMaster&&<button type="button" disabled={workflowBusy} onClick={()=>setActiveTab('sales')} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white">Return to finance workflow</button>}
-        </div>
+      </section>
+      <div className="dc-hero-grid">
+        <section className="dc-hero" aria-label="Current financial shift">
+          <div className="dc-hero-content">
+            <span className="dc-hero-tag"><ClipboardList size={14} aria-hidden="true"/> {verifiedShift?'SELECTED OPERATIONAL SHIFT':'FINANCE WORKSPACE'}</span>
+            <div className="dc-hero-title">
+              <div><h2>{verifiedShift?(verifiedShift.shiftTemplateName||verifiedShift.shiftTemplateCode||verifiedShift.shiftTemplateId):(selectedOutlet?.name||'Choose a verified shift')}</h2>
+                <p>{verifiedShift?verifiedShift.businessDate+' · '+(selectedOutlet?.name||'Selected outlet'):'Financial records are linked to a verified operational shift.'}</p></div>
+              <span className="dc-hero-art" aria-hidden="true"><Banknote size={58}/></span>
+            </div>
+            <div className="finance-hero-footer">
+              <span className="finance-shift-status" data-tone={verifiedShift?.status==='OPEN'?'open':'neutral'}>{verifiedShift?.status==='OPEN'?<Clock size={13}/>:verifiedShift?<Lock size={13}/>:<Clock size={13}/>} {verifiedShift?('OPERATIONS '+verifiedShift.status):(loadingData||shiftListLoading?'LOADING':selectedShiftId?'SHIFT NOT VERIFIED':'NO SHIFT SELECTED')}</span>
+              {verifiedShift && financeStatus && <span className="finance-shift-status" data-tone={financeStatus==='COMPLETED'?'open':financeStatus==='PENDING'||financeStatus==='REVIEW_REQUIRED'?'pending':'neutral'}>FINANCE {financeStatus.replaceAll('_',' ')}</span>}
+              {hasPermission(PERMISSIONS.SHIFTS_READ) && <button type="button" disabled={workflowBusy} onClick={()=>{if(selectedShift)goBackToShift();else navigate('daily-ops');}} className="finance-back-link"><ArrowLeft size={14}/> Return to shift workbench</button>}
+            </div>
+          </div>
+        </section>
+        <section aria-label="Financial attention centre" className="dc-attention" data-tone={attention.tone}>
+          <div className="dc-attention-top"><span className="dc-attention-icon">{attention.tone==='attention'?<AlertTriangle size={20}/>:attention.tone==='clear'?<CheckCircle2 size={20}/>:<ClipboardList size={20}/>}</span>
+            <div><div className="dc-attention-kicker">FINANCIAL RECORD STATUS</div><p className="dc-attention-context">Selected outlet · selected shift</p></div>
+          </div>
+          <h3>{attention.title}</h3><p>{attention.detail}</p>
+          <div className="dc-attention-footer"><ShieldCheck size={15}/><span>Financial finalization follows the existing reconciliation and permission checks.</span></div>
+        </section>
       </div>
 
-      {!isMaster && <section aria-label="Financial workflow" className="phase3-surface p-4 space-y-3">
-        <div><h2 className="text-base font-bold text-[#17365D]">Shift financial workflow</h2><p className="mt-1 text-xs text-[#64748B]">Choose any applicable task. Existing backend rules govern financial reconciliation and shift closure.</p></div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
-          {stages.map((stage,index)=><button type="button" key={stage.id} aria-pressed={activeTab===stage.id} disabled={workflowBusy} onClick={()=>setActiveTab(stage.id)} className={'rounded-xl border p-3 text-left '+(activeTab===stage.id?'border-orange-500 bg-orange-50':'border-slate-200 bg-white hover:border-slate-400')}>
-            <span className="block text-xs font-bold text-[#17365D]">{index+1}. {stage.label}</span>
-            <span className="mt-1 block text-[11px] text-[#64748B]">{stage.description}</span>
-            <span className="mt-2 block text-xs font-semibold text-[#17365D]">{loadingData?'Loading…':stageDetails[stage.id]}</span>
-          </button>)}
+      {(hasPermission(PERMISSIONS.CREDIT_PARTIES_READ)||hasPermission(PERMISSIONS.PRODUCT_PRICES_READ)||isMaster)&&<section aria-label="Financial master records" className="dc-panel finance-master-nav">
+        <div><h2>Master records</h2><p>Outlet-level customers and prices</p></div>
+        <div className="finance-master-actions">
+          {hasPermission(PERMISSIONS.CREDIT_PARTIES_READ)&&<button type="button" aria-pressed={activeTab==='credit-parties'} disabled={workflowBusy} onClick={()=>setActiveTab('credit-parties')} className="finance-master-link"><Users size={15}/> Credit Customers</button>}
+          {hasPermission(PERMISSIONS.PRODUCT_PRICES_READ)&&<button type="button" aria-pressed={activeTab==='prices'} disabled={workflowBusy} onClick={()=>setActiveTab('prices')} className="finance-master-link"><Tag size={15}/> Price Master</button>}
+          {isMaster&&<button type="button" disabled={workflowBusy} onClick={()=>setActiveTab('sales')} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white">Return to finance workflow</button>}
+        </div>
+      </section>}
+
+      {!isMaster && <section aria-label="Financial workflow" className="dc-panel finance-workflow">
+        <div className="finance-workflow-heading"><div><h2>Shift financial workflow</h2><p>Choose any applicable task. Existing backend rules govern financial reconciliation and shift closure.</p></div>
+          <span className="finance-workflow-count">{stages.length} tasks available</span></div>
+        <div className="finance-task-grid">
+          {stages.map((stage,index)=>{const visual=stageVisuals[stage.id];const Icon=visual.icon;return <button type="button" key={stage.id} aria-pressed={activeTab===stage.id} disabled={workflowBusy} onClick={()=>setActiveTab(stage.id)} className="finance-task" data-color={visual.color}>
+            <span className="finance-task-top"><span className="dc-card-icon"><Icon size={19} aria-hidden="true"/></span><span className="finance-task-number">{String(index+1).padStart(2,'0')}</span></span>
+            <span className="finance-task-title">{index+1}. {stage.label}</span>
+            <span className="finance-task-description">{stage.description}</span>
+            <span className="finance-task-status">{loadingData?'Loading…':stageDetails[stage.id]}</span>
+          </button>})}
         </div>
       </section>}
 
       {/* Read-only shift overview: all values come from the existing financial-summary response. */}
       {!isMaster && summary && !loadingData && (
-        <section aria-label="Financial shift overview" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section aria-label="Financial shift overview" className="finance-metric-grid">
           {[
-            { label: provisional ? 'Sales (provisional)' : 'Authoritative Sales', value: summary.salesRevenue.authoritativeTotalStr, tone: 'text-[#17365D]' },
-            { label: 'Total Collections', value: summary.collections.totalStr, tone: 'text-[#17365D]' },
+            { label: provisional ? 'Sales (provisional)' : 'Authoritative Sales', value: summary.salesRevenue.authoritativeTotalStr, tone: 'text-[#17365D]', color:provisional?'orange':'blue', icon:TrendingUp },
+            { label: 'Total Collections', value: summary.collections.totalStr, tone: 'text-[#17365D]', color:'cyan', icon:Wallet },
             { label: 'Sales vs Collections Variance', value: summary.varianceStr,
-              tone: !provisional && summary.variancePaise === 0 ? 'text-emerald-700' : 'text-amber-800' },
+              tone: !provisional && summary.variancePaise === 0 ? 'text-emerald-700' : 'text-amber-800', color:!provisional&&summary.variancePaise===0?'green':'orange', icon:Scale },
             { label: 'Pending Cash Deposit', value: summary.cashDepositControl.pendingCashDepositStr,
-              tone: summary.cashDepositControl.pendingCashDepositPaise > 0 ? 'text-amber-800' : 'text-emerald-700' },
-          ].map(metric => (
-            <div key={metric.label} className="phase3-surface p-4">
-              <div className="text-xs font-semibold text-[#526477]">{metric.label}</div>
-              <div className={`mt-2 text-xl font-bold tabular-nums ${metric.tone}`}>₹ {metric.value}</div>
+              tone: summary.cashDepositControl.pendingCashDepositPaise > 0 ? 'text-amber-800' : 'text-emerald-700', color:summary.cashDepositControl.pendingCashDepositPaise>0?'orange':'green', icon:Landmark },
+          ].map(metric => {const Icon=metric.icon;return (
+            <div key={metric.label} className="finance-metric" data-color={metric.color}>
+              <span className="dc-card-icon"><Icon size={18} aria-hidden="true"/></span>
+              <div className="finance-metric-label">{metric.label}</div>
+              <div className={`finance-metric-value ${metric.tone}`}>₹ {metric.value}</div>
             </div>
-          ))}
+          )})}
         </section>
       )}
 
@@ -509,13 +584,13 @@ export const FinancialOperationsPage: React.FC = () => {
         </div>
       )}
 
-      {!canRenderSection && <div role="status" className="phase3-surface p-5 text-sm text-slate-600">{loadingData||shiftListLoading?'Loading saved records…':!isMaster&&!selectedShift?'Select a verified shift to continue.':'This section is unavailable. Check permissions and refresh.'}</div>}
+      {!canRenderSection && <div role="status" className="phase3-surface finance-record-state p-5 text-sm text-slate-600">{loadingData||shiftListLoading?'Loading saved records…':!isMaster&&!selectedShift?'Select a verified shift to continue.':'This section is unavailable. Check permissions and refresh.'}</div>}
       {/* Main Content */}
       {canRenderSection && <div className="space-y-6">
         {activeTab === 'collections' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-[#17365D]">Shift Collections</h2>
+          <div className="dc-detail-panel finance-detail-panel space-y-4">
+            <div className="dc-detail-heading finance-panel-heading">
+              <div className="dc-detail-title"><span className="dc-detail-icon" data-color="cyan"><Wallet size={20} aria-hidden="true"/></span><div><h2>Shift Collections</h2><p>Recorded payment methods and collection entries for this shift</p></div></div>
               {canEnterFinance && hasPermission(PERMISSIONS.COLLECTIONS_WRITE) && (
                 <button
                   disabled={savingAction || loadingData} onClick={() => {setActionError(null);setCollectionType('CASH');setShowCollectionModal(true);}}
@@ -585,10 +660,9 @@ export const FinancialOperationsPage: React.FC = () => {
           <div className="space-y-6">
             <div className={activeTab==='sales'?'grid grid-cols-1 gap-6':'grid grid-cols-1 md:grid-cols-2 gap-6'}>
               {/* Sales Revenue */}
-              <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-[#17365D] uppercase tracking-wider font-mono" >{provisional?'Sales revenue (provisional)':'Authoritative Sales Revenue'}</h3>
-                  <TrendingUp className="w-4 h-4 text-emerald-500" />
+              <div className="dc-detail-panel finance-detail-panel space-y-4">
+                <div className="dc-detail-heading finance-panel-heading">
+                  <div className="dc-detail-title"><span className="dc-detail-icon" data-color="blue"><TrendingUp size={20}/></span><div><h2>{provisional?'Sales revenue (provisional)':'Authoritative Sales Revenue'}</h2><p>Revenue from saved operational readings and included components</p></div></div>
                 </div>
                 <div className="space-y-3">
                   {summary.salesRevenue.byProduct.map(p => (
@@ -692,10 +766,9 @@ export const FinancialOperationsPage: React.FC = () => {
               </div>
 
               {/* Collections Summary */}
-              {activeTab==='reconciliation' && <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-[#17365D] uppercase tracking-wider font-mono">Collections Breakdown</h3>
-                  <Wallet className="w-4 h-4 text-orange-500" />
+              {activeTab==='reconciliation' && <div className="dc-detail-panel finance-detail-panel space-y-4">
+                <div className="dc-detail-heading finance-panel-heading">
+                  <div className="dc-detail-title"><span className="dc-detail-icon" data-color="cyan"><Wallet size={20}/></span><div><h2>Collections Breakdown</h2><p>Actual recorded payments by payment method</p></div></div>
                 </div>
                 <div className="space-y-3">
                   <div className="flex justify-between text-xs font-mono">
@@ -769,7 +842,7 @@ export const FinancialOperationsPage: React.FC = () => {
 
             }
             {activeTab==='reconciliation' && financeDeferred && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+              <div className="finance-finalization rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
                 <h3 className="font-semibold text-[#17365D]">Operations closed · financial reconciliation pending</h3>
                 <p className="text-xs text-slate-600">Record actual collections in the Collections tab. Do not enter dummy payments. The next operational shift can continue independently.</p>
                 {canFinalizeFinance && <>
@@ -796,9 +869,9 @@ export const FinancialOperationsPage: React.FC = () => {
         )}
 
         {activeTab === 'handovers' && (
-          <div className="space-y-4">
-             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-[#17365D]">Cash Handovers</h2>
+          <div className="dc-detail-panel finance-detail-panel space-y-4">
+            <div className="dc-detail-heading finance-panel-heading">
+              <div className="dc-detail-title"><span className="dc-detail-icon" data-color="purple"><Wallet size={20} aria-hidden="true"/></span><div><h2>Cash Handovers</h2><p>Cash custody transfer and acknowledgement records</p></div></div>
               {canEnterFinance && hasPermission(PERMISSIONS.CASH_HANDOVER_WRITE) && (
                 <button
                   disabled={savingAction || loadingData} onClick={() => {setActionError(null);setShowHandoverModal(true);}}
@@ -850,9 +923,9 @@ export const FinancialOperationsPage: React.FC = () => {
         )}
 
         {activeTab === 'deposits' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-[#17365D]">Bank Deposits</h2>
+          <div className="dc-detail-panel finance-detail-panel space-y-4">
+            <div className="dc-detail-heading finance-panel-heading">
+              <div className="dc-detail-title"><span className="dc-detail-icon" data-color="indigo"><Landmark size={20} aria-hidden="true"/></span><div><h2>Bank Deposits</h2><p>Submitted and verified bank deposit records</p></div></div>
               {selectedShift && hasPermission(PERMISSIONS.BANK_DEPOSITS_WRITE) && <button
                 disabled={savingAction || loadingData} onClick={() => {setActionError(null);setShowDepositModal(true);}}
                 className="px-3 py-1.5 bg-[#17365D] text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
@@ -945,9 +1018,9 @@ export const FinancialOperationsPage: React.FC = () => {
         )}
 
         {activeTab === 'credit-parties' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-[#17365D]">Credit Customers / Parties</h2>
+          <div className="dc-detail-panel finance-detail-panel space-y-4">
+            <div className="dc-detail-heading finance-panel-heading">
+              <div className="dc-detail-title"><span className="dc-detail-icon" data-color="blue"><Users size={20} aria-hidden="true"/></span><div><h2>Credit Customers / Parties</h2><p>Outlet-level customer records for credit sales</p></div></div>
               {hasPermission(PERMISSIONS.CREDIT_PARTIES_WRITE) && <button
                 onClick={() => setShowPartyModal(true)}
                 className="px-3 py-1.5 bg-[#17365D] text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
@@ -976,9 +1049,9 @@ export const FinancialOperationsPage: React.FC = () => {
         )}
 
         {activeTab === 'prices' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-[#17365D]">Product Price Master</h2>
+          <div className="dc-detail-panel finance-detail-panel space-y-4">
+            <div className="dc-detail-heading finance-panel-heading">
+              <div className="dc-detail-title"><span className="dc-detail-icon" data-color="orange"><Tag size={20} aria-hidden="true"/></span><div><h2>Product Price Master</h2><p>Outlet selling prices and effective dates</p></div></div>
               {hasPermission(PERMISSIONS.PRODUCT_PRICES_WRITE) && (
                 <button
                   onClick={() => setShowPriceModal(true)}
@@ -1073,7 +1146,7 @@ export const FinancialOperationsPage: React.FC = () => {
           </div>
         )}
       </div>}
-      {!isMaster && currentStage && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white border border-slate-200 p-3"><button type="button" disabled={stageIndex===0||workflowBusy} onClick={()=>setActiveTab(stages[stageIndex-1].id)} className="text-sm font-semibold text-[#17365D] disabled:opacity-40">Previous task</button><span className="text-xs text-slate-500">{currentStage.label} · {stageIndex+1} of {stages.length}</span>{stageIndex<stages.length-1?<button type="button" disabled={workflowBusy} onClick={()=>setActiveTab(stages[stageIndex+1].id)} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Next: {stages[stageIndex+1].label}</button>:hasPermission(PERMISSIONS.SHIFTS_READ)?<button type="button" disabled={workflowBusy||!selectedShift} onClick={goBackToShift} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Review shift closure</button>:<span/>}</div>}
+      {!isMaster && currentStage && <div className="finance-task-footer flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white border border-slate-200 p-3"><button type="button" disabled={stageIndex===0||workflowBusy} onClick={()=>setActiveTab(stages[stageIndex-1].id)} className="text-sm font-semibold text-[#17365D] disabled:opacity-40">Previous task</button><span className="text-xs text-slate-500">{currentStage.label} · {stageIndex+1} of {stages.length}</span>{stageIndex<stages.length-1?<button type="button" disabled={workflowBusy} onClick={()=>setActiveTab(stages[stageIndex+1].id)} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Next: {stages[stageIndex+1].label}</button>:hasPermission(PERMISSIONS.SHIFTS_READ)?<button type="button" disabled={workflowBusy||!selectedShift} onClick={goBackToShift} className="rounded-lg bg-[#17365D] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Review shift closure</button>:<span/>}</div>}
 
       {/* MODALS */}
       
