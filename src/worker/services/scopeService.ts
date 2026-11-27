@@ -1,3 +1,4 @@
+import { hasOutletManagerRole, isOutletManager, OUTLET_MANAGER_PARENT } from '../../shared/constants';
 import { UserContext, RetailOutlet, ScopeLevel, User, UserScopeAssignment, State, Division, SalesArea } from '../../shared/types';
 import { OutletRepository } from '../repositories/outletRepository';
 import { UserRepository } from '../repositories/userRepository';
@@ -314,6 +315,11 @@ export class ScopeService {
 
     // Role ceiling verification: actor cannot modify a user whose role level exceeds or equals actor
     const targetRoles = await userRepo.getUserRoles(targetUserId);
+    if (hasOutletManagerRole(actorCtx.roles)) return false;
+    // Outlet principals, when explicitly granted user administration, can
+    // manage their own subordinate branch, never the other branch.
+    if (hasOutletManagerRole(targetRoles) && !actorCtx.roles.some(r => ScopeService.getRoleLevel(r) > 1) &&
+        targetRoles.some(r => isOutletManager(r) && !actorCtx.roles.includes(OUTLET_MANAGER_PARENT[r]))) return false;
     const targetMaxRoleLevel = Math.max(...targetRoles.map(r => ScopeService.getRoleLevel(r)), 0);
     const actorMaxRoleLevel = Math.max(...actorCtx.roles.map(r => ScopeService.getRoleLevel(r)), 0);
     if (targetMaxRoleLevel > actorMaxRoleLevel) {
@@ -564,6 +570,8 @@ export class ScopeService {
       case 'FIELD_OFFICER': return 2;
       case 'DEALER': return 1;
       case 'CSP': return 1;
+      case 'DEALER_MANAGER':
+      case 'CSP_MANAGER': return 0.5;
       default: return 0;
     }
   }
@@ -573,12 +581,16 @@ export class ScopeService {
       return { allowed: true };
     }
 
+    if (hasOutletManagerRole(actorCtx.roles)) return { allowed: false, message: 'Managers cannot provision users.' };
     const actorRoleLevels = actorCtx.roles.map(r => ScopeService.getRoleLevel(r));
     const actorMaxLevel = Math.max(...actorRoleLevels, 0);
 
     for (const requestedRole of targetRoles) {
       const requestedLevel = ScopeService.getRoleLevel(requestedRole);
 
+      if (isOutletManager(requestedRole) && actorMaxLevel <= 1 && !actorCtx.roles.includes(OUTLET_MANAGER_PARENT[requestedRole])) {
+        return { allowed: false, message: 'Managers can only be provisioned under their matching Dealer or CSP branch.' };
+      }
       // Never allow non-global users to grant ADMIN
       if (requestedRole === 'ADMIN') {
         return { allowed: false, message: 'Only accounts with explicit GLOBAL administrative scope can grant the ADMIN role.' };

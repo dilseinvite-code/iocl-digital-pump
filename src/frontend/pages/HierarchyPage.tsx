@@ -183,6 +183,23 @@ export const HierarchyPage: React.FC = () => {
       </div>
       <WorkspaceCommandContext module="hierarchy" />
 
+      {/* Outlet roles extend the personnel branch, not the geographic tree. */}
+      <section aria-label="Outlet personnel hierarchy" className="rounded-xl border border-[#D7E0EA] bg-white p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><h2 className="font-bold text-sm text-[#17365D]">Outlet personnel hierarchy</h2><p className="text-xs text-[#64748B]">Subordinate manager roles within the retail outlet level.</p></div>
+          {hasPermission(PERMISSIONS.USERS_READ) && <a href="/users" className="text-xs font-bold text-[#17365D] underline">Manage users</a>}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[['Dealer','Dealer Manager'],['CSP','CSP Manager']].map(([parent,child])=><div key={parent} className="p-3 rounded-xl border border-[#D7E0EA] bg-[#F1F5F9]">
+            <div className="font-bold text-sm text-[#17365D]">{parent}</div>
+            <div className="ml-3 mt-2 pl-3 border-l-2 border-orange-300 flex flex-wrap items-center gap-2">
+              <span className="rounded-lg bg-white px-2.5 py-1.5 border border-[#C8D9ED] text-xs font-bold text-[#17365D]">{child}</span>
+              <span className="text-[11px] text-[#64748B]">Assigned outlets only</span>
+            </div>
+          </div>)}
+        </div>
+      </section>
+
       {/* Tabs */}
       <div className="workspace-command-tabs flex items-center gap-2 border-b border-[#E2E8F0] pb-2">
         <button

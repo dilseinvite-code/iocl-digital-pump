@@ -1,7 +1,7 @@
 import { AppDatabase } from './index';
 import * as schema from './schema';
 import bcrypt from 'bcryptjs';
-import { ROLES, PERMISSIONS } from '../shared/constants';
+import { ROLES, PERMISSIONS, OUTLET_MANAGER_PERMISSION_CODES } from '../shared/constants';
 
 const DEFAULT_DEMO_PASSWORD_HASH = bcrypt.hashSync('Password@123', 4);
 
@@ -38,6 +38,8 @@ export async function seedDatabase(db: AppDatabase) {
     { id: 'role-fo', code: ROLES.FIELD_OFFICER, name: 'Field Officer', description: 'Field level inspection and retail outlet compliance manager' },
     { id: 'role-dealer', code: ROLES.DEALER, name: 'Retail Outlet Dealer', description: 'Outlet franchisee / owner with access to assigned outlet operations' },
     { id: 'role-csp', code: ROLES.CSP, name: 'Customer Service Provider', description: 'Outlet staff / attendant with operational data access' },
+    { id: 'role-dealer-manager', code: ROLES.DEALER_MANAGER, name: 'Dealer Manager', description: 'Subordinate to Dealer; assigned-outlet operations' },
+    { id: 'role-csp-manager', code: ROLES.CSP_MANAGER, name: 'CSP Manager', description: 'Subordinate to CSP; assigned-outlet operations' },
   ];
   await db.insert(schema.roles).values(rolesList).onConflictDoNothing();
 
@@ -245,7 +247,14 @@ export async function seedDatabase(db: AppDatabase) {
     'perm-dg-r', 'perm-dg-w', 'perm-rep-r',
   ].map(pId => ({ roleId: 'role-csp', permissionId: pId }));
 
+  const managerPermissionIds = new Set(allPermissionsInDb.filter(p =>
+    (OUTLET_MANAGER_PERMISSION_CODES as readonly string[]).includes(p.code)).map(p => p.id));
+  const subordinate = (parent: typeof dealerPerms, roleId: string) =>
+    parent.filter(p => managerPermissionIds.has(p.permissionId)).map(p => ({ roleId, permissionId: p.permissionId }));
+
   await db.insert(schema.rolePermissions).values([
+    ...subordinate(dealerPerms, 'role-dealer-manager'),
+    ...subordinate(cspPerms, 'role-csp-manager'),
     ...adminRolePerms,
     ...stateOfficePerms,
     ...divOfficePerms,

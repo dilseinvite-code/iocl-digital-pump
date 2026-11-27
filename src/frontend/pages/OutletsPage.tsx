@@ -1,3 +1,4 @@
+import { hasOutletManagerRole } from '../../shared/constants';
 import { WorkspaceCommandContext } from '../components/common/WorkspaceCommandContext';
 import './adminModern.css';
 import React, { useState, useEffect, useMemo } from 'react';
@@ -33,7 +34,7 @@ import {
 export const OutletsPage: React.FC = () => {
   const { hasPermission, userCtx } = useAuth();
   const [outlets, setOutlets] = useState<RetailOutlet[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<(User & {roles?: string[]})[]>([]);
   const [loading, setLoading] = useState(true);
   const [directoryError,setDirectoryError]=useState<string|null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -174,7 +175,7 @@ export const OutletsPage: React.FC = () => {
   };
 
   const fetchUsers = async () => {
-    const res = await apiFetch<User[]>('/api/v1/users');
+    const res = await apiFetch<(User & {roles?: string[]})[]>('/api/v1/users');
     if (res.success && res.data) {
       setUsers(res.data);
     }
@@ -1375,6 +1376,7 @@ export const OutletsPage: React.FC = () => {
               </div>
             )}
 
+            <p className="text-xs rounded-lg bg-blue-50 p-2 text-[#17365D]">For Dealer Manager or CSP Manager accounts, assign / revoke outlet access in Administration → Access Scopes.</p>
             <form onSubmit={handleAssignUser} className="space-y-4 text-xs">
               <div>
                 <label className="block text-[#475569] font-semibold mb-1">Select User</label>
@@ -1385,7 +1387,7 @@ export const OutletsPage: React.FC = () => {
                   className="w-full px-3 py-2 bg-[#F1F5F9] border border-[#D7E0EA] rounded-lg text-[#17365D] font-mono"
                 >
                   <option value="">-- Choose User --</option>
-                  {users.map((u) => (
+                  {users.filter(u=>!hasOutletManagerRole(u.roles||[])).map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name} ({u.empCode}) - {u.email}
                     </option>

@@ -9,7 +9,7 @@ import { requireAuth, AppContext, EnvBindings } from '../middleware/auth';
 import { requirePermission } from '../middleware/permission';
 import { ScopeService } from '../services/scopeService';
 import { UserScopeAssignmentSchema } from '../../shared/validators';
-import { PERMISSIONS } from '../../shared/constants';
+import { PERMISSIONS, hasOutletManagerRole } from '../../shared/constants';
 import { mapDatabaseUniqueError } from '../services/duplicateErrorMapper';
 
 const scopes = new Hono<{ Bindings: EnvBindings }>();
@@ -67,6 +67,12 @@ scopes.post('/', requirePermission(PERMISSIONS.SCOPES_ASSIGN) as any, async (c: 
   const hierarchyRepo = new HierarchyRepository(db);
   const outletRepo = new OutletRepository(db);
   const auditRepo = new AuditRepository(db);
+
+  // Outlet managers can only receive explicit OUTLET scopes, even from GLOBAL users.
+  const targetRoles = await userRepo.getUserRoles(payload.userId);
+  if (hasOutletManagerRole(targetRoles) && payload.scopeLevel !== 'OUTLET') {
+    return c.json({ success: false, data: null, error: { code: 'MANAGER_OUTLET_SCOPE_REQUIRED', message: 'Dealer and CSP Managers may only be assigned retail outlet access.' } }, 400);
+  }
 
   // Self Scope Elevation Check: Users cannot assign scopes to themselves unless already global
   if (payload.userId === c.var.user.user.id && !c.var.user.isGlobalScope) {
@@ -200,6 +206,11 @@ scopes.delete('/:id', requirePermission(PERMISSIONS.SCOPES_ASSIGN) as any, async
   // 2. Prevent self scope deletion if non-global
   if (targetScope.userId === c.var.user.user.id && !c.var.user.isGlobalScope) {
     return c.json({ success: false, data: null, error: { code: 'FORBIDDEN', message: 'You cannot revoke your own organizational scope assignments.' } }, 403);
+  }
+
+  const targetRoles = await new UserRepository(db).getUserRoles(targetScope.userId);
+  if (hasOutletManagerRole(targetRoles) && !ScopeService.validateRoleCeiling(c.var.user, targetRoles).allowed) {
+    return c.json({ success: false, data: null, error: { code: 'FORBIDDEN', message: 'Manager access must be managed by the matching parent branch or higher administration.' } }, 403);
   }
 
   // 3. SAFE MULTI-SCOPE DELETION CHECK:

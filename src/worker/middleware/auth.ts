@@ -1,6 +1,6 @@
 import { Context, Next } from 'hono';
 import { getCookie } from 'hono/cookie';
-import { COOKIE_NAME } from '../../shared/constants';
+import { COOKIE_NAME, hasOutletManagerRole } from '../../shared/constants';
 import { getDb } from '../../db';
 import { SessionRepository } from '../repositories/sessionRepository';
 import { UserRepository } from '../repositories/userRepository';
@@ -93,13 +93,18 @@ export async function requireAuth(c: AppContext, next: Next) {
   }
 
   // Parallelize roles, permissions, scopes, and active outlet assignments in a single concurrent batch
-  const [roles, permissions, scopes, activeOutletAssignments] = await Promise.all([
+  const [roles, permissions, rawScopes, rawOutletAssignments] = await Promise.all([
     userRepo.getUserRoles(user.id),
     userRepo.getUserPermissions(user.id),
     scopeRepo.getUserScopes(user.id),
     outletRepo.getUserOutletAssignments(user.id),
   ]);
 
+  // Manager roles use revocable explicit outlet scopes only, not standalone
+  // personnel assignments or accidental broader geographic scopes.
+  const manager = hasOutletManagerRole(roles);
+  const scopes = manager ? rawScopes.filter(s => s.scopeLevel === 'OUTLET' && s.outletId) : rawScopes;
+  const activeOutletAssignments = manager ? [] : rawOutletAssignments;
   const isLogoutEndpoint = c.req.path.endsWith('/auth/logout');
   if (
     !isLogoutEndpoint &&
@@ -112,7 +117,7 @@ export async function requireAuth(c: AppContext, next: Next) {
       outletRepo.getUserOutletAssignments(user.id, { includeArchived: true }),
     ]);
 
-    if (allScopes.length > 0 || allOutletAssignments.length > 0) {
+    if (manager || allScopes.length > 0 || allOutletAssignments.length > 0) {
       await sessionRepo.revokeSession(tokenHash, nowIso);
       finishAuth();
       return c.json({
