@@ -5,11 +5,12 @@ import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { useShiftWorkbench } from '../context/ShiftWorkbenchContext';
 import { apiFetch } from '../services/api';
 import { PERMISSIONS } from '../../shared/constants';
-import type { DailyFuelSummary } from '../../shared/types';
+import type { DailyFuelSummary, OperationalShift } from '../../shared/types';
 import { dsrStatusLabel, getDsrWorkflowStatus } from '../../shared/dsrWorkflowStatus';
 import { getLocalDateInputValue, getLocalMonthInputValue } from '../../shared/utils/dateUtils';
 import { formatMilliunits } from '../../shared/precision';
 import { dsrDates, dsrPeriodProducts, dsrProductColumns, dsrProductValues, type DsrPeriod } from '../utils/dsrReport';
+import { DSR_REMARK_MAX_LENGTH, dsrRemarkError, dsrShiftHeader, formatDsrIst, resolveDsrShiftNames } from '../utils/dsrReportMetadata';
 
 const input = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-[#17365D]';
 const primary = 'inline-flex items-center justify-center gap-2 rounded-lg bg-[#17365D] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50';
@@ -27,6 +28,9 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
   const [exporting,setExporting] = useState(false);
   const [pdfUrl,setPdfUrl] = useState('');
   const [retrievedAt,setRetrievedAt] = useState('');
+  const [shiftNames,setShiftNames] = useState<ReadonlyMap<string,string>>(new Map());
+  const [operatorRemarks,setOperatorRemarks] = useState<Record<string,string>>({});
+  const invalidRemarks=Object.values(operatorRemarks).some(v=>!!dsrRemarkError(v));
   const alive = useRef(true);
   const run = useRef(0);
   const urlRef = useRef('');
@@ -40,7 +44,7 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
   },[]);
   const retrieve = async () => {
     const token = ++run.current;
-    setBusy(true);setProgress(0);setError('');setDays(null);clearPdf();
+    setBusy(true);setProgress(0);setError('');setDays(null);setOperatorRemarks({});setShiftNames(new Map());clearPdf();
     const result: DailyFuelSummary[]=[];
     try{
       // Bound concurrent requests. Each date uses the existing outlet-scoped DSR endpoint.
@@ -56,17 +60,27 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
         result.push(...values);
         if(alive.current && token===run.current)setProgress(result.length);
       }
-      if(alive.current && token===run.current){setDays(result);setRetrievedAt(new Date().toISOString());}
+      const retrieved=new Date().toISOString();
+      const current=()=>alive.current&&token===run.current;
+      if(!current())return;
+      const names=await resolveDsrShiftNames(result,outletId,async()=>{
+        const res=await apiFetch<OperationalShift[]>('/api/v1/outlets/'+encodeURIComponent(outletId)+'/shifts',{cache:'no-store'});
+        return res.success&&Array.isArray(res.data)?res.data:[];
+      },async id=>{
+        const res=await apiFetch<OperationalShift>('/api/v1/shifts/'+encodeURIComponent(id),{cache:'no-store'});
+        return res.success&&res.data?res.data:null;
+      },current);
+      if(current()){setShiftNames(names);setDays(result);setRetrievedAt(retrieved);}
     }catch(e){if(alive.current && token===run.current)setError(e instanceof Error?e.message:'Unable to retrieve report.');}
     finally{if(alive.current && token===run.current)setBusy(false);}
   };
   const exportPdf = async (preview:boolean) => {
-    if(!days || !canExport || exporting || busy)return;
+    if(!days || !canExport || exporting || busy || invalidRemarks)return;
     const token=run.current;
     setExporting(true);setError('');
     try{
       const {generateDsrPdf}=await import('../utils/dsrReportPdf');
-      const bytes=await generateDsrPdf({outletName,roCode,days,generatedAt:new Date().toISOString(),generatedBy,periodLabel:labels[period]+' | Data retrieved '+retrievedAt});
+      const bytes=await generateDsrPdf({outletName,roCode,days,generatedAt:new Date().toISOString(),generatedBy,periodLabel:labels[period],retrievedAt,shiftNames,operatorRemarks});
       if(!alive.current || token!==run.current)return;
       const url=URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer],{type:'application/pdf'}));
       if(preview){clearPdf();urlRef.current=url;setPdfUrl(url);}
@@ -86,7 +100,7 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
       <div><div className="font-semibold text-[#17365D]">{dates[0]}{dates.length>1?' to '+dates[dates.length-1]:''}</div><div className="text-xs text-slate-500">{dates.length} business date(s) · {outletName} ({roCode})</div></div>
       <div className="flex flex-wrap gap-2">
         <button type="button" disabled={busy||exporting} className={primary} onClick={retrieve}><RefreshCw className="h-4 w-4"/>{busy?'Retrieving '+progress+'/'+dates.length:days?'Refresh report':'Retrieve DSR'}</button>
-        {canExport && <><button className={secondary} type="button" disabled={!days||busy||exporting} onClick={()=>exportPdf(true)}><Eye className="h-4 w-4"/>Preview PDF</button><button className={secondary} type="button" disabled={!days||busy||exporting} onClick={()=>exportPdf(false)}><Download className="h-4 w-4"/>{exporting?'Generating…':'Download PDF'}</button></>}
+        {canExport && <><button className={secondary} type="button" disabled={!days||busy||exporting||invalidRemarks} onClick={()=>exportPdf(true)}><Eye className="h-4 w-4"/>Preview PDF</button><button className={secondary} type="button" disabled={!days||busy||exporting||invalidRemarks} onClick={()=>exportPdf(false)}><Download className="h-4 w-4"/>{exporting?'Generating…':'Download PDF'}</button></>}
       </div>
       {busy&&<progress aria-label="DSR retrieval progress" className="w-full" max={dates.length} value={progress}/>}
     </div>
@@ -109,11 +123,12 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <h3 className="p-4 font-semibold text-[#17365D]">Day-wise DSR records</h3>
         {days.map(d=><details key={d.businessDate} className="border-t border-slate-200" open={days.length===1?true:undefined}>
-          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#17365D]">{d.businessDate} · Operational DSR: {dsrStatusLabel(getDsrWorkflowStatus(d).operational)} · Financial Reconciliation: {dsrStatusLabel(getDsrWorkflowStatus(d).financial)} · {d.shiftsCount} shift(s)</summary>
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#17365D]">{d.businessDate} · Operational DSR: {dsrStatusLabel(getDsrWorkflowStatus(d).operational)} · Financial Reconciliation: {dsrStatusLabel(getDsrWorkflowStatus(d).financial)} · {dsrShiftHeader(d,shiftNames)}</summary>
+          {canExport&&d.dayEntryStatus!=='NO_ENTRY'&&<div className="px-4 pt-2 pb-1"><label className="block text-xs font-semibold text-[#17365D]">Operator remarks on stock differences (optional)<textarea aria-label={'Operator remarks for '+d.businessDate} className={input+' mt-1 resize-y'} rows={2} maxLength={DSR_REMARK_MAX_LENGTH} disabled={busy||exporting} value={operatorRemarks[d.businessDate]??''} onChange={e=>{const value=e.target.value;clearPdf();setOperatorRemarks(prev=>({...prev,[d.businessDate]:value}));}} placeholder="Enter an explanation or follow-up action for the stock difference…"/></label><div className="flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span>English text only. Export-only remarks; not saved to the shift. Refreshing the report clears them.</span><span>{(operatorRemarks[d.businessDate]??'').length}/{DSR_REMARK_MAX_LENGTH}</span></div>{dsrRemarkError(operatorRemarks[d.businessDate]??'')&&<p role="alert" className="mt-1 text-xs text-red-700">{dsrRemarkError(operatorRemarks[d.businessDate]??'')}</p>}</div>}
           {d.dayEntryStatus==='NO_ENTRY'?<p className="px-4 pb-4 text-sm text-slate-500">No saved DSR data for this date.</p>:<div className="p-4 overflow-x-auto"><table className="min-w-[1040px] w-full text-xs text-left"><thead className="bg-slate-100"><tr>{['Product','Unit','Status',...dsrProductColumns].map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead><tbody>{d.byProduct.map(p=><tr key={p.productId} className="border-b border-slate-100">{[p.productCode,p.unit,p.status,...dsrProductValues(p)].map((v,i)=><td key={i} className="p-2 whitespace-nowrap">{v}</td>)}</tr>)}</tbody></table>{d.missingFields.length>0&&<p className="mt-2 text-xs text-amber-800">{d.missingFields.join('; ')}</p>}<p className="mt-2 text-xs text-slate-500">Full dispenser and nozzle meter statement is included in the PDF.</p></div>}
         </details>)}
       </div>
-      <p className="text-xs text-slate-500">Retrieved {retrievedAt}. This report reflects currently saved operational data, not an immutable historical snapshot. Operational completeness does not certify collections or final shift closure. No data is written.</p>
+      <p className="text-xs text-slate-500">Retrieved {formatDsrIst(retrievedAt)}. This report reflects currently saved operational data, not an immutable historical snapshot. Operational completeness does not certify collections or final shift closure. No data is written.</p>
     </>}
   </div>;
 }

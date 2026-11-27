@@ -1,6 +1,8 @@
 // Browser-only QA against an isolated local Vite build.
 // All API calls are intercepted; no deployed backend, credentials or writes.
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const { PDFDocument, PDFRawStream, decodePDFRawStream } = require('pdf-lib');
 const { chromium } = require('playwright');
 const base = 'http://127.0.0.1:4173';
 const fixtureOutlet = (id, name, roCode) => ({
@@ -10,8 +12,16 @@ const fixtureOutlet = (id, name, roCode) => ({
   city:'Fixture City', district:'Fixture District', pincode:'000000', assignedUsersCount:0,
 });
 const outlets=[fixtureOutlet('fixture-a','Fixture Outlet A','100001'),fixtureOutlet('fixture-b','Fixture Outlet B with a deliberately long registered name','100002')];
-const auth={user:{id:'fixture-reader',name:'Fixture Reader',empCode:'QA-01',email:'fixture@example.invalid'},roles:['FIELD_OFFICER'],permissions:['outlets.read','shifts.read','cng_operations.read'],primaryScope:'SALES_AREA',isGlobalAdmin:false,isGlobalScope:false,scopes:[]};
+const auth={user:{id:'fixture-reader',name:'Fixture Reader',empCode:'QA-01',email:'fixture@example.invalid'},roles:['FIELD_OFFICER'],permissions:['outlets.read','shifts.read','cng_operations.read','reports.read','reports.generate'],primaryScope:'SALES_AREA',isGlobalAdmin:false,isGlobalScope:false,scopes:[]};
 const historical={id:'fixture-old-shift',outletId:'fixture-b',businessDate:'2000-01-01',shiftTemplateId:'fixture-shift-template',shiftTemplateName:'Morning',status:'OPEN'};
+const dsrShift={id:'fixture-dsr-shift',outletId:'fixture-b',businessDate:'2000-01-02',shiftTemplateId:'fixture-general',shiftTemplateName:'General Shift',status:'CLOSED'};
+const dsrProduct={productId:'ms',productCode:'MS',productName:'Motor Spirit',unit:'LITRE',status:'COMPLETE',missingFields:[],
+  openingStockMilliunits:1000000,receiptsMilliunits:0,availableStockMilliunits:1000000,grossSalesMilliunits:200000,testingMilliunits:5000,netSalesMilliunits:195000,
+  theoreticalClosingMilliunits:805000,physicalClosingMilliunits:795000,varianceMilliunits:-10000,tankReadings:[]};
+const dsrDay={outletId:'fixture-b',outletName:outlets[1].name,businessDate:dsrShift.businessDate,status:'COMPLETE',dayEntryStatus:'COMPLETE',
+  operationalDsrStatus:'COMPLETED',financialReconciliationStatus:'PENDING',shiftsCount:1,shifts:[{...dsrShift,shiftNumber:1,financialReconciliationStatus:'PENDING'}],
+  byProduct:[dsrProduct],byDispenser:[{dispenserNumber:1,nozzles:[{shiftNumber:1,nozzleNumber:1,productId:'ms',productCode:'MS',openingTotalizerMilliunits:1000000,closingTotalizerMilliunits:1200000,grossSalesMilliunits:200000,testingQuantityMilliunits:5000,netSalesMilliunits:195000,hasReading:true,isUnavailable:false}]}],
+  missingFields:[],completion:{expectedTanks:0,openingTankReadings:0,closingTankReadings:0,expectedNozzles:1,nozzleMeterReadings:1,totalReceipts:0,completedReceipts:0,reconciliationComplete:true}};
 const ok=data=>({success:true,data,error:null});
 const fail=message=>({success:false,data:null,error:{code:'FIXTURE_FAILURE',message}});
 async function main(){
@@ -25,6 +35,7 @@ async function main(){
     let shiftAttempts=0;
     await page.route('**/*',async route=>{
       const req=route.request(),url=new URL(req.url());
+      if(['blob:','data:'].includes(url.protocol))return route.continue();
       if(url.origin!==base){if(!['fonts.googleapis.com','fonts.gstatic.com'].includes(url.hostname))blocked.push(req.url());return route.abort();}
       if(!url.pathname.startsWith('/api/'))return route.continue();
       requests.push(url.pathname);
@@ -38,6 +49,8 @@ async function main(){
         if(shiftAttempts===1){await firstResponse;return route.fulfill({status:503,json:fail('Fixture shift list unavailable')});}
         return route.fulfill({json:ok([historical])});
       }
+      if(path==='/api/v1/outlets/fixture-b/fuel/daily-summary'&&url.searchParams.get('businessDate')===dsrShift.businessDate)return route.fulfill({json:ok(dsrDay)});
+      if(path==='/api/v1/shifts/'+dsrShift.id)return route.fulfill({json:ok(dsrShift)});
       if(path.includes('/fuel/daily-summary'))return route.fulfill({status:503,json:fail('Fixture deliberately has no daily summary')});
       blocked.push(path);return route.fulfill({status:404,json:fail('Unexpected QA request')});
     });
@@ -83,9 +96,43 @@ async function main(){
       assert.equal(await page.getByRole('heading',{name:'CNG MFM & Grid Reconciliation'}).count(),0,'Unselected historical shift rendered entry form');
       assert.equal(await outlet.inputValue(),'fixture-b');
       assert(!requests.some(path=>path.includes('/shifts/fixture-old-shift')),'Historical shift was loaded without explicit selection');
+      // DSR: historical shift lookup, optional remarks, actual PDF download and refresh isolation.
+      await page.goto(base+'/dsr-reports');
+      await page.getByRole('heading',{name:'Daily Sales Reports (DSR)',exact:true}).waitFor();
+      await page.getByLabel('Business date',{exact:true}).fill(dsrShift.businessDate);
+      await page.getByRole('button',{name:'Retrieve DSR',exact:true}).click();
+      await page.getByText('Shift: General Shift',{exact:false}).waitFor();
+      const remark=page.getByRole('textbox',{name:'Operator remarks for '+dsrShift.businessDate});
+      await remark.fill('QA: verify dip before sign-off.');
+      await page.getByRole('button',{name:'Preview PDF',exact:true}).click();
+      await page.getByTitle('DSR PDF preview').waitFor();
+      await remark.fill('\u091f\u093f\u092a\u094d\u092a\u0923\u0940');
+      assert(await page.getByRole('button',{name:'Download PDF',exact:true}).isDisabled(),'Unsupported remark must not export silently');
+      await page.getByTitle('DSR PDF preview').waitFor({state:'hidden'});
+      await remark.fill('QA: verify dip before sign-off.');
+      const downloadPromise=page.waitForEvent('download');
+      await page.getByRole('button',{name:'Download PDF',exact:true}).click();
+      const download=await downloadPromise;
+      const pdf=await PDFDocument.load(await fs.readFile(await download.path()));
+      let content='';
+      for(const pdfPage of pdf.getPages()){
+        const streams=pdfPage.node.Contents();
+        for(let i=0;i<streams.size();i++){
+          const stream=pdf.context.lookup(streams.get(i));
+          assert(stream instanceof PDFRawStream);
+          content+=Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1');
+        }
+      }
+      for(const phrase of ['Shift: General Shift',' IST','GRAND TOTAL LITRE','195.000','QA: verify dip before sign-off.']){
+        assert(content.includes(Buffer.from(phrase,'ascii').toString('hex').toUpperCase()),'Downloaded DSR missing '+phrase);
+      }
+      await page.getByRole('button',{name:'Refresh report',exact:true}).click();
+      await remark.waitFor();assert.equal(await remark.inputValue(),'','Refresh must clear export-only remarks');
+      assert(requests.includes('/api/v1/shifts/'+dsrShift.id),'Exact historic shift-name lookup missing');
+      await checkViewport(390,844);
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
-      console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, no mutation or real backend requests.');
+      console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, no mutation or real backend requests.');
     }finally{releaseFirst();}
   }finally{await browser.close();}
 }

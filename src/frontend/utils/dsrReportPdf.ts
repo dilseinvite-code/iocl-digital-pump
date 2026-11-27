@@ -4,12 +4,14 @@ import { dsrStatusLabel, getDsrWorkflowStatus } from '../../shared/dsrWorkflowSt
 import { formatMilliunits } from '../../shared/precision';
 import { dsrPeriodProducts, dsrProductColumns } from './dsrReport';
 import { DSR_LOGO_PNG_BASE64 } from './dsrLogoPng';
-import { dsrDailyProductValues, dsrDailyUnitTotals, dsrTankPresentation, dsrDispenserSubtotals, nozzleHasSavedMeters,
+import { dsrDailyProductValues, dsrDailyUnitTotals, dsrTankPresentation, dsrDispenserSubtotals, dsrNozzleGrandTotals, nozzleHasSavedMeters,
   operationalShiftClosure, savedQuantity, signedVariance } from './dsrReportLayout';
+import { dsrShiftHeader, dsrShiftName, formatDsrIst, normalizeDsrRemark, type DsrShiftNames } from './dsrReportMetadata';
 
 export interface DsrExport {
   outletName: string; roCode: string; days: DailyFuelSummary[];
-  generatedAt: string; generatedBy: string; periodLabel: string;
+  generatedAt: string; generatedBy: string; periodLabel: string; retrievedAt?: string;
+  shiftNames?: DsrShiftNames; operatorRemarks?: Readonly<Record<string,string>>;
 }
 
 const W = 841.89, H = 595.28, M = 26, TW = W - 2*M, FOOT = 44;
@@ -42,14 +44,13 @@ function wrap(text: unknown, font: PDFFont, size: number, width: number): string
 }
 const operationalStatus = (d: DailyFuelSummary) => dsrStatusLabel(getDsrWorkflowStatus(d).operational);
 const financialStatus = (d: DailyFuelSummary) => dsrStatusLabel(getDsrWorkflowStatus(d).financial);
-const stamp = (s: string) => s.replace(/T/,' ').replace(/\.\d+Z$/,' UTC').replace(/Z$/,' UTC');
 const statusTone=(s:string) => {
   if(['COMPLETED','COMPLETE','CLOSED','LOCKED','ALL CLOSED / LOCKED'].includes(s))return {fg:green,bg:greenPale};
   if(s==='BLOCKED'||s==='REVIEW REQUIRED')return {fg:red,bg:redPale};
   return {fg:amber,bg:amberPale};
 };
-type TableRow={cells:string[];kind?:'total'|'subtotal';varianceIndex?:number};
-type TableSpec={title:string;headers:string[];rows:TableRow[];weights:number[];heading:string;numeric?:number[];rowHeight?:number;empty?:string;reserveAfter?:number};
+type TableRow={cells:string[];kind?:'total'|'subtotal'|'grand';varianceIndex?:number};
+type TableSpec={title:string;headers:string[];rows:TableRow[];weights:number[];heading:string;numeric?:number[];rowHeight?:number;empty?:string;reserveAfter?:number;afterGap?:number;tailRows?:number};
 
 export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
   if (!report.days.length) throw new Error('Retrieve a report before exporting.');
@@ -59,6 +60,9 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
   const logo = await pdf.embedPng(Uint8Array.from(atob(DSR_LOGO_PNG_BASE64),c=>c.charCodeAt(0)));
   const first = report.days[0].businessDate, last = report.days[report.days.length-1].businessDate;
   const dates=humanDate(first)+(first===last?'':' - '+humanDate(last));
+  const shiftNames=report.shiftNames??new Map<string,string>();
+  let activeDay:DailyFuelSummary|undefined;
+  const periodInfo=report.periodLabel+(report.retrievedAt?' | Retrieved '+formatDsrIst(report.retrievedAt):'');
   pdf.setTitle('IOCL Daily Sales Report - '+first+' to '+last);
   pdf.setSubject('Operational fuel stock and sales report; financial reconciliation status is independent.');
   let page: PDFPage;
@@ -81,12 +85,13 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
     page.drawRectangle({x:M,y:H-23,width:TW,height:4,color:orange});
     page.drawRectangle({x:M,y:H-78,width:TW,height:55,color:navy});
     page.drawImage(logo,{x:M+12,y:H-69,width:37,height:37});
-    draw('INDIAN OIL CORPORATION LIMITED',M+59,H-40,9.5,bold,white,TW-255);
-    draw('DAILY SALES REPORT (DSR)',M+59,H-61,17,bold,white,TW-255);
-    draw(report.outletName+'  |  RO '+report.roCode,W-M-211,H-41,10,bold,white,199,'right');
-    draw(dates,W-M-211,H-60,10,normal,white,199,'right');
+    draw('INDIAN OIL CORPORATION LIMITED',M+59,H-40,9.5,bold,white,TW-330);
+    draw('DAILY SALES REPORT (DSR)',M+59,H-61,17,bold,white,TW-330);
+    draw(report.outletName+'  |  RO '+report.roCode,W-M-255,H-37,10,bold,white,243,'right');
+    draw(activeDay?humanDate(activeDay.businessDate):dates,W-M-255,H-50,10,normal,white,243,'right');
+    if(activeDay)draw(dsrShiftHeader(activeDay,shiftNames),W-M-255,H-64,9,bold,white,243,'right');
     draw(heading,M,H-94,11,bold,navy,TW*.55);
-    draw(report.periodLabel,M+TW*.56,H-94,8,normal,muted,TW*.44,'right');
+    draw(periodInfo,M+TW*.56,H-94,8,normal,muted,TW*.44,'right');
     y=H-109;
   };
   const ensure=(height:number,heading:string)=>{if(y-height<FOOT)start(heading+' (continued)');};
@@ -130,18 +135,20 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
       y-=hh;
     };
     header();
+    const tailRows=Math.min(rows.length,spec.tailRows??3);
     rows.forEach((row,index)=>{
       if(y-rh<FOOT || (rows[index+1]?.kind==='subtotal' && y-rh*2<FOOT) ||
-        (spec.reserveAfter && index===Math.max(0,rows.length-3) && y-Math.min(3,rows.length)*rh-13-spec.reserveAfter<FOOT)){start(heading+' (continued)');header();}
-      const isTotal=row.kind==='total'||row.kind==='subtotal';
+        (spec.reserveAfter && index===rows.length-tailRows && y-tailRows*rh-(spec.afterGap??13)-spec.reserveAfter<FOOT)){start(heading+' (continued)');header();}
+      const grand=row.kind==='grand';
+      const isTotal=grand||row.kind==='total'||row.kind==='subtotal';
       const font=isTotal?bold:normal;
-      page.drawRectangle({x:M,y:y-rh,width:TW,height:rh,color:isTotal?pale:index%2?rgb(.975,.982,.99):white,borderColor:line,borderWidth:.35});
+      page.drawRectangle({x:M,y:y-rh,width:TW,height:rh,color:grand?navy:isTotal?pale:index%2?rgb(.975,.982,.99):white,borderColor:line,borderWidth:.35});
       if(isTotal)page.drawLine({start:{x:M,y},end:{x:W-M,y},color:navy,thickness:.65});
       let x=M;
       row.cells.forEach((v,i)=>{
         const variance=row.varianceIndex===i;
         const text=variance?signedVariance(v):v;
-        const fg=variance&&text.startsWith('-')?red:variance&&text.startsWith('+')?green:
+        const fg=grand?white:variance&&text.startsWith('-')?red:variance&&text.startsWith('+')?green:
           text==='Not recorded'||text==='Missing'?amber:ink;
         if(variance&&(text.startsWith('-')||text.startsWith('+'))){
           page.drawRectangle({x:x+.6,y:y-rh+.5,width:widths[i]-1.2,height:rh-1,color:text.startsWith('-')?redPale:greenPale});
@@ -153,7 +160,30 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
       });
       y-=rh;
     });
-    y-=13;
+    y-=spec.afterGap??13;
+  };
+  const operatorRemarks=(day:DailyFuelSummary,heading:string)=>{
+    const remark=normalizeDsrRemark(report.operatorRemarks?.[day.businessDate]??'');
+    const label='Operator remarks on stock differences (export only):';
+    if(!remark){
+      ensure(20,heading);draw(label,M+2,y-2,8.3,bold,muted,TW-8);
+      const x=M+8+bold.widthOfTextAtSize(label,8.3);
+      page.drawLine({start:{x,y:y-3},end:{x:W-M-2,y:y-3},color:line,thickness:.7});
+      y-=20;return;
+    }
+    // Wrap by measured width, splitting a long uninterrupted reference if needed.
+    // Unlike ordinary headings, a handwritten explanation must not be clipped.
+    const full=label+' '+remark,lines:string[]=[];
+    let remaining=full;
+    while(remaining){
+      let n=remaining.length;
+      while(n>1&&normal.widthOfTextAtSize(remaining.slice(0,n),8.3)>TW-8)n--;
+      if(n<remaining.length){const cut=remaining.lastIndexOf(' ',n);if(cut>=n*.6)n=cut;}
+      lines.push(remaining.slice(0,n));remaining=remaining.slice(n).trimStart();
+    }
+    ensure(lines.length*11+3,heading);
+    for(const l of lines){draw(l,M+2,y-1,8.3,normal,ink,TW-8);y-=11;}
+    y-=3;
   };
   const signoff=(heading:string)=>{
     ensure(52,heading);
@@ -183,6 +213,7 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
   for(const day of report.days){
     if(report.days.length>1&&day.dayEntryStatus==='NO_ENTRY')continue;
     const heading=humanDate(day.businessDate);
+    activeDay=day;
     start(heading+' | Operational summary');
     statusCards(day,heading);
     if(day.dayEntryStatus==='NO_ENTRY'){note('No shift or DSR entry recorded for this business date. No figures are inferred.',heading);continue;}
@@ -192,31 +223,32 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
       '  |  Tank closing: '+count(c.closingTankReadings,c.expectedTanks)+'  |  Nozzle meters: '+count(c.nozzleMeterReadings,c.expectedNozzles)+
       '  |  Completed receipts: '+count(c.completedReceipts,c.totalReceipts)+'  |  Stock reconciliation: '+(c.reconciliationComplete===true?'COMPLETE':c.reconciliationComplete===false?'PENDING':'Not available'),heading);
     if(day.shiftsCount>1){
-      table({title:'Shift-wise closure and reconciliation',headers:['Shift','Closure','Financial reconciliation','Stock reconciliation','Opening tanks','Closing tanks','Meter readings'],
-        rows:(day.shifts??[]).map(s=>({cells:[String(s.shiftNumber),s.status,s.financialReconciliationStatus?dsrStatusLabel(s.financialReconciliationStatus):'STATUS UNAVAILABLE',
+      table({title:'Shift-wise closure and reconciliation',headers:['Shift / name','Closure','Financial reconciliation','Stock reconciliation','Opening tanks','Closing tanks','Meter readings'],
+        rows:(day.shifts??[]).map(s=>({cells:[String(s.shiftNumber)+' - '+dsrShiftName(s,shiftNames),s.status,s.financialReconciliationStatus?dsrStatusLabel(s.financialReconciliationStatus):'STATUS UNAVAILABLE',
           s.reconciliationComplete?'COMPLETE':'PENDING',count(s.openingTankReadings,s.expectedTanks),count(s.closingTankReadings,s.expectedTanks),count(s.nozzleMeterReadings,s.expectedNozzles)]})),
-        weights:[.6,1.2,2,1.4,1,1,1],heading});
+        weights:[2,1.2,1.8,1.4,1,1,1],heading});
     }
     table({title:'01  Product-wise daily stock and sales',headers:['Product','Unit','Status',...dsrProductColumns],
       rows:[...day.byProduct.map(p=>({cells:[p.productCode,p.unit,p.status.replaceAll('_',' '),...dsrDailyProductValues(p)],varianceIndex:11})),
         ...dsrDailyUnitTotals(day).map(t=>({cells:['TOTAL',t.unit,t.coverage,...t.values],kind:'total' as const,varianceIndex:11}))],
-      weights:[1.08,.72,.9,1,1,1,1,.77,1,1,1,1], numeric:[3,4,5,6,7,8,9,10,11],rowHeight:17,heading});
+      weights:[1.08,.72,.9,1,1,1,1,.77,1,1,1,1], numeric:[3,4,5,6,7,8,9,10,11],rowHeight:15,afterGap:9,heading});
     note('Variance = physical closing minus book closing. Positive (+) is stock excess; negative (-) is stock shortage. These are observed differences, not confirmed financial gains or losses.',heading);
     note('Not recorded means a required reading is missing, not zero. Receipts may use invoiced quantities where measured receipt is unavailable. Totals never combine unlike units.',heading);
+    operatorRemarks(day,heading);
     for(const p of day.byProduct)if(p.missingFields.length)note(p.productCode+': '+p.missingFields.join('; '),heading,amber);
     const tanks=dsrTankPresentation(day);
     if(tanks.mode==='PAIRED'){
       table({title:'02  Tank-wise opening and closing stock',headers:['Tank','Product','Unit','Opening dip (mm)','Opening water (mm)','Opening net stock','Closing dip (mm)','Closing water (mm)','Closing net stock'],
         rows:tanks.rows.map(t=>({cells:[t.tankNumber,t.productCode,t.unit,savedQuantity(t.opening?.productDipMmMilliunits),savedQuantity(t.opening?.waterDipMmMilliunits),
           savedQuantity(t.opening?.netProductVolumeMilliunits),savedQuantity(t.closing?.productDipMmMilliunits),savedQuantity(t.closing?.waterDipMmMilliunits),savedQuantity(t.closing?.netProductVolumeMilliunits)]})),
-        weights:[.6,1.05,.7,1.1,1.1,1.3,1.1,1.1,1.3],numeric:[3,4,5,6,7,8],heading:'Tank stock | '+heading,rowHeight:16,
+        weights:[.6,1.05,.7,1.1,1.1,1.3,1.1,1.1,1.3],numeric:[3,4,5,6,7,8],heading:'Tank stock | '+heading,rowHeight:14,afterGap:9,
         empty:'No saved individual tank readings in this report.'});
       note('Tank detail shows saved measurements; stock balances are not derived from or substituted for missing readings.',heading);
     }else{
       table({title:'02  Individual saved tank readings',headers:['Tank','Product','Unit','Reading type','Product dip (mm)','Water dip (mm)','Net physical stock'],
         rows:tanks.rows.map(t=>({cells:[t.tankNumber,t.productCode,t.unit,t.reading.readingType,savedQuantity(t.reading.productDipMmMilliunits),
           savedQuantity(t.reading.waterDipMmMilliunits),savedQuantity(t.reading.netProductVolumeMilliunits)]})),
-        weights:[.6,1.05,.7,1.3,1.4,1.4,1.5],numeric:[4,5,6],heading:'Tank stock | '+heading,rowHeight:16,
+        weights:[.6,1.05,.7,1.3,1.4,1.4,1.5],numeric:[4,5,6],heading:'Tank stock | '+heading,rowHeight:14,afterGap:9,
         empty:'No saved individual tank readings in this report.'});
       note('Individual readings are listed without pairing: the current daily-summary response does not identify the shift of each tank reading. Do not sum opening/closing readings across shifts.',heading);
     }
@@ -236,15 +268,20 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
       }),
       ...dsrDispenserSubtotals(d,units).map(s=>({kind:'subtotal' as const,cells:['All',String(d.dispenserNumber),'-','TOTAL '+s.unit,'-','-',s.gross,s.testing,s.net,s.recorded+'/'+s.expected+' recorded']})),
     ]);
+    const grandTotals=dsrNozzleGrandTotals(day,units);
+    rows.push(...grandTotals.map(s=>({kind:'grand' as const,cells:['All','All','-','GRAND TOTAL '+s.unit,'-','-',s.gross,s.testing,s.net,s.recorded+'/'+s.expected+' recorded']})));
+    const listed=grandTotals.reduce((sum,s)=>sum+s.expected,0);
+    const mismatch=Number.isSafeInteger(c.expectedNozzles)&&listed!==c.expectedNozzles;
     table({title:'03  Dispenser and nozzle-wise meter statement',headers:['Shift','DU / MPD','Nozzle','Product / unit','Opening totalizer','Closing totalizer','Gross','Testing','Net sales','Coverage'],
-      rows,weights:[.65,.75,.6,1.6,1.45,1.45,1,1,1,1.3],numeric:[4,5,6,7,8],heading:'Meter statement | '+heading,rowHeight:12.5,reserveAfter:67});
-    note('Dispenser subtotals include recorded nozzle meters only, by unit. Coverage identifies missing or unavailable meters; no missing amount is replaced with zero.',heading);
+      rows,weights:[.65,.75,.6,1.6,1.45,1.45,1,1,1,1.3],numeric:[4,5,6,7,8],heading:'Meter statement | '+heading,rowHeight:12,reserveAfter:mismatch?82:67,tailRows:grandTotals.length+3});
+    note('Dispenser and grand totals include recorded nozzle meters only, by unit. Coverage identifies missing or unavailable meters; no missing amount is replaced with zero.',heading);
+    if(mismatch)note('Meter coverage warning: '+listed+' nozzle entries listed; '+c.expectedNozzles+' expected. Grand totals may be incomplete.',heading,amber);
     signoff(heading+' | Sign-off');
   }
   const pages=pdf.getPages();
   pages.forEach((p,i)=>{
     p.drawLine({start:{x:M,y:35},end:{x:W-M,y:35},thickness:.6,color:line});
-    p.drawText(fit('Generated by '+report.generatedBy+' | '+stamp(report.generatedAt),normal,7.7,TW-75),{x:M,y:23,size:7.7,font:normal,color:muted});
+    p.drawText(fit('Generated by '+report.generatedBy+' | '+formatDsrIst(report.generatedAt),normal,7.7,TW-75),{x:M,y:23,size:7.7,font:normal,color:muted});
     p.drawText('Current saved data; not an immutable signed snapshot. Operational completeness does not certify payment collections.',{x:M,y:12,size:7.2,font:normal,color:muted});
     p.drawText('Page '+(i+1)+' / '+pages.length,{x:W-M-57,y:23,size:7.7,font:normal,color:navy});
   });
