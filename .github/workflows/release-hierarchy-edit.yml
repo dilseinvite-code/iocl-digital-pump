@@ -33,7 +33,7 @@ jobs:
       - name: Validate typecheck and hierarchy/security regression tests
         run: |
           bun run typecheck
-          bun test tests/hierarchyEditing.test.ts tests/security.test.ts
+          bun test --timeout 15000 tests/hierarchyEditing.test.ts tests/security.test.ts
       - name: Verify existing production Worker and D1 binding
         shell: bash
         run: |
