@@ -40,8 +40,8 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
           onCloseMobile={() => setMobileOpen(false)}
         />
 
-        <main id="main-workspace" tabIndex={-1} className="min-w-0 flex-1 overflow-x-hidden p-3 sm:p-5 lg:p-6 xl:p-8">
-          <WorkspaceTaskFinder activeTab={activeTab} onNavigate={setActiveTab}/>
+        <main id="main-workspace" tabIndex={-1} data-workspace={activeTab} className="min-w-0 flex-1 overflow-x-hidden p-3 sm:p-5 lg:p-6 xl:p-8">
+          {activeTab!=='dashboard'&&<WorkspaceTaskFinder activeTab={activeTab} onNavigate={setActiveTab}/>}
           {children}
         </main>
       </div>

@@ -18,7 +18,7 @@ describe('IndianOil vibrant theme and UX preservation', () => {
   });
 
   it('preserves task-first launcher, permission filtering and sidebar search', () => {
-    expect(dashboard).toContain('What would you like to do?');
+    expect(dashboard).toContain('Outlet command centre');
     expect(dashboard).toContain('hasPermission(task.permission as PermissionCode)');
     expect(sidebar).toContain('searchedNav = filteredNav.filter');
     expect(sidebar).toContain('aria-label="Find a page"');

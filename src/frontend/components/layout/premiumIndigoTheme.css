@@ -306,3 +306,16 @@
   .enterprise-shell.iocl-vibrant main .iocl-mobile-stack select { width:100%; min-width:0; }
   .enterprise-shell.iocl-vibrant main .iocl-scroll-panel :is(.flex.justify-end,.flex.justify-between) { flex-wrap:wrap; }
 }
+
+/* Command centre family: deep blue navigation across existing grouped modules.
+   No change to route IDs, role checks, scope selection or drawer behavior. */
+.enterprise-shell.iocl-vibrant aside > .iocl-sidebar-content,
+.enterprise-shell.iocl-vibrant .iocl-mobile-drawer .iocl-sidebar-content {
+  background:linear-gradient(165deg,#17344f 0%,#142c47 48%,#0d2137 100%);border-color:#234966;
+}
+.enterprise-shell.iocl-vibrant aside nav button[aria-current="page"],
+.enterprise-shell.iocl-vibrant .iocl-mobile-drawer nav button[aria-current="page"] {
+  background:linear-gradient(100deg,#2c4e70,#294662);color:white;border-left-color:#ff8b3f;box-shadow:0 3px 12px #061c3930;
+}
+.enterprise-shell.iocl-vibrant aside nav button[aria-current="page"] svg,
+.enterprise-shell.iocl-vibrant .iocl-mobile-drawer nav button[aria-current="page"] svg {color:#ffb47e;}
