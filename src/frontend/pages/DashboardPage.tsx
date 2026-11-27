@@ -122,7 +122,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     { id: 'cng-ops', label: 'CNG Operations', description: 'Manage CNG logs and readings.', icon: Fuel, permission: PERMISSIONS.CNG_OPERATIONS_READ, group: 'daily' },
     { id: 'lube-ops', label: 'Lube Operations', description: 'Manage lubricant inventory and sales.', icon: Layers, permission: PERMISSIONS.LUBE_OPERATIONS_READ, group: 'daily' },
     { id: 'dsr-reports', label: 'DSR Reports', description: 'Retrieve daily, weekly, monthly or custom PDF reports.', icon: FileText, permission: PERMISSIONS.REPORTS_READ, group: 'reports' },
-    { id: 'reports', label: 'Monthly Reports', description: 'Review integrated monthly performance and PDF reports.', icon: FileText, permission: PERMISSIONS.REPORTS_READ, group: 'reports' },
+    { id: 'reports', label: 'Outlet Performance Reports', description: 'Review integrated monthly performance and PDF reports.', icon: FileText, permission: PERMISSIONS.REPORTS_READ, group: 'reports' },
     { id: 'documents', label: 'Documentation & Compliance', description: 'Licences, agreements, claims, evidence and compliance PDFs.', icon: ShieldCheck, permission: PERMISSIONS.DOCUMENTS_READ, group: 'reports' },
     { id: 'equipment-ops', label: 'Equipment & Maintenance', description: 'Equipment condition, breakdowns and maintenance.', icon: Wrench, permission: PERMISSIONS.EQUIPMENT_READ, group: 'support' },
     { id: 'utilities-ops', label: 'Utilities & Bills', description: 'Utility records and sub-meter readings.', icon: Activity, permission: PERMISSIONS.UTILITIES_READ, group: 'support' },

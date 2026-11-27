@@ -90,7 +90,7 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false;
+    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false, performanceUi=false;
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -105,6 +105,26 @@ async function main(){
       if(path==='/api/v1/auth/me')return route.fulfill({json:ok(auth)});
       if(path==='/api/v1/outlets')return route.fulfill({json:ok(outlets)});
       if(path==='/api/v1/users'||path==='/api/v1/hierarchy/states')return route.fulfill({json:ok([])});
+      if(performanceUi && path.includes('/reports/monthly-operations')){
+        const isPdf=path.endsWith('/pdf'), id=path.split('/')[4];
+        const requestedOutlet=outlets.find(o=>o.id===id);
+        const month=url.searchParams.get('month'), cutoffMode=url.searchParams.get('cutoffMode');
+        if(!requestedOutlet||!month||!cutoffMode)return route.fulfill({json:fail('Missing report selection')});
+        if(isPdf){
+          const pdf=await PDFDocument.create();pdf.addPage().drawText('Fixture monthly performance report');
+          return route.fulfill({status:200,contentType:'application/pdf',body:Buffer.from(await pdf.save()),headers:{'Content-Disposition':'attachment; filename="fixture-monthly-performance.pdf"'}});
+        }
+        if(month==='2000-03')return route.fulfill({json:fail('Fixture performance report unavailable')});
+        const empty=month==='2000-02'&&cutoffMode==='LATEST_DATA';
+        const cutoffDate=empty?'':cutoffMode==='SELECTED_DATE'?url.searchParams.get('cutoffDate'):cutoffMode==='LATEST_DATA'?month+'-02':month+'-28';
+        const latestDataDate=empty?null:month+'-02';
+        if(month==='2000-04')await new Promise(resolve=>setTimeout(resolve,500));
+        return route.fulfill({json:ok({outletId:id,outletName:requestedOutlet.name,month,cutoffMode,cutoffDate,latestDataDate,
+          productSections:[],dgSection:{rows:[],totals:{totalRunningMinutes:150,totalRunningHoursStr:'2:30',totalHsdConsumedMilliunits:12345,totalHsdConsumedStr:'12.345',totalAmountPaise:0,totalAmountStr:'0.00'}},
+          dgSummary:{totalLogs:2,totalRunHours:2.5,totalDieselConsumedLitres:12.345,averageDailyRunHours:1.25,totalGridFailureMinutes:0,totalRunningHoursStr:'2:30'},
+          fuelSummary:{totalShiftsCount:id==='fixture-b'?7:2,totalSalesPaise:id==='fixture-b'?12345678:200000},
+          breakdownSummary:{totalTickets:3,openTickets:1,resolvedTickets:2},hrSummary:{totalStaff:11,presentDaysCount:62}})});
+      }
       if(financeUi){
         const outlet='/api/v1/outlets/fixture-b';
         if(path===outlet+'/shifts')return route.fulfill({json:ok([financeClosed,financeCompleted,historical])});
@@ -701,6 +721,63 @@ async function main(){
       await financeTask(0).click();
       await page.getByRole('heading',{name:'Sales revenue (provisional)',exact:true}).waitFor();
       await capture('finance-provisional-desktop');
+      // Monthly outlet performance is distinct from DSR. Check saved figures, filter identity, PDF and empty/error states.
+      performanceUi=true;
+      await page.goto(base+'/reports');
+      await page.getByRole('heading',{name:'Outlet Performance Reports',exact:true}).waitFor();
+      const performanceMonth=page.getByLabel('Reporting month',{exact:true});
+      const performanceCutoff=page.getByLabel('Report cutoff',{exact:true});
+      const performanceDate=page.getByLabel('Cutoff date',{exact:true});
+      const performanceOutlet=page.getByLabel('Retail outlet',{exact:true});
+      const performanceHero=page.getByRole('region',{name:'Report selection summary'});
+      const performanceStatus=page.getByRole('region',{name:'Performance report status'});
+      const performanceOverview=page.getByRole('region',{name:'Outlet performance overview'});
+      const performanceCards=performanceOverview.locator('.performance-card');
+      await performanceMonth.fill('2000-01');
+      await performanceHero.getByRole('heading',{name:'January 2000',exact:true}).waitFor();
+      await performanceStatus.getByRole('heading',{name:'Latest record precedes cutoff',exact:true}).waitFor();
+      await performanceHero.getByText('2000-01-02',{exact:true}).waitFor();
+      await page.getByRole('list',{name:'Selected outlet hierarchy'}).getByText(outlets[1].name+' · '+outlets[1].roCode,{exact:true}).waitFor();
+      await performanceCards.nth(0).getByText('₹1,23,456.78',{exact:true}).waitFor();
+      await performanceCards.nth(1).getByText('2:30',{exact:true}).waitFor();
+      await performanceCards.nth(3).getByText('62 man-days',{exact:true}).waitFor();
+      assert.equal(await performanceCards.count(),4);
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1024,768],[1440,900]]){
+        await checkViewport(w,h);
+        for(const panel of [performanceHero,performanceStatus,performanceOverview]){
+          const b=await panel.boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1,'Performance panel clipped at '+w);
+        }
+        if(w===390||w===1440){await page.evaluate(()=>window.scrollTo(0,0));await capture('performance-command-'+w);await capture('performance-indicators-'+w,performanceOverview);}
+      }
+      const pdf=await downloadReport();
+      assert.equal(pdf.suggestedFilename(),'fixture-monthly-performance.pdf');
+      await PDFDocument.load(await fs.readFile(await pdf.path()));
+      await performanceCutoff.selectOption('SELECTED_DATE');
+      assert(await page.getByRole('button',{name:'Download PDF',exact:true}).isDisabled(),'Missing cutoff date allowed export');
+      await performanceDate.fill('2000-01-04');
+      await performanceHero.getByText('Selected Date · 2000-01-04',{exact:true}).waitFor();
+      await performanceCards.nth(0).getByText('₹1,23,456.78',{exact:true}).waitFor();
+      await performanceCutoff.selectOption('LATEST_DATA');
+      await performanceStatus.getByRole('heading',{name:'Saved performance report available',exact:true}).waitFor();
+      await performanceMonth.fill('2000-02');
+      await performanceStatus.getByRole('heading',{name:'No fuel or DG records found',exact:true}).waitFor();
+      assert.equal(await performanceCards.count(),0,'Empty latest-data cutoff rendered zero performance metrics');
+      await performanceMonth.fill('2000-03');
+      await page.getByRole('alert').getByText('Fixture performance report unavailable',{exact:true}).waitFor();
+      assert.equal(await performanceCards.count(),0,'Failed request retained stale metrics');
+      await performanceMonth.fill('2000-04');
+      await performanceMonth.fill('2000-01');
+      await performanceOutlet.selectOption('fixture-a');
+      await performanceCards.nth(0).getByText('₹2,000.00',{exact:true}).waitFor();
+      await performanceHero.getByText(outlets[0].name+' · '+outlets[0].roCode,{exact:true}).waitFor();
+      await page.getByRole('list',{name:'Selected outlet hierarchy'}).getByText(outlets[0].name+' · '+outlets[0].roCode,{exact:true}).waitFor();
+      assert.equal(await performanceCards.nth(0).getByText('₹1,23,456.78',{exact:true}).count(),0);
+      // Restrict report generation without restricting read access.
+      auth.isGlobalAdmin=false;auth.permissions=auth.permissions.filter(p=>p!=='reports.generate');
+      await page.goto(base+'/reports');
+      await performanceOverview.waitFor();
+      assert.equal(await page.getByRole('button',{name:'Preview PDF',exact:true}).count(),0);
+      assert.equal(await page.getByRole('button',{name:'Download PDF',exact:true}).count(),0);
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
       console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, populated operational detail panels and exact totals, closed-shift controls, no mutation or real backend requests.');

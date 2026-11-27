@@ -1,0 +1,86 @@
+/* Read-only Outlet Performance Reports; reuse the approved command-centre family. */
+.performance-command { background:transparent; }
+.performance-command .performance-refresh {
+  display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:42px;
+  padding:8px 13px; background:white; border:1px solid #cfdce9; border-radius:9px;
+  color:#234b72; font-size:12px; font-weight:750;
+}
+.performance-command .performance-refresh:hover:not(:disabled) { background:#edf4fb; }
+.performance-command button:disabled { opacity:.55; cursor:not-allowed; }
+.performance-command .performance-controls {
+  display:grid; grid-template-columns:minmax(0,1.65fr) repeat(3,minmax(0,1fr));
+  gap:10px; padding-top:11px; border-top:1px solid #e5ecf4; align-items:end;
+}
+.performance-command .performance-controls:not(:has(#performance-cutoff)) { grid-template-columns:minmax(0,1.8fr) repeat(2,minmax(0,1fr)); }
+.performance-command .performance-controls > div { min-width:0; }
+.performance-command .performance-controls label {
+  display:block; margin-bottom:5px; font-size:10px; letter-spacing:.075em; text-transform:uppercase; color:#536b80; font-weight:750;
+}
+.performance-command .performance-controls :is(input,select) {
+  width:100%; min-width:0; min-height:42px; padding:9px 11px; border:1px solid #cfdce9;
+  border-radius:9px; background:white; color:#17365d; font-size:13px; font-weight:650;
+}
+.performance-command .performance-period-meta {
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:13px;
+}
+.performance-command .performance-period-meta > div {
+  display:grid; gap:4px; min-width:0; background:#ffffff12; border:1px solid #ffffff29;
+  border-radius:8px; padding:9px 11px; overflow-wrap:anywhere;
+}
+.performance-command .performance-period-meta span { font-size:10px; color:#d7e7f5; font-weight:650; }
+.performance-command .performance-period-meta strong { color:#fff; font-size:13px; font-weight:750; line-height:1.4; }
+.performance-command .performance-export-actions {
+  display:flex; flex-wrap:wrap; gap:8px; margin-top:13px; border-top:1px solid #ffffff29; padding-top:12px;
+}
+.performance-command .performance-export-actions button {
+  display:inline-flex; justify-content:center; align-items:center; gap:7px; padding:9px 13px;
+  min-height:42px; border-radius:9px; color:white; font-size:12px; font-weight:750;
+}
+.performance-command .performance-preview { border:1px solid #ffffff55; background:#ffffff18; }
+.performance-command .performance-preview:hover:not(:disabled) { background:#ffffff29; }
+.performance-command .performance-download { background:linear-gradient(115deg,#d75d12,#b94308); border:1px solid #efac67; box-shadow:0 3px 9px #122b4733; }
+.performance-command .performance-download:hover:not(:disabled) { background:#b94308; }
+.performance-command .performance-overview { padding:16px; }
+.performance-command .performance-overview-tag {
+  display:inline-flex; padding:5px 9px; border:1px solid #cddff1; background:#eff5fc;
+  color:#2c5883; border-radius:999px; font-size:11px; font-weight:750;
+}
+.performance-command .performance-card-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:11px; margin-top:13px; }
+.performance-command .performance-card {
+  display:flex; flex-direction:column; gap:11px; min-width:0; padding:14px 12px;
+  background:linear-gradient(155deg,var(--tile-bg),#fff 85%); border:1px solid var(--tile-border);
+  border-top:3px solid var(--tile-fg); border-radius:13px; overflow-wrap:anywhere;
+}
+.performance-command .performance-card-head { display:flex; min-width:0; align-items:center; gap:9px; }
+.performance-command .performance-card-head h3 { font-size:13px; font-weight:800; color:var(--tile-fg); line-height:1.35; }
+.performance-command .performance-metric { display:grid; gap:3px; min-width:0; }
+.performance-command .performance-metric strong { font-size:clamp(25px,3vw,34px); font-weight:850; letter-spacing:-.04em; line-height:1.15; color:var(--tile-fg); font-variant-numeric:tabular-nums; }
+.performance-command .performance-metric span { color:var(--tile-fg); font-size:12px; font-weight:700; line-height:1.4; }
+.performance-command .performance-card dl { display:grid; gap:0; padding-top:3px; border-top:1px solid var(--tile-border); }
+.performance-command .performance-card dl>div { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; column-gap:7px; row-gap:3px; padding:8px 0; border-bottom:1px solid var(--tile-border); }
+.performance-command .performance-card dt { color:#536b80; font-size:11px; line-height:1.4; flex-basis:120px; flex-grow:1; min-width:0; }
+.performance-command .performance-card dd { color:var(--dc-ink); font-size:12px; font-weight:800; line-height:1.4; font-variant-numeric:tabular-nums; min-width:0; }
+.performance-command .performance-card-note { display:flex; align-items:flex-start; gap:6px; color:#536b80; font-size:11px; line-height:1.5; margin-top:auto; }
+.performance-command .performance-card-note svg { flex:none; margin-top:2px; color:var(--tile-fg); }
+.performance-command .performance-empty { display:flex; align-items:center; gap:13px; border:1px dashed #bed2e6; border-radius:12px; background:#f5f9fd; color:#4b6d91; padding:23px 15px; margin-top:12px; }
+.performance-command .performance-empty svg { flex:none; }
+.performance-command .performance-empty h3 { color:var(--dc-ink); font-size:14px; font-weight:800; }
+.performance-command .performance-empty p { font-size:12px; line-height:1.5; margin-top:4px; }
+.performance-command .performance-report-guide { display:flex; align-items:flex-start; gap:11px; padding:14px 16px; }
+.performance-command .performance-report-guide h2 { font-size:14px; font-weight:800; color:var(--dc-ink); }
+.performance-command .performance-report-guide p { font-size:12px; line-height:1.55; color:var(--dc-muted); margin-top:4px; }
+.performance-command .performance-error { display:flex; align-items:flex-start; gap:9px; border:1px solid #f0c3c3; border-radius:12px; background:#fff0f0; color:#9b2929; padding:12px; font-size:12px; overflow-wrap:anywhere; }
+.performance-command .performance-error svg { flex:none; }
+.performance-command .performance-error span { flex:1; min-width:0; }
+.performance-command .performance-error button { text-decoration:underline; font-weight:700; }
+@container (max-width:1000px) {
+  .performance-command .performance-card-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .performance-command .performance-controls,.performance-command .performance-controls:not(:has(#performance-cutoff)) { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .performance-command .performance-outlet { grid-column:1/-1; }
+}
+@container (max-width:570px) {
+  .performance-command .performance-controls,.performance-command .performance-controls:not(:has(#performance-cutoff)),
+  .performance-command .performance-card-grid,.performance-command .performance-period-meta { grid-template-columns:minmax(0,1fr); }
+  .performance-command .performance-overview,.performance-command .performance-report-guide { padding:12px; }
+  .performance-command .performance-export-actions button { flex:1 1 120px; }
+}

@@ -11,7 +11,8 @@ describe('Phase 3 enterprise-light Financial Operations and Monthly Reports', ()
     expect(reports).toContain("import './financialReportsModern.css'");
     expect(financial).toContain('className="finance-modern daily-command finance-command ');
     expect(financial).toContain("import './financeCommandCentre.css'");
-    expect(reports).toContain('className="reports-modern mx-auto max-w-7xl space-y-6 pb-10"');
+    expect(reports).toContain('className="reports-modern daily-command performance-command ');
+    expect(reports).toContain("import './outletPerformanceCommandCentre.css'");
     expect(styles).toContain('.finance-modern .phase3-data-table');
     expect(styles).toContain('.reports-modern .phase3-surface');
     expect(styles).toContain('color-scheme: light');
@@ -43,8 +44,8 @@ describe('Phase 3 enterprise-light Financial Operations and Monthly Reports', ()
       'selectedOutletId', 'selectedMonth', 'cutoffMode', 'cutoffDate',
       'buildPdfUrl', 'fetchReport', 'handlePreviewPdf', 'handleDownloadPdf',
       'apiFetchBlob', 'MONTH_END', 'SELECTED_DATE', 'LATEST_DATA',
-      'report.dgSummary', 'report.fuelSummary',
-      'report.breakdownSummary', 'report.hrSummary'
+      'verifiedReport.dgSummary', 'verifiedReport.fuelSummary',
+      'verifiedReport.breakdownSummary', 'verifiedReport.hrSummary'
     ]) expect(reports).toContain(required);
     expect(reports).toContain('aria-label="Report selection summary"');
   });
