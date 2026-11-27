@@ -7,7 +7,7 @@ import { apiFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { State, Division, SalesArea } from '../../shared/types';
 import { PERMISSIONS } from '../../shared/constants';
-import { Layers, Plus, Pencil, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Layers, Plus, Pencil, Trash2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
 type HierarchyTab = 'states' | 'divisions' | 'salesAreas';
 type HierarchyUnit = State | Division | SalesArea;
@@ -23,11 +23,12 @@ export const HierarchyPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState<HierarchyTab>('states');
-  const [modal, setModal] = useState<{ tab: HierarchyTab; unit: HierarchyUnit | null } | null>(null);
+  const [modal, setModal] = useState<{ tab: HierarchyTab; unit: HierarchyUnit | null; deleting?: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const refreshRef = useRef<HTMLButtonElement | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Forms
@@ -69,14 +70,14 @@ export const HierarchyPage: React.FC = () => {
     return areaIds.includes(area.id) || divisionIds.includes(area.divisionId) || !!(area.stateId && stateIds.includes(area.stateId));
   };
 
-  const openModal = (tab: HierarchyTab, unit: HierarchyUnit | null, trigger: HTMLElement) => {
+  const openModal = (tab: HierarchyTab, unit: HierarchyUnit | null, trigger: HTMLElement, deleting = false) => {
     triggerRef.current = trigger;
     setErrorMsg(null);
     setSuccessMsg(null);
     setCode(unit?.code || '');
     setName(unit?.name || '');
     setSelectedParentId(unit && 'divisionId' in unit ? unit.divisionId : unit && 'stateId' in unit ? unit.stateId || '' : '');
-    setModal({ tab, unit });
+    setModal({ tab, unit, deleting });
   };
   const closeModal = () => {
     if (saving) return;
@@ -88,6 +89,24 @@ export const HierarchyPage: React.FC = () => {
     e.preventDefault();
     if (!modal || saving) return;
     setErrorMsg(null);
+    if (modal.deleting && modal.unit) {
+      setSaving(true);
+      const res = await apiFetch<{ id: string }>('/api/v1/hierarchy/' + unitEndpoints[modal.tab] + '/' + encodeURIComponent(modal.unit.id), {
+        method: 'DELETE',
+        body: JSON.stringify({ expectedUpdatedAt: modal.unit.updatedAt }),
+      });
+      setSaving(false);
+      if (res.success) {
+        setModal(null);
+        setSuccessMsg(unitLabels[modal.tab] + ' deleted successfully.');
+        await fetchHierarchy(true);
+        void refreshAccessibleOutlets();
+        requestAnimationFrame(() => refreshRef.current?.focus());
+      } else {
+        setErrorMsg(res.error?.message || 'Failed to delete unit safely.');
+      }
+      return;
+    }
     const normalizedCode = code.trim().toUpperCase();
     const normalizedName = name.trim();
     if (normalizedCode.length < 2 || normalizedCode.length > 10 || normalizedName.length < 2) {
@@ -116,11 +135,15 @@ export const HierarchyPage: React.FC = () => {
     }
   };
 
-  const renderEdit = (tab: HierarchyTab, unit: HierarchyUnit) => mayEdit(tab, unit) && (
-    <div className="pt-2 border-t border-[#E2E8F0] flex justify-end">
+  const renderActions = (tab: HierarchyTab, unit: HierarchyUnit) => mayEdit(tab, unit) && (
+    <div className="pt-2 border-t border-[#E2E8F0] flex flex-wrap gap-2 justify-end">
       <button type="button" aria-label={'Edit ' + unit.name} onClick={e => openModal(tab, unit, e.currentTarget)}
         className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-lg border border-[#C8D9ED] bg-[#EEF5FF] text-[#17365D] text-xs font-bold hover:bg-[#DCEBFF] focus-visible:outline-2 focus-visible:outline-[#2354C6]">
         <Pencil size={14} aria-hidden="true"/> Edit
+      </button>
+      <button type="button" aria-label={'Delete ' + unit.name} onClick={e => openModal(tab, unit, e.currentTarget, true)}
+        className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-800 text-xs font-bold hover:bg-red-100 focus-visible:outline-2 focus-visible:outline-red-600">
+        <Trash2 size={14} aria-hidden="true"/> Delete
       </button>
     </div>
   );
@@ -143,7 +166,7 @@ export const HierarchyPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button type="button" onClick={()=>void fetchHierarchy(true)} disabled={loading} aria-label="Refresh hierarchy"
+          <button type="button" ref={refreshRef} onClick={()=>void fetchHierarchy(true)} disabled={loading} aria-label="Refresh hierarchy"
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D7E0EA] text-[#17365D] bg-white text-xs font-semibold hover:bg-[#F1F5F9] disabled:opacity-50">
             <RefreshCw size={14} aria-hidden="true"/> Refresh
           </button>
@@ -210,7 +233,7 @@ export const HierarchyPage: React.FC = () => {
               </div>
               <h3 className="font-extrabold text-sm text-[#17365D]">{s.name}</h3>
               <p className="text-[11px] text-[#64748B] font-mono break-all">ID: {s.id}</p>
-              {renderEdit('states', s)}
+              {renderActions('states', s)}
             </div>
           ))}
 
@@ -222,7 +245,7 @@ export const HierarchyPage: React.FC = () => {
               </div>
               <h3 className="font-extrabold text-sm text-[#17365D]">{d.name}</h3>
               <p className="text-[11px] text-[#64748B] font-mono">Parent State: <strong className="text-[#17365D]">{d.stateName || d.stateId}</strong></p>
-              {renderEdit('divisions', d)}
+              {renderActions('divisions', d)}
             </div>
           ))}
 
@@ -234,7 +257,7 @@ export const HierarchyPage: React.FC = () => {
               </div>
               <h3 className="font-extrabold text-sm text-[#17365D]">{sa.name}</h3>
               <p className="text-[11px] text-[#64748B] font-mono">Parent Division: <strong className="text-[#17365D]">{sa.divisionName || sa.divisionId}</strong></p>
-              {renderEdit('salesAreas', sa)}
+              {renderActions('salesAreas', sa)}
             </div>
           ))}
         </div>
@@ -256,8 +279,8 @@ export const HierarchyPage: React.FC = () => {
           <div role="dialog" aria-modal="true" aria-labelledby="hierarchy-modal-title" className="admin-modern bg-white border border-[#E2E8F0] rounded-2xl max-w-md w-full max-h-[90dvh] overflow-y-auto p-6 shadow-2xl space-y-4">
             <div>
               <p className="text-[10px] font-bold tracking-wider uppercase text-[#A95215]">Organizational hierarchy</p>
-              <h2 id="hierarchy-modal-title" className="text-lg font-bold text-[#17365D]">{modal.unit ? 'Edit' : 'Add'} {unitLabels[modal.tab]}</h2>
-              {modal.unit && <p className="text-xs text-[#64748B] mt-1">Update the name or code. Existing status, parent relationships and linked outlets will not change.</p>}
+              <h2 id="hierarchy-modal-title" className="text-lg font-bold text-[#17365D]">{modal.deleting ? 'Delete' : modal.unit ? 'Edit' : 'Add'} {unitLabels[modal.tab]}</h2>
+              {modal.unit && !modal.deleting && <p className="text-xs text-[#64748B] mt-1">Update the name or code. Existing status, parent relationships and linked outlets will not change.</p>}
             </div>
 
             {errorMsg && (
@@ -268,6 +291,20 @@ export const HierarchyPage: React.FC = () => {
             )}
 
             <form onSubmit={handleSave} className="space-y-3 text-xs">
+              {modal.deleting && modal.unit ? (
+                <>
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-900 space-y-2">
+                    <div className="flex items-center gap-2 font-bold"><Trash2 size={18} aria-hidden="true"/> Permanently delete this unit?</div>
+                    <p className="text-sm font-bold break-words">{modal.unit.name}</p>
+                    <p className="font-mono break-all">{modal.unit.code}</p>
+                    <p>This action cannot be undone. Only units without linked child units, outlets, scope assignments or officer posting history can be deleted. No linked records will be deleted.</p>
+                  </div>
+                  <div className="pt-3 flex flex-wrap items-center justify-end gap-3">
+                    <button type="button" autoFocus onClick={closeModal} disabled={saving} className="px-4 py-2 bg-[#F1F5F9] text-[#475569] rounded-lg font-semibold hover:bg-[#E8EEF5]">Cancel</button>
+                    <button type="submit" disabled={saving} className="px-4 py-2 bg-red-700 hover:bg-red-800 text-white rounded-lg font-bold shadow-md disabled:opacity-60">{saving ? 'Deleting…' : 'Delete Unit'}</button>
+                  </div>
+                </>
+              ) : (<>
               {modal.tab !== 'states' && (
                 <div>
                   <label htmlFor="hierarchy-parent" className="block text-[#475569] font-semibold mb-1">{modal.tab==='divisions'?'Parent State Office':'Parent Divisional Office'}</label>
@@ -303,6 +340,7 @@ export const HierarchyPage: React.FC = () => {
                   {saving?'Saving…':modal.unit?'Save Changes':'Create Unit'}
                 </button>
               </div>
+              </>)}
             </form>
           </div>
         </div>, document.body
