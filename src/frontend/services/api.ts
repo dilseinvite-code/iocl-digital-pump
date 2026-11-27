@@ -75,7 +75,7 @@ function invalidateCacheForPath(endpoint: string): void {
   const segments = cleanEndpoint.split('/').filter(Boolean);
   const prefix = segments.slice(0, 3).join('/');
   for (const key of Array.from(requestQueryCache.keys())) {
-    if (key.includes(prefix)) {
+    if (key.includes(prefix) || (prefix === 'api/v1/hierarchy' && (key.includes('api/v1/outlets') || key.includes('api/v1/scopes')))) {
       requestQueryCache.delete(key);
     }
   }
