@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { WorkspaceTaskFinder } from './WorkspaceTaskFinder';
+import { useActiveOutlet } from '../../context/ActiveOutletContext';
 import './vibrantTheme.css';
 import './option4Saas.css';
 import './premiumIndigoTheme.css';
@@ -17,6 +18,8 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
   setActiveTab,
   children,
 }) => {
+  const {activeOutlet,activeOutletId,loading:outletLoading,outletLoadError}=useActiveOutlet();
+  const dailyOwnFinder=activeTab==='daily-ops'&&!outletLoading&&!outletLoadError&&!!activeOutletId&&activeOutlet?.id===activeOutletId;
   const [mobileOpen, setMobileOpen] = useState(false);
   const wasMobileOpen=useRef(false);
   useEffect(()=>{
@@ -41,7 +44,7 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
         />
 
         <main id="main-workspace" tabIndex={-1} data-workspace={activeTab} className="min-w-0 flex-1 overflow-x-hidden p-3 sm:p-5 lg:p-6 xl:p-8">
-          {activeTab!=='dashboard'&&<WorkspaceTaskFinder activeTab={activeTab} onNavigate={setActiveTab}/>}
+          {activeTab!=='dashboard'&&!dailyOwnFinder&&<WorkspaceTaskFinder activeTab={activeTab} onNavigate={setActiveTab}/>}
           {children}
         </main>
       </div>
