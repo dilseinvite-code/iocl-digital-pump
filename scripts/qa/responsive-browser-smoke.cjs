@@ -28,6 +28,10 @@ const workbenchBootstrap=date=>({outletId:'fixture-b',outletName:outlets[1].name
   shiftTemplates:[{id:dsrShift.shiftTemplateId,code:'GENERAL',name:'General Shift',startTime:'06:00',endTime:'06:00'}],
   shifts:[{shift:{...dsrShift,businessDate:date},shiftTemplateName:'General Shift',shiftTemplateCode:'GENERAL',tanks:[],nozzles:[],receipts:[],reconciliations:[]}],
   dailySummary:workbenchDay(date)});
+const emptyWorkbenchDay=date=>({...workbenchDay(date),outletId:'fixture-a',outletName:outlets[0].name,status:'NOT_STARTED',
+  dayEntryStatus:'NO_ENTRY',operationalDsrStatus:'NOT_STARTED',financialReconciliationStatus:'NOT_STARTED',shiftsCount:0,shifts:[],byProduct:[],byDispenser:[],
+  completion:{...workbenchDay(date).completion,expectedTanks:0,openingTankReadings:0,closingTankReadings:0,expectedNozzles:0,nozzleMeterReadings:0,unavailableNozzles:0,reconciliationComplete:false}});
+const emptyWorkbenchBootstrap=date=>({...workbenchBootstrap(date),outletId:'fixture-a',outletName:outlets[0].name,shifts:[],dailySummary:emptyWorkbenchDay(date)});
 const ok=data=>({success:true,data,error:null});
 const fail=message=>({success:false,data:null,error:{code:'FIXTURE_FAILURE',message}});
 async function main(){
@@ -58,6 +62,7 @@ async function main(){
         if(shiftAttempts===1){await firstResponse;return route.fulfill({status:503,json:fail('Fixture shift list unavailable')});}
         return route.fulfill({json:ok([historical])});
       }
+      if(path==='/api/v1/outlets/fixture-a/daily-operations'&&operationsUi)return route.fulfill({json:ok(emptyWorkbenchBootstrap(url.searchParams.get('businessDate')))});
       if(path==='/api/v1/outlets/fixture-b/daily-operations'&&operationsUi)return route.fulfill({json:ok(workbenchBootstrap(url.searchParams.get('businessDate')))});
       if(path==='/api/v1/outlets/fixture-b/fuel/daily-summary'){
         const date=url.searchParams.get('businessDate');
@@ -69,7 +74,7 @@ async function main(){
       }
       if(path==='/api/v1/outlets/fixture-a/fuel/daily-summary'&&operationsUi){
         const date=url.searchParams.get('businessDate');
-        return route.fulfill({json:ok({...workbenchDay(date),outletId:'fixture-a',outletName:outlets[0].name,status:'NOT_STARTED',dayEntryStatus:'NO_ENTRY',operationalDsrStatus:'NOT_STARTED',financialReconciliationStatus:'NOT_STARTED',shiftsCount:0,shifts:[],completion:{...dsrDay.completion,expectedTanks:0,openingTankReadings:0,closingTankReadings:0,expectedNozzles:0,nozzleMeterReadings:0,unavailableNozzles:0,reconciliationComplete:false}})});
+        return route.fulfill({json:ok(emptyWorkbenchDay(date))});
       }
       if(path==='/api/v1/shifts/'+dsrShift.id+'/tank-snapshots')return route.fulfill({json:ok([
         {outletId:'fixture-b',operationalShiftId:dsrShift.id,tankId:'t-ms',tankNumber:1,tankName:'MS Tank',productId:'ms',productCode:'MS',productUnit:'LITRE',capacityMilliunits:50000000},
@@ -266,6 +271,58 @@ async function main(){
       await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-desktop');
       await capture('daily-status-desktop',page.getByRole('region',{name:'Independent DSR and financial reconciliation'}));
       await checkViewport(390,844);await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-mobile');
+      // Daily page shares the approved dashboard language while keeping the same authorized outlet.
+      const dailyPath=page.getByRole('list',{name:'Selected outlet hierarchy'});
+      await dailyPath.getByText(outlets[1].name+' · '+outlets[1].roCode,{exact:true}).waitFor();
+      assert.equal(await page.getByTestId('workspace-task-finder').count(),1,'Daily workspace has duplicate task finders');
+      assert.equal(await page.getByRole('button',{name:'Open Shift',exact:true}).count(),0,'Read-only role offered shift opening');
+      assert.equal(await page.getByRole('button',{name:'Collections & finance',exact:false}).count(),0,'Restricted finance shortcut visible');
+      assert.equal(await page.locator('.dc-admin-tools').count(),0,'Non-global admin has reset tools');
+      await checkViewport(1440,900);
+      await capture('daily-workbench',page.getByRole('navigation',{name:'Jump to daily entry task'}));
+      await page.locator('#daily-outlet').selectOption('fixture-a');
+      await dailyPath.getByText(outlets[0].name+' · '+outlets[0].roCode,{exact:true}).waitFor();
+      await page.getByRole('heading',{name:'Start daily operations',exact:true}).waitFor();
+      await page.getByRole('region',{name:'Daily operations progress'}).getByText('Not opened',{exact:true}).waitFor();
+      assert.equal((await page.getByTestId('operational-dsr-status').textContent()).trim(),'NOT STARTED');
+      assert.equal((await page.getByTestId('financial-reconciliation-status').textContent()).trim(),'NOT STARTED');
+      assert.equal(await page.getByRole('region',{name:'Daily operations progress'}).getByText('0 / 0',{exact:true}).count(),0,'No expected readings should not show 0/0');
+      assert.equal(await page.getByRole('heading',{name:'Shift workbench',exact:true}).count(),0,'Stale outlet workbench displayed');
+      auth.permissions.push('shifts.open','tank_stock.read','financial_reconciliation.read');
+      auth.roles=['ADMIN'];auth.primaryScope='GLOBAL';auth.isGlobalScope=true;auth.isGlobalAdmin=true;
+      await page.goto(base+'/daily-operations');
+      await page.getByRole('button',{name:'Open Shift',exact:true}).waitFor();
+      await dailyPath.getByText(outlets[0].name+' · '+outlets[0].roCode,{exact:true}).waitFor();
+      const notes=page.locator('#shift-opening-notes');
+      assert.equal(await notes.isVisible(),false,'Optional notes should start compact');
+      await page.locator('.dc-shift-notes>summary').click();
+      await notes.fill('Fixture note not saved');
+      await page.locator('.dc-shift-notes>summary').click();
+      await page.locator('.dc-shift-notes>summary').click();
+      assert.equal(await notes.inputValue(),'Fixture note not saved','Collapsing notes lost unsaved text');
+      await notes.fill('');
+      await page.locator('.dc-shift-notes>summary').click();
+      const admin=page.locator('.dc-admin-tools');
+      const reset=page.getByTestId('daily-ops-test-data-reset-panel');
+      assert.equal(await reset.isVisible(),false,'Reset form must not dominate daily operations');
+      await admin.locator(':scope>summary').click();await reset.waitFor();
+      await admin.locator(':scope>summary').click();await reset.waitFor({state:'hidden'});
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1024,768],[1440,900]]){
+        await checkViewport(w,h);
+        for(const selector of ['.dc-context','.dc-hero','.dc-attention','.dc-progress','.dc-primary-action']){
+          const b=await page.locator(selector).boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1,selector+' clipped at '+w);
+        }
+      }
+      const attentionPanel=page.getByRole('region',{name:'Attention centre'});
+      await attentionPanel.getByText('No shift recorded',{exact:true}).waitFor();
+      for(const selector of ['.dc-attention-top','.dc-attention-footer']){
+        const background=await attentionPanel.locator(selector).evaluate(el=>getComputedStyle(el).backgroundColor);
+        assert.equal(background,'rgba(0, 0, 0, 0)','Sidebar theme leaked into attention panel');
+      }
+      await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-no-shift-desktop');
+      await capture('daily-no-shift-progress',page.getByRole('region',{name:'Daily operations progress'}));
+      await capture('daily-admin-collapsed',admin);
+      await checkViewport(390,844);await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-no-shift-mobile');
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
       console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, closed-shift controls, no mutation or real backend requests.');

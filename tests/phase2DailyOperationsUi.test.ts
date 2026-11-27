@@ -7,7 +7,7 @@ describe('Phase 2 Modern Enterprise Light: Daily Operations & DSR', () => {
 
   it('adds the scoped enterprise-light workspace styling and accessible tables', () => {
     expect(source).toContain("import './dailyOperationsModern.css'");
-    expect(source).toContain('className="daily-ops-modern space-y-6 pb-12"');
+    expect(source).toContain('className="daily-ops-modern daily-command pb-12"');
     expect((source.match(/daily-ops-data-table w-full text-left border-collapse/g) || []).length).toBe(5);
     expect((source.match(/aria-label="Scrollable operations table"/g) || []).length).toBe(5);
     expect(styling).toContain('.daily-ops-modern .daily-ops-data-table');
@@ -22,6 +22,21 @@ describe('Phase 2 Modern Enterprise Light: Daily Operations & DSR', () => {
     expect(source).toContain('summary.completion.pendingReceipts === 0');
     expect(source).toContain('summary.completion.reconciliationComplete');
     expect(source).toContain('not a required step sequence');
+  });
+
+  it('extends the approved command centre without changing data entry or scope authority', () => {
+    expect(source).toContain('outletHierarchy(selectedOutlet)');
+    expect(source).toContain('selectedOutlet?.id===selectedOutletId');
+    expect(source).toContain('Daily figures apply only to the selected retail outlet.');
+    expect(source).toContain('hasPermission(PERMISSIONS.SHIFTS_OPEN)');
+    expect(source).toContain('canOpenShift && bootstrap && bootstrap.shiftTemplates.length > 0');
+    expect(source).toContain('className="dc-shift-notes"');
+    expect(source).toContain('value={newShiftNotes}');
+    expect(source).toContain('{isGlobalAdmin && <details className="dc-admin-tools">');
+    expect(source).toContain('aria-label="Independent DSR and financial reconciliation"');
+    expect(source).toContain('aria-label="Attention centre"');
+    expect(source).toContain('summary.completion.expectedTanks ?');
+    for(const cls of ['dc-status-card','dc-progress-tile','dc-task-tile','dc-context-controls'])expect(styling).toContain(cls);
   });
 
   it('keeps all missing-data warning details available and collapsible', () => {

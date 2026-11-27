@@ -166,7 +166,7 @@ function MainAppContent() {
       <ShiftWorkbenchProvider onNavigate={handleSetActiveTab}>
       <DashboardShell activeTab={activeTab} setActiveTab={handleSetActiveTab}>
         {activeTab === 'dashboard' && <DashboardPage onNavigate={handleSetActiveTab} />}
-        {activeTab === 'daily-ops' && <OutletScopedPage><DailyOperationsPage /></OutletScopedPage>}
+        {activeTab === 'daily-ops' && <OutletScopedPage><DailyOperationsPage onNavigate={handleSetActiveTab} /></OutletScopedPage>}
         {activeTab === 'outlets' && <OutletsPage />}
         {activeTab === 'products' && <ProductsPage />}
         {activeTab === 'pump-infra' && <PumpInfrastructurePage />}

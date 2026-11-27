@@ -32,9 +32,9 @@ describe('Option 4 — Vibrant Modern SaaS actual UI implementation', () => {
   });
 
   it('preserves the shift entry controls and displays existing progress data only', () => {
-    expect(daily).toContain('option4-hero');
-    expect(daily).toContain('option4-progress');
-    expect(daily).toContain('option4-step');
+    expect(daily).toContain('dc-hero');
+    expect(daily).toContain('dc-progress');
+    expect(daily).toContain('dc-progress-tile');
     expect(daily).toContain('summary.completion.reconciliationComplete');
     for (const operation of ['handleOpenShift', 'handleCloseShift', 'handleSaveAllTanks', 'handleSaveAllNozzles']) {
       expect(daily).toContain(operation);

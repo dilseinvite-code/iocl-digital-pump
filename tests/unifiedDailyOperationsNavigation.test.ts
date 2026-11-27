@@ -36,7 +36,7 @@ describe('Unified Daily Operations navigation', () => {
   });
 
   it('does not change backend contracts or database schema', () => {
-    expect(app).toContain('<DailyOperationsPage />');
+    expect(app).toContain('<DailyOperationsPage onNavigate={handleSetActiveTab} />');
     expect(daily).toContain('/nozzle-unavailability');
     expect(daily).toContain('/shifts/open');
   });
