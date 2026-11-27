@@ -49,7 +49,13 @@ async function main(){
         if(shiftAttempts===1){await firstResponse;return route.fulfill({status:503,json:fail('Fixture shift list unavailable')});}
         return route.fulfill({json:ok([historical])});
       }
-      if(path==='/api/v1/outlets/fixture-b/fuel/daily-summary'&&url.searchParams.get('businessDate')===dsrShift.businessDate)return route.fulfill({json:ok(dsrDay)});
+      if(path==='/api/v1/outlets/fixture-b/fuel/daily-summary'){
+        const date=url.searchParams.get('businessDate');
+        if(date===dsrShift.businessDate)return route.fulfill({json:ok(dsrDay)});
+        if(/^2000-01-\d{2}$/.test(date||''))return route.fulfill({json:ok({...dsrDay,businessDate:date,
+          status:'NOT_STARTED',dayEntryStatus:'NO_ENTRY',operationalDsrStatus:'NOT_STARTED',financialReconciliationStatus:'NOT_STARTED',
+          shiftsCount:0,shifts:[],byProduct:[],byDispenser:[],completion:{...dsrDay.completion,expectedNozzles:0,nozzleMeterReadings:0,reconciliationComplete:false}})});
+      }
       if(path==='/api/v1/shifts/'+dsrShift.id)return route.fulfill({json:ok(dsrShift)});
       if(path.includes('/fuel/daily-summary'))return route.fulfill({status:503,json:fail('Fixture deliberately has no daily summary')});
       blocked.push(path);return route.fulfill({status:404,json:fail('Unexpected QA request')});
@@ -113,26 +119,54 @@ async function main(){
       const downloadPromise=page.waitForEvent('download');
       await page.getByRole('button',{name:'Download PDF',exact:true}).click();
       const download=await downloadPromise;
-      const pdf=await PDFDocument.load(await fs.readFile(await download.path()));
-      let content='';
-      for(const pdfPage of pdf.getPages()){
-        const streams=pdfPage.node.Contents();
-        for(let i=0;i<streams.size();i++){
-          const stream=pdf.context.lookup(streams.get(i));
-          assert(stream instanceof PDFRawStream);
-          content+=Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1');
+      async function readPdf(file){
+        const pdf=await PDFDocument.load(await fs.readFile(await file.path()));
+        let content='';
+        for(const pdfPage of pdf.getPages()){
+          const streams=pdfPage.node.Contents();
+          for(let i=0;i<streams.size();i++){
+            const stream=pdf.context.lookup(streams.get(i));
+            assert(stream instanceof PDFRawStream);
+            content+=Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1');
+          }
         }
+        return {pdf,content,has:phrase=>content.includes(Buffer.from(phrase,'ascii').toString('hex').toUpperCase())};
       }
+      const {content}=await readPdf(download);
       for(const phrase of ['Shift: General Shift',' IST','GRAND TOTAL LITRE','195.000','QA: verify dip before sign-off.']){
         assert(content.includes(Buffer.from(phrase,'ascii').toString('hex').toUpperCase()),'Downloaded DSR missing '+phrase);
       }
       await page.getByRole('button',{name:'Refresh report',exact:true}).click();
       await remark.waitFor();assert.equal(await remark.inputValue(),'','Refresh must clear export-only remarks');
       assert(requests.includes('/api/v1/shifts/'+dsrShift.id),'Exact historic shift-name lookup missing');
+      // Period report defaults to consolidated, with explicit detailed audit export.
+      await page.getByRole('button',{name:'Monthly',exact:true}).click();
+      await page.getByLabel('Month',{exact:true}).fill('2000-01');
+      const consolidatedButton=page.getByRole('button',{name:'Consolidated DSR',exact:true});
+      assert.equal(await consolidatedButton.getAttribute('aria-pressed'),'true');
+      await page.getByRole('button',{name:'Retrieve DSR',exact:true}).click();
+      await page.getByRole('heading',{name:'Product-wise consolidated quantities',exact:true}).waitFor();
+      async function downloadReport(){
+        const pending=page.waitForEvent('download');
+        await page.getByRole('button',{name:'Download PDF',exact:true}).click();
+        return await pending;
+      }
+      const monthFile=await downloadReport();
+      assert(monthFile.suggestedFilename().endsWith('-consolidated.pdf'));
+      const month=await readPdf(monthFile);
+      for(const phrase of ['MONTHLY CONSOLIDATED DSR','RECORDED TOTAL','2000-01-03 to 2000-01-31','195.000','0.000 [1/31]','PENDING'])assert(month.has(phrase),'Consolidated PDF missing '+phrase);
+      assert(!month.has('Dispenser and nozzle-wise meter statement'),'Consolidated PDF includes unnecessary daily meters');
+      await page.getByRole('button',{name:'Detailed DSR',exact:true}).click();
+      await page.getByRole('heading',{name:'Product-wise net sales',exact:true}).waitFor();
+      const detailFile=await downloadReport();
+      assert(detailFile.suggestedFilename().endsWith('-detailed.pdf'));
+      const detail=await readPdf(detailFile);
+      assert(detail.pdf.getPageCount()>month.pdf.getPageCount(),'Detailed monthly PDF should include the day-level evidence');
+      assert(detail.has('GRAND TOTAL LITRE'),'Detailed export lost meter totals');
       await checkViewport(390,844);
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
-      console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, no mutation or real backend requests.');
+      console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, no mutation or real backend requests.');
     }finally{releaseFirst();}
   }finally{await browser.close();}
 }

@@ -10,6 +10,7 @@ import { dsrStatusLabel, getDsrWorkflowStatus } from '../../shared/dsrWorkflowSt
 import { getLocalDateInputValue, getLocalMonthInputValue } from '../../shared/utils/dateUtils';
 import { formatMilliunits } from '../../shared/precision';
 import { dsrDates, dsrPeriodProducts, dsrProductColumns, dsrProductValues, type DsrPeriod } from '../utils/dsrReport';
+import { consolidateDsr, periodProductCells, periodProductHeaders, type DsrReportFormat } from '../utils/dsrConsolidated';
 import { DSR_REMARK_MAX_LENGTH, dsrRemarkError, dsrShiftHeader, formatDsrIst, resolveDsrShiftNames } from '../utils/dsrReportMetadata';
 
 const input = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-[#17365D]';
@@ -29,6 +30,7 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
   const [pdfUrl,setPdfUrl] = useState('');
   const [retrievedAt,setRetrievedAt] = useState('');
   const [shiftNames,setShiftNames] = useState<ReadonlyMap<string,string>>(new Map());
+  const [reportFormat,setReportFormat]=useState<DsrReportFormat>(period==='DAY'?'DETAILED':'CONSOLIDATED');
   const [operatorRemarks,setOperatorRemarks] = useState<Record<string,string>>({});
   const invalidRemarks=Object.values(operatorRemarks).some(v=>!!dsrRemarkError(v));
   const alive = useRef(true);
@@ -80,19 +82,20 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
     setExporting(true);setError('');
     try{
       const {generateDsrPdf}=await import('../utils/dsrReportPdf');
-      const bytes=await generateDsrPdf({outletName,roCode,days,generatedAt:new Date().toISOString(),generatedBy,periodLabel:labels[period],retrievedAt,shiftNames,operatorRemarks});
+      const bytes=await generateDsrPdf({outletName,roCode,days,generatedAt:new Date().toISOString(),generatedBy,periodLabel:labels[period],retrievedAt,shiftNames,operatorRemarks,reportFormat});
       if(!alive.current || token!==run.current)return;
       const url=URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer],{type:'application/pdf'}));
       if(preview){clearPdf();urlRef.current=url;setPdfUrl(url);}
       else {
         const a=document.createElement('a');a.href=url;
-        a.download='DSR-'+roCode.replace(/[^a-zA-Z0-9_-]/g,'_')+'-'+dates[0]+(dates.length>1?'--'+dates[dates.length-1]:'')+'.pdf';
+        a.download='DSR-'+roCode.replace(/[^a-zA-Z0-9_-]/g,'_')+'-'+dates[0]+(dates.length>1?'--'+dates[dates.length-1]:'')+(period==='DAY'?'':'-'+reportFormat.toLowerCase())+'.pdf';
         document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
       }
     }catch(e){if(alive.current && token===run.current)setError(e instanceof Error?e.message:'PDF generation failed.');}
     finally{if(alive.current && token===run.current)setExporting(false);}
   };
   const totals=days?dsrPeriodProducts(days):[];
+  const consolidated=days&&period!=='DAY'&&reportFormat==='CONSOLIDATED'?consolidateDsr(days):null;
   const complete=days?.filter(d=>d.dayEntryStatus==='COMPLETE').length??0;
   const none=days?.filter(d=>d.dayEntryStatus==='NO_ENTRY').length??0;
   return <div className="space-y-4">
@@ -102,6 +105,7 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
         <button type="button" disabled={busy||exporting} className={primary} onClick={retrieve}><RefreshCw className="h-4 w-4"/>{busy?'Retrieving '+progress+'/'+dates.length:days?'Refresh report':'Retrieve DSR'}</button>
         {canExport && <><button className={secondary} type="button" disabled={!days||busy||exporting||invalidRemarks} onClick={()=>exportPdf(true)}><Eye className="h-4 w-4"/>Preview PDF</button><button className={secondary} type="button" disabled={!days||busy||exporting||invalidRemarks} onClick={()=>exportPdf(false)}><Download className="h-4 w-4"/>{exporting?'Generating…':'Download PDF'}</button></>}
       </div>
+      {period!=='DAY'&&canExport&&<div className="basis-full border-t border-slate-200 pt-3"><p className="text-xs font-semibold text-slate-600 mb-2">PDF report format</p><div role="group" aria-label="PDF report format" className="flex flex-wrap gap-2">{(['CONSOLIDATED','DETAILED'] as DsrReportFormat[]).map(f=><button key={f} type="button" aria-pressed={reportFormat===f} disabled={busy||exporting} className={reportFormat===f?primary:secondary} onClick={()=>{clearPdf();setReportFormat(f);}}>{f==='CONSOLIDATED'?'Consolidated DSR':'Detailed DSR'}</button>)}</div><p className="mt-2 text-xs text-slate-500">{reportFormat==='CONSOLIDATED'?'Compact period summary with recorded totals, boundary stocks, date-wise sales and coverage.':'Full individual daily reports with tanks, nozzle meters and sign-off for audit.'}</p></div>}
       {busy&&<progress aria-label="DSR retrieval progress" className="w-full" max={dates.length} value={progress}/>}
     </div>
     {error&&<div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error} {days?'':'No incomplete retrieval will be exported.'}</div>}
@@ -111,7 +115,13 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[[String(days.length),'Business dates'],[String(complete),'Complete'],[String(days.length-complete-none),'Partial'],[String(none),'No entry']].map(([n,label])=><div key={label} className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-medium text-slate-500">{label}</p><p className="text-2xl font-bold text-[#17365D]">{n}</p></div>)}
       </div>
-      <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+      {consolidated?<div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h3 className="font-semibold text-[#17365D]">Product-wise consolidated quantities</h3>
+        {complete!==days.length&&<p className="text-xs font-semibold text-amber-800">Incomplete period coverage — recorded subtotals only, not the full-period result.</p>}
+        <p className="text-xs text-slate-600">Opening and physical closing use only the selected first and last dates. Sales days and [days] show fully covered dates; unit totals include known product values and never combine unlike units.</p>
+        <div className="overflow-x-auto"><table className="min-w-[1050px] w-full text-left text-xs"><thead className="bg-slate-100 text-[#17365D]"><tr>{periodProductHeaders.map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead><tbody>{consolidated.rows.map(row=><tr key={row.key} className={row.isTotal?'bg-slate-100 font-semibold':'border-b border-slate-100'}>{periodProductCells(row).map((v,i)=><td key={i} className="p-2 whitespace-nowrap">{v}</td>)}</tr>)}</tbody></table></div>
+        {!consolidated.rows.length&&<p className="text-sm text-slate-500">No recorded product quantities for the selected dates.</p>}
+      </div>:<div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
         <h3 className="font-semibold text-[#17365D]">Product-wise net sales</h3>
         <p className="text-xs text-slate-600">Recorded-date subtotals only. Incomplete coverage is not treated as zero. Quantities of different units are never combined.</p>
         <div className="overflow-x-auto"><table className="w-full text-left text-sm">
@@ -119,13 +129,13 @@ function RetrievedReport({outletId, outletName, roCode, dates, period, canExport
           <tbody>{totals.map(p=><tr key={p.productId+':'+p.unit} className="border-b border-slate-100"><td className="p-3">{p.productCode} — {p.productName}</td><td className="p-3">{p.unit}</td><td className="p-3">{p.recordedDays}/{p.totalDays}</td><td className="p-3">{p.completeDays}/{p.totalDays}</td><td className="p-3 font-mono">{p.recordedNetMilliunits===null?'Not recorded':formatMilliunits(p.recordedNetMilliunits)}</td><td className="p-3">{p.fullyRecorded?'Complete':'Incomplete subtotal'}</td></tr>)}</tbody>
         </table></div>
         {!totals.length&&<p className="py-3 text-sm text-slate-500">No recorded product data for the selected dates.</p>}
-      </div>
+      </div>}
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <h3 className="p-4 font-semibold text-[#17365D]">Day-wise DSR records</h3>
         {days.map(d=><details key={d.businessDate} className="border-t border-slate-200" open={days.length===1?true:undefined}>
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#17365D]">{d.businessDate} · Operational DSR: {dsrStatusLabel(getDsrWorkflowStatus(d).operational)} · Financial Reconciliation: {dsrStatusLabel(getDsrWorkflowStatus(d).financial)} · {dsrShiftHeader(d,shiftNames)}</summary>
           {canExport&&d.dayEntryStatus!=='NO_ENTRY'&&<div className="px-4 pt-2 pb-1"><label className="block text-xs font-semibold text-[#17365D]">Operator remarks on stock differences (optional)<textarea aria-label={'Operator remarks for '+d.businessDate} className={input+' mt-1 resize-y'} rows={2} maxLength={DSR_REMARK_MAX_LENGTH} disabled={busy||exporting} value={operatorRemarks[d.businessDate]??''} onChange={e=>{const value=e.target.value;clearPdf();setOperatorRemarks(prev=>({...prev,[d.businessDate]:value}));}} placeholder="Enter an explanation or follow-up action for the stock difference…"/></label><div className="flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span>English text only. Export-only remarks; not saved to the shift. Refreshing the report clears them.</span><span>{(operatorRemarks[d.businessDate]??'').length}/{DSR_REMARK_MAX_LENGTH}</span></div>{dsrRemarkError(operatorRemarks[d.businessDate]??'')&&<p role="alert" className="mt-1 text-xs text-red-700">{dsrRemarkError(operatorRemarks[d.businessDate]??'')}</p>}</div>}
-          {d.dayEntryStatus==='NO_ENTRY'?<p className="px-4 pb-4 text-sm text-slate-500">No saved DSR data for this date.</p>:<div className="p-4 overflow-x-auto"><table className="min-w-[1040px] w-full text-xs text-left"><thead className="bg-slate-100"><tr>{['Product','Unit','Status',...dsrProductColumns].map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead><tbody>{d.byProduct.map(p=><tr key={p.productId} className="border-b border-slate-100">{[p.productCode,p.unit,p.status,...dsrProductValues(p)].map((v,i)=><td key={i} className="p-2 whitespace-nowrap">{v}</td>)}</tr>)}</tbody></table>{d.missingFields.length>0&&<p className="mt-2 text-xs text-amber-800">{d.missingFields.join('; ')}</p>}<p className="mt-2 text-xs text-slate-500">Full dispenser and nozzle meter statement is included in the PDF.</p></div>}
+          {d.dayEntryStatus==='NO_ENTRY'?<p className="px-4 pb-4 text-sm text-slate-500">No saved DSR data for this date.</p>:<div className="p-4 overflow-x-auto"><table className="min-w-[1040px] w-full text-xs text-left"><thead className="bg-slate-100"><tr>{['Product','Unit','Status',...dsrProductColumns].map(h=><th key={h} className="p-2">{h}</th>)}</tr></thead><tbody>{d.byProduct.map(p=><tr key={p.productId} className="border-b border-slate-100">{[p.productCode,p.unit,p.status,...dsrProductValues(p)].map((v,i)=><td key={i} className="p-2 whitespace-nowrap">{v}</td>)}</tr>)}</tbody></table>{d.missingFields.length>0&&<p className="mt-2 text-xs text-amber-800">{d.missingFields.join('; ')}</p>}<p className="mt-2 text-xs text-slate-500">{reportFormat==='CONSOLIDATED'?'Select Detailed DSR for the full dispenser and nozzle meter statement.':'Full dispenser and nozzle meter statement is included in the PDF.'}</p></div>}
         </details>)}
       </div>
       <p className="text-xs text-slate-500">Retrieved {formatDsrIst(retrievedAt)}. This report reflects currently saved operational data, not an immutable historical snapshot. Operational completeness does not certify collections or final shift closure. No data is written.</p>
@@ -149,7 +159,7 @@ export const DsrReportsPage: React.FC = () => {
   return <div className="space-y-5 pb-8">
     <div className="rounded-xl border border-slate-200 bg-white p-5">
       <h1 className="flex items-center gap-2 text-xl font-bold text-[#17365D]"><FileText className="w-5 h-5 text-orange-500"/>Daily Sales Reports (DSR)</h1>
-      <p className="mt-1 text-sm text-slate-500">Retrieve historical daily operations, stock and nozzle sales by date. Preview or download one combined PDF.</p>
+      <p className="mt-1 text-sm text-slate-500">Retrieve historical daily operations, stock and nozzle sales by date. Preview or download a consolidated period summary or detailed daily PDF.</p>
       {selection && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600"><span>Workbench business date: {selection.businessDate}. DSR includes all shifts for the selected business dates.</span><button type="button" onClick={()=>navigate('daily-ops')} className="font-semibold text-[#17365D] underline">Return to shift workbench</button></div>}
     </div>
     <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">

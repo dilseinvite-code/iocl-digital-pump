@@ -6,11 +6,13 @@ import { dsrPeriodProducts, dsrProductColumns } from './dsrReport';
 import { DSR_LOGO_PNG_BASE64 } from './dsrLogoPng';
 import { dsrDailyProductValues, dsrDailyUnitTotals, dsrTankPresentation, dsrDispenserSubtotals, dsrNozzleGrandTotals, nozzleHasSavedMeters,
   operationalShiftClosure, savedQuantity, signedVariance } from './dsrReportLayout';
+import { consolidateDsr, dayUnitQuantity, periodProductCells, periodProductHeaders, periodDateStatusCells, periodQuantity, type DsrReportFormat } from './dsrConsolidated';
 import { dsrShiftHeader, dsrShiftName, formatDsrIst, normalizeDsrRemark, type DsrShiftNames } from './dsrReportMetadata';
 
 export interface DsrExport {
   outletName: string; roCode: string; days: DailyFuelSummary[];
   generatedAt: string; generatedBy: string; periodLabel: string; retrievedAt?: string;
+  reportFormat?: DsrReportFormat;
   shiftNames?: DsrShiftNames; operatorRemarks?: Readonly<Record<string,string>>;
 }
 
@@ -50,7 +52,7 @@ const statusTone=(s:string) => {
   return {fg:amber,bg:amberPale};
 };
 type TableRow={cells:string[];kind?:'total'|'subtotal'|'grand';varianceIndex?:number};
-type TableSpec={title:string;headers:string[];rows:TableRow[];weights:number[];heading:string;numeric?:number[];rowHeight?:number;empty?:string;reserveAfter?:number;afterGap?:number;tailRows?:number};
+type TableSpec={title:string;headers:string[];rows:TableRow[];weights:number[];heading:string;numeric?:number[];rowHeight?:number;empty?:string;reserveAfter?:number;afterGap?:number;tailRows?:number;keepTogether?:boolean};
 
 export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
   if (!report.days.length) throw new Error('Retrieve a report before exporting.');
@@ -63,7 +65,9 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
   const shiftNames=report.shiftNames??new Map<string,string>();
   let activeDay:DailyFuelSummary|undefined;
   const periodInfo=report.periodLabel+(report.retrievedAt?' | Retrieved '+formatDsrIst(report.retrievedAt):'');
-  pdf.setTitle('IOCL Daily Sales Report - '+first+' to '+last);
+  const consolidated=report.reportFormat==='CONSOLIDATED';
+  const reportTitle=consolidated?report.periodLabel.toUpperCase()+' CONSOLIDATED DSR':'DAILY SALES REPORT (DSR)';
+  pdf.setTitle('IOCL '+(consolidated?reportTitle:'Daily Sales Report')+' - '+first+' to '+last);
   pdf.setSubject('Operational fuel stock and sales report; financial reconciliation status is independent.');
   let page: PDFPage;
   let y=0;
@@ -86,7 +90,7 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
     page.drawRectangle({x:M,y:H-78,width:TW,height:55,color:navy});
     page.drawImage(logo,{x:M+12,y:H-69,width:37,height:37});
     draw('INDIAN OIL CORPORATION LIMITED',M+59,H-40,9.5,bold,white,TW-330);
-    draw('DAILY SALES REPORT (DSR)',M+59,H-61,17,bold,white,TW-330);
+    draw(reportTitle,M+59,H-61,17,bold,white,TW-330);
     draw(report.outletName+'  |  RO '+report.roCode,W-M-255,H-37,10,bold,white,243,'right');
     draw(activeDay?humanDate(activeDay.businessDate):dates,W-M-255,H-50,10,normal,white,243,'right');
     if(activeDay)draw(dsrShiftHeader(activeDay,shiftNames),W-M-255,H-64,9,bold,white,243,'right');
@@ -134,6 +138,7 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
       });
       y-=hh;
     };
+    if(spec.keepTogether&&rows.length<=8)ensure(20+hh+rows.length*rh+(spec.afterGap??13),heading);
     header();
     const tailRows=Math.min(rows.length,spec.tailRows??3);
     rows.forEach((row,index)=>{
@@ -162,9 +167,9 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
     });
     y-=spec.afterGap??13;
   };
-  const operatorRemarks=(day:DailyFuelSummary,heading:string)=>{
+  const operatorRemarks=(day:DailyFuelSummary,heading:string,withDate=false)=>{
     const remark=normalizeDsrRemark(report.operatorRemarks?.[day.businessDate]??'');
-    const label='Operator remarks on stock differences (export only):';
+    const label=(withDate?humanDate(day.businessDate)+' | ':'')+'Operator remarks on stock differences (export only):';
     if(!remark){
       ensure(20,heading);draw(label,M+2,y-2,8.3,bold,muted,TW-8);
       const x=M+8+bold.widthOfTextAtSize(label,8.3);
@@ -196,7 +201,39 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
     });
     y-=30;
   };
-  if(report.days.length>1){
+  if(consolidated){
+    const model=consolidateDsr(report.days),heading='Consolidated period summary';
+    start(heading);
+    note('Business dates: '+model.totalDays+'  |  Complete: '+model.complete+'  |  Partial: '+model.partial+'  |  No entry: '+model.noEntry,heading);
+    if(model.complete!==model.totalDays)note('INCOMPLETE PERIOD COVERAGE - amounts are recorded subtotals, not a full-period result. Missing dates/readings are never zero.',heading,amber);
+    table({title:'01  Product-wise consolidated quantities',headers:periodProductHeaders,
+      rows:model.rows.map(r=>({cells:periodProductCells(r),kind:r.isTotal?'total':undefined,varianceIndex:9})),
+      weights:[1.4,.72,1.13,1.18,1.04,.85,1.05,.76,1.28,1.2],numeric:[2,3,4,5,6,8,9],rowHeight:14,afterGap:7,keepTogether:true,heading,
+      empty:'No product quantities recorded for this period.'});
+    note('Opening is stock on '+humanDate(first)+'; closing is physical stock on '+humanDate(last)+'. Missing boundary readings are not substituted. Use Detailed DSR for tank/nozzle evidence and daily sign-off.',heading);
+    note('Sales days and [days] show fully covered dates out of selected dates. Totals include known product/date amounts only; receipts are completed recorded receipts; variance is the sum of recorded daily differences, not period stock loss. Units stay separate.',heading);
+    const dayHeaders=['Business date / range','Days','Operational DSR','Shift closure','Finance','Gross','Testing','Net sales','Receipts','Variance'];
+    for(const unit of model.units){
+      table({title:'02  Date-wise recorded quantities ('+unit.unit+')',headers:dayHeaders,
+        rows:model.dateGroups.map(g=>{const s=periodDateStatusCells(g),m=unit.days[g.index].measures;
+          return {cells:[s[0],s[4],s[1],s[2],s[3],dayUnitQuantity(m.gross),dayUnitQuantity(m.testing),dayUnitQuantity(m.net),dayUnitQuantity(m.receipts),dayUnitQuantity(m.variance,true)],varianceIndex:9};}),
+        weights:[2.05,.43,1.22,1.2,1.48,.94,.84,.96,.94,1],numeric:[5,6,7,8,9],rowHeight:14,afterGap:7,keepTogether:true,heading:'Date-wise quantities | '+unit.unit});
+    }
+    if(!model.units.length)table({title:'02  Day-wise coverage and status',headers:['Business date / range','Days','Operational DSR','Shift closure','Finance'],
+      rows:model.dateGroups.map(g=>{const s=periodDateStatusCells(g);return {cells:[s[0],s[4],s[1],s[2],s[3]]};}),weights:[2.4,.65,1.6,1.6,1.7],rowHeight:14,afterGap:7,keepTogether:true,heading});
+    note('Consecutive dates without any recorded shift are grouped into ranges. * means a subtotal of known products; other product amounts are not recorded.',heading);
+    for(const unit of model.units){
+      for(let offset=0;offset<unit.products.length;offset+=7){
+        const products=unit.products.slice(offset,offset+7);
+        table({title:'03  Date-wise product net sales ('+unit.unit+')'+(unit.products.length>7?' | Products '+(offset+1)+'-'+(offset+products.length):''),
+          headers:['Business date / range','Days',...products.map(p=>p.code)],
+          rows:model.dateGroups.map(g=>({cells:[g.label,String(g.count),...unit.days[g.index].productNet.slice(offset,offset+products.length).map(v=>periodQuantity(v))]})),
+          weights:[2.1,.55,...products.map(()=>1.25)],numeric:products.map((_,i)=>i+2),rowHeight:14,afterGap:7,keepTogether:true,heading:'Product-wise daily net sales | '+unit.unit});
+      }
+    }
+    const remarked=report.days.filter(d=>d.dayEntryStatus!=='NO_ENTRY'&&normalizeDsrRemark(report.operatorRemarks?.[d.businessDate]??''));
+    if(remarked.length){ensure(35,heading);band('Operator remarks (export only)');for(const day of remarked)operatorRemarks(day,heading,true);}
+  }else if(report.days.length>1){
     start('Period overview');
     const complete=report.days.filter(d=>d.dayEntryStatus==='COMPLETE').length;
     const none=report.days.filter(d=>d.dayEntryStatus==='NO_ENTRY').length;
@@ -210,7 +247,7 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
       rows:report.days.map(d=>({cells:[d.businessDate,operationalStatus(d),operationalShiftClosure(d),financialStatus(d),String(d.shiftsCount)]})),
       weights:[1.2,1.7,2,2.1,.75],heading:'Period overview'});
   }
-  for(const day of report.days){
+  if(!consolidated)for(const day of report.days){
     if(report.days.length>1&&day.dayEntryStatus==='NO_ENTRY')continue;
     const heading=humanDate(day.businessDate);
     activeDay=day;
@@ -231,7 +268,7 @@ export async function generateDsrPdf(report: DsrExport): Promise<Uint8Array> {
     table({title:'01  Product-wise daily stock and sales',headers:['Product','Unit','Status',...dsrProductColumns],
       rows:[...day.byProduct.map(p=>({cells:[p.productCode,p.unit,p.status.replaceAll('_',' '),...dsrDailyProductValues(p)],varianceIndex:11})),
         ...dsrDailyUnitTotals(day).map(t=>({cells:['TOTAL',t.unit,t.coverage,...t.values],kind:'total' as const,varianceIndex:11}))],
-      weights:[1.08,.72,.9,1,1,1,1,.77,1,1,1,1], numeric:[3,4,5,6,7,8,9,10,11],rowHeight:15,afterGap:9,heading});
+      weights:[1.08,.72,.9,1,1,1,1,.77,1,1,1,1], numeric:[3,4,5,6,7,8,9,10,11],rowHeight:14,afterGap:7,keepTogether:true,heading});
     note('Variance = physical closing minus book closing. Positive (+) is stock excess; negative (-) is stock shortage. These are observed differences, not confirmed financial gains or losses.',heading);
     note('Not recorded means a required reading is missing, not zero. Receipts may use invoiced quantities where measured receipt is unavailable. Totals never combine unlike units.',heading);
     operatorRemarks(day,heading);
