@@ -56,6 +56,17 @@ const emptyWorkbenchDay=date=>({...workbenchDay(date),outletId:'fixture-a',outle
   dayEntryStatus:'NO_ENTRY',operationalDsrStatus:'NOT_STARTED',financialReconciliationStatus:'NOT_STARTED',shiftsCount:0,shifts:[],byProduct:[],byDispenser:[],
   completion:{...workbenchDay(date).completion,expectedTanks:0,openingTankReadings:0,closingTankReadings:0,expectedNozzles:0,nozzleMeterReadings:0,unavailableNozzles:0,reconciliationComplete:false}});
 const emptyWorkbenchBootstrap=date=>({...workbenchBootstrap(date),outletId:'fixture-a',outletName:outlets[0].name,shifts:[],dailySummary:emptyWorkbenchDay(date)});
+// Exact stock/receipt fixtures used only by the isolated stock workspace checks.
+const stockTanks=shift=>[dsrProduct,detailHsd].map((p,i)=>({id:'snap-'+p.productId,operationalShiftId:shift.id,outletId:shift.outletId,tankId:'t-'+p.productId,tankNumber:i+1,tankName:p.productCode+' Tank',productId:p.productId,productCode:p.productCode,productName:p.productName,productUnit:'LITRE',capacityMilliunits:5000000,safeFillCapacityMilliunits:4500000}));
+const stockReadings=shift=> stockTanks(shift).flatMap((tank,i)=>['OPENING','CLOSING'].map((readingType,j)=>{
+  const p=[dsrProduct,detailHsd][i],net=j?p.physicalClosingMilliunits:p.openingStockMilliunits;
+  return {...tank,id:'reading-'+tank.tankId+'-'+readingType,readingType,source:'MANUAL',productDipMmStr:j?'795.000':'1000.000',waterDipMmStr:'0.000',grossObservedVolumeStr:metricStr(net),waterVolumeStr:'0.000',netProductVolumeStr:metricStr(net),netProductVolumeMilliunits:net,recordedAt:shift.businessDate+'T'+(j?'16:00:00Z':'06:00:00Z')};
+}));
+const stockReport=shift=>{
+  const rows=stockTanks(shift).map((tank,i)=>{const p=[dsrProduct,detailHsd][i];return {...tank,hasOpeningReading:true,hasClosingReading:true,receiptsCount:0,openingStockStr:metricStr(p.openingStockMilliunits),receiptQuantityStr:'0.000',salesQuantityStr:metricStr(p.netSalesMilliunits),theoreticalClosingStockStr:metricStr(p.theoreticalClosingMilliunits),physicalClosingStockStr:metricStr(p.physicalClosingMilliunits),varianceStr:metricStr(p.varianceMilliunits),varianceStatus:p.varianceMilliunits<0?'LOSS':'GAIN'}});
+  return {operationalShiftId:shift.id,outletId:shift.outletId,businessDate:shift.businessDate,byTank:rows,byProduct:rows};
+};
+const pendingStockReceipt={id:'fixture-receipt',operationalShiftId:historical.id,outletId:historical.outletId,ttNumber:'FIXTURE-TT',invoiceNumber:'FIXTURE-INV',invoiceDate:historical.businessDate,arrivalAt:historical.businessDate+'T07:00:00Z',sealVerified:true,status:'ARRIVED',lines:[]};
 const ok=data=>({success:true,data,error:null});
 const fail=message=>({success:false,data:null,error:{code:'FIXTURE_FAILURE',message}});
 async function main(){
@@ -66,7 +77,7 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0, operationsUi=false;
+    let shiftAttempts=0, operationsUi=false, stockUi=false;
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -81,6 +92,17 @@ async function main(){
       if(path==='/api/v1/auth/me')return route.fulfill({json:ok(auth)});
       if(path==='/api/v1/outlets')return route.fulfill({json:ok(outlets)});
       if(path==='/api/v1/users'||path==='/api/v1/hierarchy/states')return route.fulfill({json:ok([])});
+      if(stockUi){
+        if(path==='/api/v1/outlets/fixture-a/shifts')return route.fulfill({json:ok([])});
+        if(path==='/api/v1/outlets/fixture-b/shifts')return route.fulfill({json:ok([dsrShift,historical])});
+        for(const shift of [dsrShift,historical]){
+          const prefix='/api/v1/shifts/'+shift.id;
+          if(path===prefix+'/tank-snapshots')return route.fulfill({json:ok(stockTanks(shift))});
+          if(path===prefix+'/tank-readings')return route.fulfill({json:ok(stockReadings(shift))});
+          if(path===prefix+'/fuel-receipts')return route.fulfill({json:ok(shift.status==='OPEN'?[pendingStockReceipt]:[])});
+          if(path===prefix+'/stock-reconciliation')return route.fulfill({json:ok(stockReport(shift))});
+        }
+      }
       if(path==='/api/v1/outlets/fixture-b/shifts'){
         shiftAttempts++;
         if(shiftAttempts===1){await firstResponse;return route.fulfill({status:503,json:fail('Fixture shift list unavailable')});}
@@ -381,6 +403,70 @@ async function main(){
       await capture('daily-no-shift-progress',page.getByRole('region',{name:'Daily operations progress'}));
       await capture('daily-admin-collapsed',admin);
       await checkViewport(390,844);await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-no-shift-mobile');
+      // Stock command centre: all four tasks, saved quantities and shift guards.
+      stockUi=true;
+      auth.permissions.push('tank_stock.write','fuel_receipts.read','fuel_receipts.write','stock_reconciliation.read');
+      await page.goto(base+'/stock');
+      await page.getByRole('heading',{name:'Stock & Decantation Operations',exact:true}).waitFor();
+      await page.locator('#stock-outlet').selectOption('fixture-b');
+      const stockShift=page.locator('#stock-shift');
+      await stockShift.selectOption(dsrShift.id);
+      const stockScope=page.getByRole('list',{name:'Selected outlet hierarchy'});
+      await stockScope.getByText(outlets[1].name+' · '+outlets[1].roCode,{exact:true}).waitFor();
+      const stockHero=page.getByRole('region',{name:'Current stock shift'});
+      await stockHero.getByText('CLOSED',{exact:true}).waitFor();
+      await stockHero.getByRole('heading',{name:'General Shift',exact:true}).waitFor();
+      const stockTasks=page.getByRole('region',{name:'Stock operations sections'});
+      const stockOverview=page.getByRole('region',{name:'Shift stock snapshot'});
+      assert.equal(await stockOverview.locator('.stock-metric').count(),4);
+      const openingTask=stockTasks.getByRole('button',{name:/Opening Stock/});
+      await openingTask.click();
+      await page.getByRole('heading',{name:'Opening Tank Stock Dips',exact:true}).waitFor();
+      const table=page.locator('.stock-data-panel');
+      assert.equal(await table.getByText('Recorded',{exact:true}).count(),2);
+      assert.equal(await page.getByRole('button',{name:/Record opening dip/}).count(),0,'Closed shift offered stock entry');
+      assert.equal(await openingTask.getAttribute('aria-current'),'step');
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1024,768],[1440,900]]){
+        await checkViewport(w,h);
+        for(const panel of [stockHero,stockTasks,stockOverview,table]){
+          const b=await panel.boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1,'Stock section clipped at '+w);
+        }
+        if(w===390||w===1440){await page.evaluate(()=>window.scrollTo(0,0));await capture('stock-command-'+w);await capture('stock-opening-'+w,table);}
+      }
+      await page.getByRole('button',{name:'Next: Fuel Receipts',exact:true}).click();
+      await page.getByRole('heading',{name:'Tanker Fuel Deliveries',exact:true}).waitFor();
+      await page.getByText('No fuel receipts recorded for this shift.',{exact:true}).waitFor();
+      assert.equal(await page.getByRole('button',{name:'New Fuel Receipt',exact:true}).count(),0,'Closed shift offered receipt creation');
+      await capture('stock-receipts-1440',page.locator('.stock-task-content').first());
+      await page.getByRole('button',{name:'Next: Closing Stock',exact:true}).click();
+      await page.getByRole('heading',{name:'Closing Tank Stock Dips',exact:true}).waitFor();
+      assert((await page.locator('.stock-net').allTextContents()).some(v=>v.trim()==='795.000 L'));
+      await capture('stock-closing-1440',table);
+      await page.getByRole('button',{name:'Next: Reconciliation',exact:true}).click();
+      await page.getByRole('heading',{name:'Tank-Level Reconciliation',exact:true}).waitFor();
+      await page.getByRole('heading',{name:'Product-Level Reconciliation Summary',exact:true}).waitFor();
+      assert.equal(await page.locator('.stock-variance[data-tone="error"]').count(),2);
+      assert.equal(await page.locator('.stock-variance[data-tone="success"]').count(),2);
+      assert.equal(await page.getByRole('button',{name:'Compute Reconciliation',exact:true}).count(),0,'Closed shift offered reconcile mutation');
+      await capture('stock-reconciliation-1440',page.locator('.stock-task-content').first());
+      await checkViewport(390,844);
+      await capture('stock-reconciliation-390',page.locator('.stock-data-panel').first());
+      // A verified open shift continues to expose existing entry and receipt controls.
+      await stockShift.selectOption(historical.id);
+      await stockHero.getByText('OPEN',{exact:true}).waitFor();
+      await page.getByRole('region',{name:'Stock attention centre'}).getByRole('heading',{name:'1 pending fuel receipt',exact:true}).waitFor();
+      await stockTasks.getByRole('button',{name:/Fuel Receipts/}).click();
+      await page.getByRole('button',{name:'New Fuel Receipt',exact:true}).waitFor();
+      await page.getByRole('button',{name:'Continue Receipt',exact:true}).waitFor();
+      await page.getByRole('textbox',{name:'Search tanker receipts'}).fill('no matching receipt');
+      await page.getByText('No receipts match this search.',{exact:true}).waitFor();
+      await page.getByRole('textbox',{name:'Search tanker receipts'}).fill('');
+      await page.getByRole('button',{name:'Continue Receipt',exact:true}).waitFor();
+      await stockTasks.getByRole('button',{name:/Opening Stock/}).click();
+      await page.getByRole('button',{name:/Record opening dip/}).click();
+      await page.getByRole('button',{name:'Save OPENING Reading',exact:true}).waitFor();
+      await page.getByRole('button',{name:'Cancel',exact:true}).click();
+      await checkViewport(1440,900);
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
       console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, populated operational detail panels and exact totals, closed-shift controls, no mutation or real backend requests.');

@@ -1,4 +1,6 @@
 import './operationsModern.css';
+import './dailyOperationsModern.css';
+import './stockCommandCentre.css';
 import React, { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../services/api';
 import {
@@ -24,6 +26,14 @@ import {
   Link2,
   Check,
   X,
+  ArrowLeft,
+  ChevronRight,
+  GitBranch,
+  Layers,
+  Lock,
+  ClipboardList,
+  Clock,
+  Search,
 } from 'lucide-react';
 
 import { useActiveOutlet } from '../context/ActiveOutletContext';
@@ -34,6 +44,7 @@ import { stockStageOrder, tankDipCoverage, filterStockReceipts, isFinalizedRecei
 import { PERMISSIONS } from '../../shared/constants';
 import { getLocalDateInputValue, getLocalDateTimeInputValue } from '../../shared/utils/dateUtils';
 import {consumeWorkspaceSection} from '../components/layout/workspaceTaskCatalog';
+import { outletHierarchy, scopeLabel } from '../utils/commandCentre';
 
 export interface ReceiptLineReadiness {
   lineId: string;
@@ -331,7 +342,7 @@ export const StockOperationsPage: React.FC = () => {
   const selectedOutletId = activeOutletId || '';
   const setSelectedOutletId = setActiveOutletId;
   const {selection, remember, navigate} = useShiftWorkbench();
-  const {hasPermission} = useAuth();
+  const {hasPermission,userCtx} = useAuth();
   const initialSelection = useRef(selection);
   const selectedRef = useRef('');
   const mounted = useRef(true);
@@ -1023,105 +1034,101 @@ export const StockOperationsPage: React.FC = () => {
     }
   }
 
-  return (
-    <div className="operations-modern space-y-5 pb-10 max-w-[1500px] mx-auto">
-      {/* Page Header */}
-      <div className="option4-hero p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <img className="option4-station-art" src="/option4-fuel-station.svg" alt="" aria-hidden="true" />
-        <div className="option4-hero-content max-w-2xl">
-          <span className="option4-eyebrow">Daily operations / Stock & Decantation</span>
-          <h1 className="text-xl md:text-2xl font-black text-[#17365D] tracking-tight flex items-center gap-2">
-            <Droplets className="w-6 h-6 text-orange-500" />
-            Stock & Decantation Operations
-          </h1>
-          <p className="text-xs md:text-sm text-[#64748B] mt-1">
-            Tank stock dips, tanker receipts, quality density verification, and authoritative reconciliation
-          </p>
-        </div>
+  const selectedOutlet = outlets.find(outlet => outlet.id === selectedOutletId);
+  const receiptPending = shiftReceiptSummary.pendingReceipts.length;
+  const stockAttention = !currentShift
+    ? {tone:'info',title:'Choose an operational shift',detail:'Select a verified shift to view its saved stock and receipt records.'}
+    : receiptPending > 0
+    ? {tone:'attention',title:receiptPending+' pending fuel '+(receiptPending===1?'receipt':'receipts'),detail:'Review the recorded deliveries and complete or cancel them using the existing receipt controls.'}
+    : currentShift.status !== 'OPEN'
+    ? {tone:'info',title:'Read-only shift',detail:'Saved stock, delivery and reconciliation records remain available for review.'}
+    : {tone:'clear',title:receipts.length?'All receipts finalised':'No receipts recorded',detail:'Review tank readings and stock comparison independently. This is not shift-close clearance.'};
 
-        <button
+  return (
+    <div className="operations-modern daily-command stock-command pb-10 max-w-[1500px] mx-auto">
+      <header className="dc-heading">
+        <div>
+          <p className="dc-eyebrow"><span/> INDIANOIL WORKSPACE / DAILY WORK</p>
+          <h1>Stock &amp; Decantation Operations</h1>
+          <p className="dc-muted">Tank stock dips, tanker receipts, quality density verification and authoritative reconciliation.</p>
+        </div>
+        <button type="button"
           disabled={workflowBusy}
           onClick={() => { if(selectedShiftId)loadShiftData(selectedShiftId);else loadShifts(selectedOutletId); }}
-          className="self-start sm:self-auto px-3 py-2 bg-[#F1F5F9] hover:bg-[#E8EEF5] text-[#334155] text-xs font-bold rounded-lg border border-[#D7E0EA] flex items-center gap-1.5 transition-colors"
+          className="stock-refresh px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </button>
-      </div>
+      </header>
 
-      {/* Selectors Bar */}
-      <div className="option4-panel grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4 sm:p-5">
-        <div>
-          <label className="block text-[11px] font-bold text-[#64748B] uppercase tracking-wider mb-1">
-            Retail Outlet
-          </label>
-          <select
-            value={selectedOutletId}
-            disabled={workflowBusy}
-            onChange={e => {if(dipForm.productDipMm && !window.confirm('Discard the unsaved dip entry and change outlet?'))return;setSelectedOutletId(e.target.value);}}
-            className="w-full bg-[#F1F5F9] text-[#17365D] text-sm font-semibold rounded-lg p-2.5 border border-[#D7E0EA] focus:border-orange-500 focus:outline-none"
-          >
-            {outlets.map(o => (
-              <option key={o.id} value={o.id}>
-                {o.roCode} - {o.name}
-              </option>
-            ))}
-          </select>
+      <section aria-label="Selected outlet and operational shift" className="dc-panel dc-context">
+        <div className="dc-hierarchy-head">
+          <span className="dc-hierarchy-icon"><GitBranch size={18} aria-hidden="true"/></span>
+          <div><h2>Organization hierarchy</h2><p>Primary access: <strong>{scopeLabel(userCtx?.primaryScope || 'UNKNOWN')}</strong> · Records apply only to the selected retail outlet and shift.</p></div>
         </div>
-
-        <div>
-          <label className="block text-[11px] font-bold text-[#64748B] uppercase tracking-wider mb-1">
-            Operational Shift
-          </label>
-          <select
-            value={selectedShiftId}
-            disabled={workflowBusy}
-            onChange={e => { if(dipForm.productDipMm && !window.confirm('Discard the unsaved dip entry and switch shift?')) return; setErrorMsg(null); chooseShift(shifts.find(s=>s.id===e.target.value)||null); }}
-            className="w-full bg-[#F1F5F9] text-[#17365D] text-sm font-semibold rounded-lg p-2.5 border border-[#D7E0EA] focus:border-orange-500 focus:outline-none"
-          >
-            {shifts.length === 0 ? (
-              <option value="">{shiftListLoading?'Loading shifts…':'No shifts available'}</option>
-            ) : (
-              <><option value="">Choose shift</option>{shifts.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.businessDate} · {s.shiftTemplateName || s.shiftTemplateCode || s.shiftTemplateId} ({s.status})
-                </option>
-              ))}</>
-            )}
-          </select>
-        </div>
-
-        {currentShift && (
-          <div className="flex items-center justify-between gap-2 text-xs text-[#475569] font-mono bg-[#F1F5F9] p-2.5 rounded-lg border border-[#D7E0EA]/50 self-end">
-            <div className="flex items-center gap-2">
-              <span className="text-[#64748B]">Status:</span>
-              <span
-                className={`px-2 py-0.5 rounded font-bold ${
-                  currentShift.status === 'OPEN'
-                    ? 'bg-emerald-500/20 text-emerald-700 border border-emerald-500/30'
-                    : 'bg-[#E8EEF5] text-[#475569]'
-                }`}
-              >
-                {currentShift.status}
-              </span>
-            </div>
-            {receipts.length > 0 && (
-              <span
-                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                  shiftReceiptSummary.allReceiptsFinalized
-                    ? 'bg-emerald-500/15 text-emerald-800 border border-emerald-500/30'
-                    : 'bg-amber-500/20 text-amber-800 border border-amber-500/30'
-                }`}
-              >
-                Receipts: {shiftReceiptSummary.completedCount + shiftReceiptSummary.cancelledCount}/
-                {shiftReceiptSummary.totalReceipts} Finalised
-              </span>
-            )}
+        {selectedOutlet && <ol aria-label="Selected outlet hierarchy" className="dc-hierarchy-path">
+          {outletHierarchy(selectedOutlet).map((part,i)=><li key={part.label}>
+            {i>0&&<ChevronRight size={14} className="dc-chevron" aria-hidden="true"/>}
+            <span data-selected={i===4}><small>{part.label}</small><strong>{part.name}{part.code?' · '+part.code:''}</strong></span>
+          </li>)}
+        </ol>}
+        <div className="stock-context-controls">
+          <div>
+            <label htmlFor="stock-outlet">Retail Outlet</label>
+            <select id="stock-outlet"
+              value={selectedOutletId}
+              disabled={workflowBusy}
+              onChange={e => {if(dipForm.productDipMm && !window.confirm('Discard the unsaved dip entry and change outlet?'))return;setSelectedOutletId(e.target.value);}}
+              className="w-full bg-white text-[#17365D] text-sm font-semibold rounded-lg p-2.5 border border-[#D7E0EA] focus:border-orange-500 focus:outline-none disabled:opacity-60"
+            >
+              {outlets.map(o => <option key={o.id} value={o.id}>{o.roCode} - {o.name}</option>)}
+            </select>
           </div>
-        )}
-      </div>
+          <div>
+            <label htmlFor="stock-shift">Operational Shift</label>
+            <select id="stock-shift"
+              value={selectedShiftId}
+              disabled={workflowBusy}
+              onChange={e => { if(dipForm.productDipMm && !window.confirm('Discard the unsaved dip entry and switch shift?')) return; setErrorMsg(null); chooseShift(shifts.find(s=>s.id===e.target.value)||null); }}
+              className="w-full bg-white text-[#17365D] text-sm font-semibold rounded-lg p-2.5 border border-[#D7E0EA] focus:border-orange-500 focus:outline-none disabled:opacity-60"
+            >
+              {shifts.length === 0 ? <option value="">{shiftListLoading?'Loading shifts…':'No shifts available'}</option> :
+                <><option value="">Choose shift</option>{shifts.map(s => (
+                  <option key={s.id} value={s.id}>{s.businessDate} · {s.shiftTemplateName || s.shiftTemplateCode || s.shiftTemplateId} ({s.status})</option>
+                ))}</>}
+            </select>
+          </div>
+        </div>
+      </section>
 
-      {hasPermission(PERMISSIONS.SHIFTS_READ) && <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3"><span className="text-xs text-slate-600">{currentShift ? 'Working on '+currentShift.businessDate+' · '+(currentShift.shiftTemplateName || currentShift.shiftTemplateCode || currentShift.shiftTemplateId) : shifts.length===0&&!shiftListLoading?'No saved shifts for this outlet. Open a shift in Shift & Readings.':'Choose a verified shift to continue.'}</span><button type="button" disabled={workflowBusy} onClick={()=>{if(currentShift)goBackToShift();else navigate('daily-ops');}} className="text-sm font-semibold text-[#17365D] underline disabled:opacity-50">Return to shift workbench</button></div>}
+      <div className="dc-hero-grid">
+        <section className="dc-hero" aria-label="Current stock shift">
+          <div className="dc-hero-content">
+            <span className="dc-hero-tag"><ClipboardList size={14} aria-hidden="true"/> {currentShift ? 'SELECTED OPERATIONAL SHIFT' : 'STOCK WORKSPACE'}</span>
+            <div className="dc-hero-title">
+              <div>
+                <h2>{currentShift ? (currentShift.shiftTemplateName || currentShift.shiftTemplateCode || currentShift.shiftTemplateId) : 'Select a shift to continue'}</h2>
+                <p>{currentShift ? currentShift.businessDate+' · '+(selectedOutlet?.name || 'Selected outlet') : 'Stock records are linked to a verified operational shift.'}</p>
+              </div>
+              <span className="dc-hero-art" aria-hidden="true"><Droplets size={58}/></span>
+            </div>
+            <div className="stock-hero-footer">
+              <span className="stock-shift-status" data-tone={currentShift?.status==='OPEN'?'open':'neutral'}>{currentShift?.status==='OPEN'?<Clock size={13}/>:currentShift?<Lock size={13}/>:<Clock size={13}/>} {currentShift?.status || (shiftListLoading||loading?'LOADING':'NO SHIFT SELECTED')}</span>
+              {currentShift && receipts.length > 0 && <span className="stock-hero-receipts">{shiftReceiptSummary.completedCount + shiftReceiptSummary.cancelledCount}/{shiftReceiptSummary.totalReceipts} receipts finalised</span>}
+              {hasPermission(PERMISSIONS.SHIFTS_READ) && <button type="button" disabled={workflowBusy} onClick={()=>{if(currentShift)goBackToShift();else navigate('daily-ops');}} className="stock-back-link"><ArrowLeft size={14}/> Return to shift workbench</button>}
+            </div>
+          </div>
+        </section>
+        <section aria-label="Stock attention centre" className="dc-attention" data-tone={stockAttention.tone}>
+          <div className="dc-attention-top">
+            <span className="dc-attention-icon">{stockAttention.tone==='attention'?<AlertTriangle size={20}/>:stockAttention.tone==='clear'?<CheckCircle2 size={20}/>:<ClipboardList size={20}/>}</span>
+            <div><div className="dc-attention-kicker">STOCK ATTENTION</div><p className="dc-attention-context">Selected outlet · selected shift</p></div>
+          </div>
+          <h3>{stockAttention.title}</h3><p>{stockAttention.detail}</p>
+          <div className="dc-attention-footer"><ShieldAlert size={15}/><span>Stock indicators are not financial approval or shift-close clearance.</span></div>
+        </section>
+      </div>
       {/* Error & Success Messages */}
       {errorMsg && (
         <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl text-red-700 text-xs font-semibold flex items-center gap-2">
@@ -1137,47 +1144,28 @@ export const StockOperationsPage: React.FC = () => {
       )}
 
       {/* Operational stages are navigation, not required gates. Show their purpose at a glance. */}
-      <section aria-label="Stock operations sections" className="option4-panel space-y-4 p-4 sm:p-5">
-        <div>
-          <h2 className="text-lg font-bold text-[#17365D]">Stock workflow</h2>
-          <p className="text-xs text-[#64748B]">Choose an applicable task for this shift. Saved progress is shown below; this is not a shift-close clearance.</p>
+      <section aria-label="Stock operations sections" className="dc-panel stock-workflow">
+        <div className="dc-section-heading">
+          <div><p className="dc-eyebrow"><span/> WORKFLOW</p><h2>Stock workflow</h2><p>Choose an applicable task for this shift. Saved progress is shown below; this is not a shift-close clearance.</p></div>
+          <span className="stock-step-counter">Current task · {stageIndex+1} of {stockStageOrder.length}</span>
         </div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="stock-workflow-grid">
         {[
-          { id: 'OPENING', label: 'Opening Stock', icon: Droplets, hint: 'Initial tank readings', progress:openingCoverage.label },
-          {
-            id: 'RECEIPTS',
-            label:'Fuel Receipts',
-            icon: Fuel,
-            hint: 'Tankers & decantation', progress:receipts.length?shiftReceiptSummary.pendingReceipts.length+' pending · '+receipts.length+' total':'No receipts recorded',
-          },
-          { id: 'CLOSING', label: 'Closing Stock', icon: Droplets, hint: 'Final tank readings', progress:closingCoverage.label },
-          { id: 'RECONCILIATION', label: 'Reconciliation', icon: Calculator, hint: 'Stock comparison', progress:stockReconciliationLabel(reconciliation,reconciliationAvailable) },
-        ].map(tab => {
+          { id: 'OPENING', label: 'Opening Stock', icon: Droplets, color:'blue', hint: 'Initial tank readings', progress:openingCoverage.label },
+          { id: 'RECEIPTS', label:'Fuel Receipts', icon: Fuel, color:'green', hint: 'Tankers & decantation', progress:receipts.length?shiftReceiptSummary.pendingReceipts.length+' pending · '+receipts.length+' total':'No receipts recorded' },
+          { id: 'CLOSING', label: 'Closing Stock', icon: Droplets, color:'cyan', hint: 'Final tank readings', progress:closingCoverage.label },
+          { id: 'RECONCILIATION', label: 'Reconciliation', icon: Calculator, color:'indigo', hint: 'Stock comparison', progress:stockReconciliationLabel(reconciliation,reconciliationAvailable) },
+        ].map((tab,index) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
-            <button
-              key={tab.id}
-              disabled={workflowBusy}
-              onClick={() => changeStage(tab.id as StockStage)}
-              type="button"
-              aria-current={isActive ? 'step' : undefined}
-              data-active={isActive}
-              className={`option4-stock-stage flex min-h-28 flex-col items-start justify-between gap-3 rounded-2xl border px-4 py-4 text-left transition-all ${
-                isActive
-                  ? 'border-[#F47721] bg-orange-50 shadow-sm ring-1 ring-orange-200'
-                  : 'border-[#DCE6F1] bg-white hover:border-[#9CB1C9] hover:shadow-sm'
-              }`}
-            >
-              <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${isActive ? 'bg-[#F47721] text-white' : 'bg-[#F1F5F9] text-[#17365D]'}`}>
-                <Icon className="h-4 w-4" />
-              </span>
-              <span>
-                <span className="block text-sm font-bold text-[#17365D]">{tab.label}</span>
-                <span className="mt-1 block text-xs text-[#64748B]">{tab.hint}</span>
-                <span className="mt-2 block text-xs font-semibold text-[#17365D]">{loading?'Loading…':currentShift?tab.progress:'Select shift'}</span>
-              </span>
+            <button key={tab.id} disabled={workflowBusy} onClick={() => changeStage(tab.id as StockStage)}
+              type="button" aria-current={isActive ? 'step' : undefined} data-active={isActive} data-color={tab.color}
+              className="stock-workflow-tile dc-task-tile">
+              <div className="stock-tile-top"><span className="dc-card-icon"><Icon size={19} aria-hidden="true"/></span><span className="stock-tile-number">{String(index+1).padStart(2,'0')}</span></div>
+              <strong>{tab.label}</strong>
+              <small>{tab.hint}</small>
+              <span className="stock-tile-progress">{loading?'Loading…':currentShift?tab.progress:'Select shift'}<ChevronRight size={14} aria-hidden="true"/></span>
             </button>
           );
         })}
@@ -1185,22 +1173,22 @@ export const StockOperationsPage: React.FC = () => {
       </section>
 
       {/* Read-only record counts from the currently selected operational shift. */}
-      {!currentShift && <p role="status" className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">{loading||shiftListLoading?'Loading the selected shift…':shifts.length===0?'No shifts recorded for this outlet. Open a shift in Shift & Readings to enter stock or fuel receipts.':'Select a verified shift to view saved stock and receipts.'}</p>}
-      {currentShift && <section aria-label="Shift stock snapshot" className="option4-panel p-4 sm:p-5">
-        <div className="mb-3">
-          <h2 className="text-base font-bold text-[#17365D]">Shift stock overview</h2>
-          <p className="text-xs text-[#64748B]">Current records for the selected shift — no sample data</p>
+      {!currentShift && <p role="status" className="dc-panel stock-empty"><ClipboardList size={22} aria-hidden="true"/><span>{loading||shiftListLoading?'Loading the selected shift…':shifts.length===0?'No shifts recorded for this outlet. Open a shift in Shift & Readings to enter stock or fuel receipts.':'Select a verified shift to view saved stock and receipts.'}</span></p>}
+      {currentShift && <section aria-label="Shift stock snapshot" className="dc-panel stock-overview">
+        <div className="dc-section-heading">
+          <div><h2>Shift stock overview</h2><p>Current records for the selected shift — no sample data</p></div>
+          <span className="stock-step-counter">Saved shift records</span>
         </div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="stock-overview-grid">
           {[
-            { label: 'Tanks', value: tankSnapshots.length, tone: 'blue' },
-            { label: 'Dip readings', value: tankReadings.length, tone: 'orange' },
-            { label: 'Fuel receipts', value: receipts.length, tone: 'green' },
-            { label: 'Pending receipts', value: shiftReceiptSummary.pendingReceipts.length, tone: 'purple' },
+            { label: 'Tanks', value: tankSnapshots.length, tone: 'blue', icon:Layers },
+            { label: 'Dip readings', value: tankReadings.length, tone: 'orange', icon:Droplets },
+            { label: 'Fuel receipts', value: receipts.length, tone: 'green', icon:Fuel },
+            { label: 'Pending receipts', value: shiftReceiptSummary.pendingReceipts.length, tone: 'purple', icon:Clock },
           ].map(stat => (
-            <div key={stat.label} className="option4-stat p-4" data-tone={stat.tone}>
-              <p className="text-xs font-semibold text-[#53698F]">{stat.label}</p>
-              <p className="mt-2 text-2xl font-extrabold tabular-nums text-[#17365D]">{stat.value}</p>
+            <div key={stat.label} className="stock-metric" data-color={stat.tone}>
+              <span className="dc-card-icon"><stat.icon size={18} aria-hidden="true"/></span>
+              <div><p>{stat.label}</p><strong>{stat.value}</strong></div>
             </div>
           ))}
         </div>
@@ -1208,11 +1196,11 @@ export const StockOperationsPage: React.FC = () => {
 
       {/* Tab Content: OPENING & CLOSING STOCK */}
       {currentShift && (activeTab === 'OPENING' || activeTab === 'CLOSING') && (
-        <div className="space-y-6">
+        <div className="stock-task-content space-y-4">
           {/* Record Dip Form */}
-          {currentShift.status==='OPEN' && hasPermission(PERMISSIONS.TANK_STOCK_WRITE) && !showDipForm && <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-slate-600">Select a tank to record a reading, or use the shared Shift &amp; Readings workbench.</p><button type="button" disabled={workflowBusy} onClick={()=>startDip()} className="rounded-lg bg-[#17365D] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">+ Record {activeTab==='OPENING'?'opening':'closing'} dip</button></div>}
+          {currentShift.status==='OPEN' && hasPermission(PERMISSIONS.TANK_STOCK_WRITE) && !showDipForm && <div className="dc-panel stock-form-launch flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-slate-600">Select a tank to record a reading, or use the shared Shift &amp; Readings workbench.</p><button type="button" disabled={workflowBusy} onClick={()=>startDip()} className="rounded-lg bg-[#17365D] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">+ Record {activeTab==='OPENING'?'opening':'closing'} dip</button></div>}
           {currentShift?.status === 'OPEN' && hasPermission(PERMISSIONS.TANK_STOCK_WRITE) && showDipForm && (
-            <form onSubmit={handleRecordDip} className="bg-white p-4 md:p-5 rounded-xl border border-[#E2E8F0] space-y-4">
+            <form onSubmit={handleRecordDip} className="dc-panel stock-dip-form bg-white p-4 md:p-5 rounded-xl border border-[#E2E8F0] space-y-4">
               <h3 className="text-sm font-bold text-[#17365D] uppercase tracking-wider flex items-center gap-2">
                 <Droplets className="w-4 h-4 text-orange-500" />
                 Record {activeTab} Dip Reading
@@ -1288,15 +1276,17 @@ export const StockOperationsPage: React.FC = () => {
           )}
 
           {/* Snapshot Tanks Readings Table */}
-          <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden">
-            <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between">
-              <h3 className="text-sm font-bold text-[#17365D] uppercase tracking-wider">
-                {activeTab} Tank Stock Dips
-              </h3>
+          <div className="dc-detail-panel stock-data-panel bg-white rounded-xl border border-[#E2E8F0] overflow-hidden">
+            <div className="dc-detail-heading flex flex-wrap items-center justify-between gap-3">
+              <div className="dc-detail-title">
+                <span className="dc-detail-icon" data-color={activeTab==='OPENING'?'blue':'cyan'}><Droplets size={20} aria-hidden="true"/></span>
+                <div><h2>{activeTab==='OPENING'?'Opening':'Closing'} Tank Stock Dips</h2><p>Saved tank dip readings and calibrated product stock.</p></div>
+              </div>
+              <span className="stock-count-pill">{activeTab==='OPENING'?openingCoverage.label:closingCoverage.label}</span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-[#475569]">
+            <div className="stock-table-scroll overflow-x-auto" role="region" aria-label="Scrollable stock table" tabIndex={0}>
+              <table className="stock-data-table w-full text-left text-xs text-[#475569]">
                 <thead className="bg-[#F1F5F9] text-[10px] text-[#64748B] uppercase font-mono tracking-wider">
                   <tr>
                     <th className="p-3">Tank #</th>
@@ -1316,16 +1306,16 @@ export const StockOperationsPage: React.FC = () => {
                     return (
                       <tr key={ts.tankId} className="hover:bg-[#F1F5F9]">
                         <td className="p-3 font-bold text-[#17365D]">Tank #{ts.tankNumber}</td>
-                        <td className="p-3">{ts.productCode} - {ts.productName}</td>
-                        <td className="p-3 text-[#64748B]">{reading ? reading.source : '-'}</td>
+                        <td className="p-3"><span className="dc-detail-product">{ts.productCode}</span><span className="stock-product-name">{ts.productName}</span></td>
+                        <td className="p-3 text-[#64748B]">{reading ? <span className="stock-source">{reading.source}</span> : '-'}</td>
                         <td className="p-3 text-[#334155]">{reading ? reading.productDipMmStr : '-'}</td>
                         <td className="p-3 text-[#334155]">{reading ? reading.waterDipMmStr : '-'}</td>
                         <td className="p-3 text-right text-[#475569]">{reading ? reading.grossObservedVolumeStr : '-'}</td>
                         <td className="p-3 text-right text-[#64748B]">{reading ? reading.waterVolumeStr : '-'}</td>
-                        <td className="p-3 text-right font-bold text-[#B8530D]">
+                        <td className="p-3 text-right font-bold stock-net">
                           {reading ? `${reading.netProductVolumeStr} L` : <span className="text-red-700 font-normal">MISSING</span>}
                         </td>
-                        <td className="p-3">{reading?<span className="text-emerald-700">Recorded</span>:currentShift.status==='OPEN'&&hasPermission(PERMISSIONS.TANK_STOCK_WRITE)?<button type="button" disabled={workflowBusy} onClick={()=>{if(dipForm.productDipMm&&!window.confirm('Discard unsaved dip reading?'))return;startDip(ts.tankId);}} className="font-semibold text-[#17365D] underline">Record dip</button>:<span className="text-slate-500">Not recorded</span>}</td>
+                        <td className="p-3">{reading?<span className="stock-status" data-tone="success"><CheckCircle2 size={13}/> Recorded</span>:currentShift.status==='OPEN'&&hasPermission(PERMISSIONS.TANK_STOCK_WRITE)?<button type="button" disabled={workflowBusy} onClick={()=>{if(dipForm.productDipMm&&!window.confirm('Discard unsaved dip reading?'))return;startDip(ts.tankId);}} className="font-semibold text-[#17365D] underline">Record dip</button>:<span className="stock-status" data-tone="neutral">Not recorded</span>}</td>
                       </tr>
                     );
                   })}
@@ -1338,16 +1328,11 @@ export const StockOperationsPage: React.FC = () => {
 
       {/* Tab Content: FUEL RECEIPTS */}
       {currentShift && activeTab === 'RECEIPTS' && (
-        <div className="space-y-6">
-          <div className="flex flex-wrap justify-between items-center gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-[#17365D] uppercase tracking-wider flex items-center gap-2">
-                <Fuel className="w-4 h-4 text-orange-500" />
-                Tanker Fuel Deliveries
-              </h3>
-              <p className="text-xs text-[#64748B] mt-0.5">
-                Every tanker receipt must reach COMPLETED (with verified PRE & POST tank dips) or CANCELLED before shift closing.
-              </p>
+        <div className="stock-task-content space-y-4">
+          <div className="dc-panel stock-task-header flex flex-wrap justify-between items-center gap-3">
+            <div className="dc-detail-title">
+              <span className="dc-detail-icon" data-color="green"><Fuel size={20} aria-hidden="true"/></span>
+              <div><h2>Tanker Fuel Deliveries</h2><p>Every tanker receipt must reach COMPLETED (with verified PRE &amp; POST tank dips) or CANCELLED before shift closing.</p></div>
             </div>
             {currentShift?.status === 'OPEN' && hasPermission(PERMISSIONS.FUEL_RECEIPTS_WRITE) && (
               <button
@@ -1413,10 +1398,12 @@ export const StockOperationsPage: React.FC = () => {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3"><div className="flex flex-wrap gap-2" role="group" aria-label="Filter receipts">{(['PENDING','FINALIZED','ALL'] as const).map(filter=><button key={filter} aria-pressed={receiptFilter===filter} type="button" disabled={workflowBusy} onClick={()=>setReceiptFilter(filter)} className={'rounded-lg border px-3 py-2 text-xs font-semibold '+(receiptFilter===filter?'bg-[#17365D] text-white border-[#17365D]':'bg-white text-[#17365D] border-slate-200')}>{filter==='PENDING'?'Pending ('+shiftReceiptSummary.pendingReceipts.length+')':filter==='FINALIZED'?'Finalized ('+(receipts.length-shiftReceiptSummary.pendingReceipts.length)+')':'All ('+receipts.length+')'}</button>)}</div><input aria-label="Search tanker receipts" placeholder="Search tanker, invoice or product" value={receiptSearch} onChange={e=>setReceiptSearch(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"/></div>
+          <div className="dc-panel stock-receipt-toolbar"><div className="stock-filters flex flex-wrap gap-2" role="group" aria-label="Filter receipts">{(['PENDING','FINALIZED','ALL'] as const).map(filter=><button key={filter} aria-pressed={receiptFilter===filter} type="button" disabled={workflowBusy} onClick={()=>setReceiptFilter(filter)} className={'rounded-lg border px-3 py-2 text-xs font-semibold '+(receiptFilter===filter?'bg-[#17365D] text-white border-[#17365D]':'bg-white text-[#17365D] border-slate-200')}>{filter==='PENDING'?'Pending ('+shiftReceiptSummary.pendingReceipts.length+')':filter==='FINALIZED'?'Finalized ('+(receipts.length-shiftReceiptSummary.pendingReceipts.length)+')':'All ('+receipts.length+')'}</button>)}</div><div className="stock-search"><Search size={16} aria-hidden="true"/><input aria-label="Search tanker receipts" placeholder="Search tanker, invoice or product" value={receiptSearch} onChange={e=>setReceiptSearch(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"/></div></div>
           {visibleReceipts.length === 0 ? (
-            <div className="p-8 text-center bg-white rounded-xl border border-[#E2E8F0] text-[#64748B] text-xs font-mono">
-              {receipts.length===0?'No fuel receipts recorded for this shift.':receiptSearch?'No receipts match this search.':'No receipts in this filter. Select All to view receipt history.'}
+            <div className="dc-panel stock-empty-receipts">
+              <span className="stock-empty-icon"><Fuel size={26} aria-hidden="true"/></span>
+              <h3>{receipts.length===0?'No fuel receipts recorded for this shift.':receiptSearch?'No receipts match this search.':'No receipts in this filter.'}</h3>
+              <p>{receipts.length===0?'Saved tanker deliveries will appear here.':receiptSearch?'Try another tanker, invoice or product.':'Select All to view receipt history.'}</p>
             </div>
           ) : (
             visibleReceipts.map(rcpt => {
@@ -1424,7 +1411,7 @@ export const StockOperationsPage: React.FC = () => {
               const readiness = evaluateReceiptCompletionReadiness(rcpt, tankReadings);
 
               return (
-                <div key={rcpt.id} className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden p-4 space-y-4">
+                <div key={rcpt.id} className="dc-panel stock-receipt-card bg-white rounded-xl border border-[#E2E8F0] overflow-hidden p-4 space-y-4">
                   <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E2E8F0] pb-3">
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1512,8 +1499,8 @@ export const StockOperationsPage: React.FC = () => {
                   {/* Lines Table */}
                   <details open={!isFinalized || undefined} className="rounded-lg border border-slate-200">
                     <summary className="cursor-pointer p-3 text-xs font-semibold text-[#17365D]">Tank quantities, dip readings and quality details ({rcpt.lines?.length||0} lines)</summary>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs text-[#475569] font-mono">
+                  <div className="stock-table-scroll overflow-x-auto" role="region" aria-label="Scrollable stock table" tabIndex={0}>
+                    <table className="stock-data-table w-full text-left text-xs text-[#475569] font-mono">
                       <thead className="bg-[#F1F5F9] text-[10px] text-[#64748B] uppercase">
                         <tr>
                           <th className="p-2.5">Tank</th>
@@ -1599,16 +1586,11 @@ export const StockOperationsPage: React.FC = () => {
 
       {/* Tab Content: RECONCILIATION */}
       {currentShift && activeTab === 'RECONCILIATION' && (
-        <div className="space-y-6">
-          <div className="flex flex-wrap justify-between items-center gap-4">
-            <div>
-              <h3 className="text-sm font-bold text-[#17365D] uppercase tracking-wider flex items-center gap-2">
-                <Calculator className="w-4 h-4 text-orange-500" />
-                Shift Stock Reconciliation
-              </h3>
-              <p className="text-xs text-[#64748B] mt-0.5">
-                Theoretical Closing = Opening + Completed Receipts - Sales
-              </p>
+        <div className="stock-task-content space-y-4">
+          <div className="dc-panel stock-task-header flex flex-wrap justify-between items-center gap-4">
+            <div className="dc-detail-title">
+              <span className="dc-detail-icon" data-color="indigo"><Calculator size={20} aria-hidden="true"/></span>
+              <div><h2>Shift Stock Reconciliation</h2><p>Theoretical Closing = Opening + Completed Receipts - Sales</p></div>
             </div>
 
             {currentShift?.status === 'OPEN' && hasPermission(PERMISSIONS.STOCK_RECONCILIATION_READ) && (
@@ -1628,14 +1610,12 @@ export const StockOperationsPage: React.FC = () => {
               {reconciliationAvailable?'No reconciliation report available yet. Enter Opening/Closing dips and click Compute.':'Stock reconciliation is unavailable. Refresh or check access before relying on this view.'}
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="stock-task-content space-y-4">
               {/* By Tank Table */}
-              <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden">
-                <div className="p-3.5 bg-[#F1F5F9] border-b border-[#E2E8F0] font-bold text-xs text-[#17365D] uppercase">
-                  Tank-Level Reconciliation
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs text-[#475569] font-mono">
+              <div className="dc-detail-panel stock-data-panel bg-white rounded-xl border border-[#E2E8F0] overflow-hidden">
+                <div className="dc-detail-heading"><div className="dc-detail-title"><span className="dc-detail-icon" data-color="blue"><Layers size={19} aria-hidden="true"/></span><div><h2>Tank-Level Reconciliation</h2><p>Recorded stock movement and variance for each tank.</p></div></div></div>
+                <div className="stock-table-scroll overflow-x-auto" role="region" aria-label="Scrollable stock table" tabIndex={0}>
+                  <table className="stock-data-table w-full text-left text-xs text-[#475569] font-mono">
                     <thead className="bg-[#F1F5F9] text-[10px] text-[#64748B] uppercase">
                       <tr>
                         <th className="p-3">Tank #</th>
@@ -1653,17 +1633,17 @@ export const StockOperationsPage: React.FC = () => {
                       {reconciliation.byTank.map(t => (
                         <tr key={t.tankId} className="hover:bg-[#F1F5F9]/30">
                           <td className="p-3 font-bold text-[#17365D]">Tank #{t.tankNumber}</td>
-                          <td className="p-3">{t.productCode}</td>
+                          <td className="p-3"><span className="dc-detail-product">{t.productCode}</span></td>
                           <td className="p-3 text-right">{t.openingStockStr ?? '-'} L</td>
                           <td className="p-3 text-right text-emerald-700">+{t.receiptQuantityStr} L</td>
                           <td className="p-3 text-right text-amber-700">-{t.salesQuantityStr} L</td>
                           <td className="p-3 text-right font-bold text-[#334155]">{t.theoreticalClosingStockStr ?? '-'} L</td>
                           <td className="p-3 text-right font-bold text-[#17365D]">{t.physicalClosingStockStr ?? '-'} L</td>
-                          <td className="p-3 text-right font-bold text-[#B8530D]">{t.varianceStr ?? '-'} L</td>
+                          <td className="p-3 text-right font-bold"><span className="stock-variance" data-tone={t.varianceStatus==='GAIN'?'success':t.varianceStatus==='LOSS'?'error':'neutral'}>{t.varianceStr ?? '-'} L</span></td>
                           <td className="p-3 text-center">
                             {t.varianceStatus ? (
                               <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                                className={`stock-status px-2 py-0.5 rounded text-[10px] font-black ${
                                   t.varianceStatus === 'BALANCED'
                                     ? 'bg-[#E8EEF5] text-[#475569]'
                                     : t.varianceStatus === 'GAIN'
@@ -1685,12 +1665,10 @@ export const StockOperationsPage: React.FC = () => {
               </div>
 
               {/* By Product Summary */}
-              <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden">
-                <div className="p-3.5 bg-[#F1F5F9] border-b border-[#E2E8F0] font-bold text-xs text-[#17365D] uppercase">
-                  Product-Level Reconciliation Summary
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs text-[#475569] font-mono">
+              <div className="dc-detail-panel stock-data-panel bg-white rounded-xl border border-[#E2E8F0] overflow-hidden">
+                <div className="dc-detail-heading"><div className="dc-detail-title"><span className="dc-detail-icon" data-color="purple"><Calculator size={19} aria-hidden="true"/></span><div><h2>Product-Level Reconciliation Summary</h2><p>Product totals from the saved stock reconciliation.</p></div></div></div>
+                <div className="stock-table-scroll overflow-x-auto" role="region" aria-label="Scrollable stock table" tabIndex={0}>
+                  <table className="stock-data-table w-full text-left text-xs text-[#475569] font-mono">
                     <thead className="bg-[#F1F5F9] text-[10px] text-[#64748B] uppercase">
                       <tr>
                         <th className="p-3">Product</th>
@@ -1706,17 +1684,17 @@ export const StockOperationsPage: React.FC = () => {
                     <tbody className="divide-y divide-slate-200">
                       {reconciliation.byProduct.map(p => (
                         <tr key={p.productId} className="hover:bg-[#F1F5F9]/30">
-                          <td className="p-3 font-bold text-[#17365D]">{p.productCode} - {p.productName}</td>
+                          <td className="p-3 font-bold text-[#17365D]"><span className="dc-detail-product">{p.productCode}</span><span className="stock-product-name">{p.productName}</span></td>
                           <td className="p-3 text-right">{p.openingStockStr ?? '-'} L</td>
                           <td className="p-3 text-right text-emerald-700">+{p.receiptQuantityStr} L</td>
                           <td className="p-3 text-right text-amber-700">-{p.salesQuantityStr} L</td>
                           <td className="p-3 text-right font-bold text-[#334155]">{p.theoreticalClosingStockStr ?? '-'} L</td>
                           <td className="p-3 text-right font-bold text-[#17365D]">{p.physicalClosingStockStr ?? '-'} L</td>
-                          <td className="p-3 text-right font-bold text-[#B8530D]">{p.varianceStr ?? '-'} L</td>
+                          <td className="p-3 text-right font-bold"><span className="stock-variance" data-tone={p.varianceStatus==='GAIN'?'success':p.varianceStatus==='LOSS'?'error':'neutral'}>{p.varianceStr ?? '-'} L</span></td>
                           <td className="p-3 text-center">
                             {p.varianceStatus ? (
                               <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                                className={`stock-status px-2 py-0.5 rounded text-[10px] font-black ${
                                   p.varianceStatus === 'BALANCED'
                                     ? 'bg-[#E8EEF5] text-[#475569]'
                                     : p.varianceStatus === 'GAIN'
@@ -1741,7 +1719,7 @@ export const StockOperationsPage: React.FC = () => {
         </div>
       )}
 
-      {currentShift&&<div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4"><button type="button" disabled={workflowBusy||stageIndex===0} onClick={()=>changeStage(stockStageOrder[stageIndex-1])} className="text-sm font-semibold text-[#17365D] disabled:opacity-40">Previous task</button><span className="text-xs text-slate-500">{stageLabels[activeTab]} · {stageIndex+1} of 4</span>{stageIndex<stockStageOrder.length-1?<button type="button" disabled={workflowBusy} onClick={()=>changeStage(stockStageOrder[stageIndex+1])} className="rounded-lg bg-[#17365D] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Next: {stageLabels[stockStageOrder[stageIndex+1]]}</button>:hasPermission(PERMISSIONS.SHIFTS_READ)?<button type="button" disabled={workflowBusy} onClick={goBackToShift} className="rounded-lg bg-[#17365D] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Return to shift workbench</button>:<span/>}</div>}
+      {currentShift&&<div className="dc-panel stock-task-footer"><button type="button" disabled={workflowBusy||stageIndex===0} onClick={()=>changeStage(stockStageOrder[stageIndex-1])} className="text-sm font-semibold text-[#17365D] disabled:opacity-40"><ArrowLeft size={14}/> Previous task</button><span className="text-xs text-slate-500">{stageLabels[activeTab]} · {stageIndex+1} of 4</span>{stageIndex<stockStageOrder.length-1?<button type="button" disabled={workflowBusy} onClick={()=>changeStage(stockStageOrder[stageIndex+1])} className="rounded-lg bg-[#17365D] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Next: {stageLabels[stockStageOrder[stageIndex+1]]} <ArrowRight size={14}/></button>:hasPermission(PERMISSIONS.SHIFTS_READ)?<button type="button" disabled={workflowBusy} onClick={goBackToShift} className="rounded-lg bg-[#17365D] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Return to shift workbench</button>:<span/>}</div>}
 
       {/* Manage Fuel Receipt Lifecycle & Decantation Modal */}
       {managingReceipt && managingReceiptReadiness && (
