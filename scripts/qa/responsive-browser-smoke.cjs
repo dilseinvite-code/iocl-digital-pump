@@ -31,7 +31,7 @@ const workbenchBootstrap=date=>({outletId:'fixture-b',outletName:outlets[1].name
 const ok=data=>({success:true,data,error:null});
 const fail=message=>({success:false,data:null,error:{code:'FIXTURE_FAILURE',message}});
 async function main(){
-  const browser=await chromium.launch({headless:true});
+  const browser=await chromium.launch({headless:true,...(process.env.QA_CHROMIUM_EXECUTABLE?{executablePath:process.env.QA_CHROMIUM_EXECUTABLE}: {})});
   try{
     const page=await browser.newPage({viewport:{width:390,height:844}});
     const errors=[],blocked=[],requests=[];
@@ -67,6 +67,17 @@ async function main(){
           status:'NOT_STARTED',dayEntryStatus:'NO_ENTRY',operationalDsrStatus:'NOT_STARTED',financialReconciliationStatus:'NOT_STARTED',
           shiftsCount:0,shifts:[],byProduct:[],byDispenser:[],completion:{...dsrDay.completion,expectedNozzles:0,nozzleMeterReadings:0,reconciliationComplete:false}})});
       }
+      if(path==='/api/v1/outlets/fixture-a/fuel/daily-summary'&&operationsUi){
+        const date=url.searchParams.get('businessDate');
+        return route.fulfill({json:ok({...workbenchDay(date),outletId:'fixture-a',outletName:outlets[0].name,status:'NOT_STARTED',dayEntryStatus:'NO_ENTRY',operationalDsrStatus:'NOT_STARTED',financialReconciliationStatus:'NOT_STARTED',shiftsCount:0,shifts:[],completion:{...dsrDay.completion,expectedTanks:0,openingTankReadings:0,closingTankReadings:0,expectedNozzles:0,nozzleMeterReadings:0,unavailableNozzles:0,reconciliationComplete:false}})});
+      }
+      if(path==='/api/v1/shifts/'+dsrShift.id+'/tank-snapshots')return route.fulfill({json:ok([
+        {outletId:'fixture-b',operationalShiftId:dsrShift.id,tankId:'t-ms',tankNumber:1,tankName:'MS Tank',productId:'ms',productCode:'MS',productUnit:'LITRE',capacityMilliunits:50000000},
+        {outletId:'fixture-b',operationalShiftId:dsrShift.id,tankId:'t-hsd',tankNumber:2,tankName:'HSD Tank',productId:'hsd',productCode:'HSD',productUnit:'LITRE',capacityMilliunits:30000000},
+      ])});
+      if(path==='/api/v1/shifts/'+dsrShift.id+'/tank-readings')return route.fulfill({json:ok([
+        {outletId:'fixture-b',operationalShiftId:dsrShift.id,tankId:'t-ms',productId:'ms',netProductVolumeMilliunits:25000000,recordedAt:new Date().toISOString(),readingType:'CLOSING'},
+      ])});
       if(path==='/api/v1/shifts/'+dsrShift.id)return route.fulfill({json:ok(dsrShift)});
       if(path.includes('/fuel/daily-summary'))return route.fulfill({status:503,json:fail('Fixture deliberately has no daily summary')});
       blocked.push(path);return route.fulfill({status:404,json:fail('Unexpected QA request')});
@@ -191,14 +202,56 @@ async function main(){
       // Test the actual dashboard and daily workspace UI with isolated saved statuses.
       operationsUi=true;
       await page.goto(base+'/dashboard');
-      await page.getByRole('heading',{name:'What would you like to do?',exact:true}).waitFor();
-      const todayPanel=page.getByRole('region',{name:"Today's operational status"});
+      await page.getByRole('heading',{name:'Outlet command centre',exact:true}).waitFor();
+      const todayPanel=page.getByRole('region',{name:"Today's operational status"}).locator('.cc-status-grid');
       await todayPanel.getByText('COMPLETED',{exact:true}).waitFor();
       await todayPanel.getByText('CLOSED',{exact:true}).waitFor();
       await todayPanel.getByText('PENDING',{exact:true}).waitFor();
+      let hierarchy=page.getByRole('region',{name:'Organization hierarchy'});
+      await hierarchy.getByText('Fixture State',{exact:true}).waitFor();
+      await hierarchy.getByText('Fixture Division',{exact:true}).waitFor();
+      await hierarchy.getByText('Fixture Area',{exact:true}).waitFor();
+      await hierarchy.getByText('2 accessible active outlets',{exact:false}).waitFor();
+      assert.equal(await page.getByTestId('workspace-task-finder').count(),1,'Dashboard must retain exactly one task finder');
+      await page.getByTestId('workspace-task-finder').getByRole('button',{name:'Find a task'}).click();
+      const taskQuery=page.locator('#iocl-workspace-task-query');
+      await taskQuery.fill('bank deposit');
+      await page.getByTestId('workspace-task-finder').getByText('No accessible tasks found.',{exact:false}).waitFor();
+      await taskQuery.press('Escape');
+      await taskQuery.waitFor({state:'hidden'});
+      assert((await hierarchy.textContent()).includes('Primary access: Sales area'));
+      const quick=page.getByRole('region',{name:'Quick actions'});
+      assert.equal(await quick.locator('[data-module="financials"]').count(),0,'Restricted finance tile visible');
+      assert.equal(await quick.locator('[data-module="pump-infra"]').count(),0,'Restricted tank setup tile visible');
+      assert.equal(await page.getByRole('region',{name:'Saved tank stock overview'}).count(),0,'Unassigned tank stock view visible');
+      assert(!requests.some(p=>p.includes('/tank-snapshots')||p.includes('/tank-readings')),'Restricted tank resource requested');
+      await page.getByRole('region',{name:'Attention centre'}).getByText('Finance pending',{exact:true}).waitFor();
+      assert.equal(await page.getByRole('region',{name:'Attention centre'}).getByRole('button',{name:'Collections & Finance'}).count(),0,'Restricted finance CTA visible');
+      // Authorized scope stays the same; exercise a fully assigned user, then switch outlets.
+      auth.permissions.push('shifts.open','tank_stock.read','financial_reconciliation.read','tanks.read','documents.read','equipment.read','lube_operations.read');
+      await page.goto(base+'/dashboard');
+      await page.getByRole('heading',{name:'Outlet command centre',exact:true}).waitFor();
+      const savedStock=page.getByRole('region',{name:'Saved tank stock overview'});
+      await savedStock.getByText('25,000 L',{exact:true}).waitFor();
+      await savedStock.getByText('50.0% of nominal capacity',{exact:true}).waitFor();
+      await savedStock.getByText('Not recorded',{exact:true}).waitFor();
+      await page.getByRole('region',{name:'Attention centre'}).getByText('Finance pending',{exact:true}).waitFor();
+      const activeHierarchy=page.getByRole('region',{name:'Organization hierarchy'});
+      await activeHierarchy.getByText(outlets[1].name+' · '+outlets[1].roCode,{exact:true}).waitFor();
       for(const [w,h] of [[320,640],[390,844],[768,1024],[1440,900]])await checkViewport(w,h);
       await page.evaluate(()=>window.scrollTo(0,0));await capture('dashboard-desktop');
+      await capture('dashboard-quick-access',page.getByRole('region',{name:'Quick actions'}));
+      await capture('dashboard-stock',savedStock);
       await checkViewport(390,844);await page.evaluate(()=>window.scrollTo(0,0));await capture('dashboard-mobile');
+      await outlet.selectOption('fixture-a');
+      await activeHierarchy.getByText(outlets[0].name+' · '+outlets[0].roCode,{exact:true}).waitFor();
+      await page.getByRole('region',{name:'Attention centre'}).getByText('No shift recorded',{exact:true}).waitFor();
+      assert.equal(await savedStock.getByText('25,000 L',{exact:true}).count(),0,'Stale previous-outlet stock leaked');
+      await savedStock.getByText('No shift recorded today',{exact:true}).waitFor();
+      await checkViewport(1440,900);await page.evaluate(()=>window.scrollTo(0,0));await capture('dashboard-no-shift');
+      await outlet.selectOption('fixture-b');
+      await savedStock.getByText('25,000 L',{exact:true}).waitFor();
+      auth.permissions.splice(5);
       await page.goto(base+'/daily-operations');
       await page.getByRole('heading',{name:'Three independent statuses',exact:true}).waitFor();
       assert.equal((await page.getByTestId('operational-dsr-status').textContent()).trim(),'COMPLETED');

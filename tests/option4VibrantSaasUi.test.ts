@@ -20,7 +20,7 @@ describe('Option 4 — Vibrant Modern SaaS actual UI implementation', () => {
   });
 
   it('renders a modern task launcher, real KPI counts, and separately accessible work areas', () => {
-    expect(dashboard).toContain('What would you like to do');
+    expect(dashboard).toContain('Outlet command centre');
     expect(dashboard).toContain('aria-label="Quick actions"');
     expect(dashboard).toContain('aria-label="Work areas"');
     expect(dashboard).toContain('data-tone={metric.tone}');

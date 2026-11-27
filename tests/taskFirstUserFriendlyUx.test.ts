@@ -10,8 +10,9 @@ describe('Task-first user-friendly workspace redesign', () => {
   const app = file('src/App.tsx');
 
   it('offers permission-gated task shortcuts connected to existing navigation', () => {
-    expect(dashboard).toContain('What would you like to do');
-    for (const group of ['daily', 'reports']) expect(dashboard).toContain("tasks.filter(task=>task.group==='"+group+"')");
+    expect(dashboard).toContain('Outlet command centre');
+    for (const group of ['daily', 'reports', 'support', 'setup']) expect(dashboard).toContain(`id:'${group}'`);
+    expect(dashboard).toContain('tasks.filter(task=>task.group===group.id)');
     expect(dashboard).toContain("getWorkDeskIndicators(summary)");
     expect(dashboard).toContain("if (!governanceOpen || !userCtx) return;");
     expect(dashboard).toContain("task.id !== 'dsr-reports' || canViewDaily");
