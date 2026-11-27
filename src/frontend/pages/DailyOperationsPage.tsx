@@ -1932,21 +1932,23 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
               </div>
 
               {/* 4. NOZZLE METER ENTRY GRID */}
-              <div id="daily-nozzle-readings" className="scroll-mt-24 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50">
-                  <div>
-                    <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                      <Gauge className="w-4 h-4 text-[#003366]" />
-                      2. Nozzle Meter Entry Grid ({activeWorkspace.nozzles.length} Configured
-                      Nozzles)
-                    </h2>
-                    <p className="text-xs text-slate-600 mt-0.5">
-                      Use <kbd className="px-1.5 py-0.5 bg-white border rounded text-[11px]">Tab</kbd>{' '}
-                      or{' '}
-                      <kbd className="px-1.5 py-0.5 bg-white border rounded text-[11px]">Enter</kbd>{' '}
-                      to move across fields. Opening totalizer auto-suggests from the previous
-                      closed shift.
-                    </p>
+              <div id="daily-nozzle-readings" className="dc-detail-panel scroll-mt-24 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                <div className="dc-detail-heading flex flex-wrap items-center justify-between gap-3">
+                  <div className="dc-detail-title">
+                    <span className="dc-detail-icon" data-color="purple"><Gauge size={20} aria-hidden="true" /></span>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">
+                        2. Nozzle Meter Entry Grid ({activeWorkspace.nozzles.length} Configured
+                        Nozzles)
+                      </h2>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Use <kbd className="px-1.5 py-0.5 bg-white border rounded text-[11px]">Tab</kbd>{' '}
+                        or{' '}
+                        <kbd className="px-1.5 py-0.5 bg-white border rounded text-[11px]">Enter</kbd>{' '}
+                        to move across fields. Opening totalizer auto-suggests from the previous
+                        closed shift.
+                      </p>
+                    </div>
                   </div>
 
                   {!isShiftReadOnly && (
@@ -2001,7 +2003,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 text-sm">
-                      {activeWorkspace.nozzles.map((nozzle) => {
+                      {activeWorkspace.nozzles.map((nozzle, index) => {
                         const key = `${activeWorkspace.shift.id}:${nozzle.nozzleId}`;
                         const draft =
                           nozzleDrafts[key] ||
@@ -2041,7 +2043,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                           );
 
                         return (
-                          <tr key={nozzle.nozzleId} className="hover:bg-slate-50/80 align-top">
+                          <tr key={nozzle.nozzleId} data-dispenser-start={index > 0 && activeWorkspace.nozzles[index - 1].dispenserId !== nozzle.dispenserId} className="hover:bg-slate-50/80 align-top">
                             <td className="py-2.5 px-3 font-semibold text-slate-900">
                               MPD #{nozzle.dispenserNumber}
                               <div className="text-[11px] font-normal text-slate-500">
@@ -2052,7 +2054,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                               Nozzle #{nozzle.nozzleNumber}
                             </td>
                             <td className="py-2.5 px-3">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-50 text-blue-900 border border-blue-200">
+                              <span className="dc-detail-product inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-50 text-blue-900 border border-blue-200">
                                 {nozzle.productCode}
                               </span>
                             </td>
@@ -2094,7 +2096,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                                 </div>
                               )}
                               {hasContinuityDiff && (
-                                <div className="mt-1.5 p-2 rounded bg-amber-50 border border-amber-200 text-[11px] space-y-1">
+                                <div className="dc-continuity-note mt-1.5 p-2 rounded bg-amber-50 border border-amber-200 text-[11px] space-y-1">
                                   <div className="font-mono text-amber-900">
                                     Prev: {nozzle.suggestedOpeningTotalizer} | Curr:{' '}
                                     {draft.openingTotalizer} | Diff: {continuityDiffStr}
@@ -2232,30 +2234,30 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                             {/* Save Status */}
                             <td className="py-2.5 px-3">
                               {nozzle.unavailability ? (
-                                <span className="text-xs font-semibold text-slate-600">
+                                <span className="dc-meter-status text-xs font-semibold text-slate-600" data-tone="neutral">
                                   Unavailable ({nozzle.unavailability.reason})
                                 </span>
                               ) : draft.saveStatus === 'SAVING' ? (
-                                <span className="text-xs font-semibold text-blue-700">
+                                <span className="dc-meter-status text-xs font-semibold text-blue-700" data-tone="info">
                                   Saving...
                                 </span>
                               ) : draft.saveStatus === 'ERROR' ? (
                                 <span
-                                  className="text-xs font-semibold text-red-700"
+                                  className="dc-meter-status text-xs font-semibold text-red-700" data-tone="error"
                                   title={draft.errorMessage || ''}
                                 >
                                   {draft.errorMessage || 'Error'}
                                 </span>
                               ) : draft.saveStatus === 'DIRTY' ? (
-                                <span className="text-xs font-semibold text-amber-700">
+                                <span className="dc-meter-status text-xs font-semibold text-amber-700" data-tone="warning">
                                   Unsaved
                                 </span>
                               ) : nozzle.reading ? (
-                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                                <span className="dc-meter-status inline-flex items-center gap-1 text-xs font-semibold text-emerald-700" data-tone="success">
                                   <CheckCircle2 className="w-3.5 h-3.5" /> Saved
                                 </span>
                               ) : (
-                                <span className="text-xs text-slate-400">Not Entered</span>
+                                <span className="dc-meter-status text-xs text-slate-400" data-tone="neutral">Not Entered</span>
                               )}
                             </td>
 
@@ -2297,29 +2299,34 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
           {summary && summary.shiftsCount > 0 && (
             <div id="daily-sales-summary" className="scroll-mt-24 grid grid-cols-1 xl:grid-cols-12 gap-6">
               {/* DU / MPD Totals */}
-              <div className="xl:col-span-5 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-200 bg-slate-50">
-                  <h2 className="text-base font-bold text-slate-900">
-                    3. DU / MPD Sales Aggregation
-                  </h2>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    Dispenser-wise nozzle net sales and multi-product breakdown
-                  </p>
+              <div className="dc-detail-panel dc-dispensers xl:col-span-5 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                <div className="dc-detail-heading">
+                  <div className="dc-detail-title">
+                    <span className="dc-detail-icon" data-color="cyan"><Fuel size={20} aria-hidden="true" /></span>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">
+                        3. DU / MPD Sales Aggregation
+                      </h2>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Dispenser-wise nozzle net sales and multi-product breakdown
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="p-4 space-y-3">
+                <div className="dc-dispenser-list p-4 space-y-3">
                   {summary.byDispenser.map((disp) => (
                     <div
                       key={disp.dispenserId}
-                      className="border border-slate-200 rounded-lg p-3.5 bg-slate-50/50 space-y-2.5"
+                      className="dc-dispenser-card border border-slate-200 rounded-lg p-3.5 bg-slate-50/50 space-y-2.5"
                     >
-                      <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                      <div className="dc-dispenser-head flex items-center justify-between border-b border-slate-200 pb-2">
                         <div>
                           <span className="text-sm font-bold text-slate-900">
                             MPD #{disp.dispenserNumber}
                           </span>
                           <span className="text-xs text-slate-500 ml-2">{disp.dispenserName}</span>
                         </div>
-                        <div className="text-right font-mono">
+                        <div className="dc-dispenser-total text-right font-mono">
                           <span className="text-xs text-slate-500 mr-1.5">MPD Total:</span>
                           <span className="text-sm font-bold text-[#003366]">
                             {formatMilliunits(disp.netSalesMilliunits)} L
@@ -2328,11 +2335,11 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                       </div>
 
                       {/* Nozzle pills */}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      <div className="dc-nozzle-pills grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {disp.nozzles.map((n) => (
                           <div
                             key={`${n.operationalShiftId}:${n.nozzleId}`}
-                            className="px-2.5 py-1.5 rounded bg-white border border-slate-200 flex items-center justify-between text-xs"
+                            className="dc-nozzle-pill px-2.5 py-1.5 rounded bg-white border border-slate-200 flex items-center justify-between text-xs"
                           >
                             <span className="font-medium text-slate-700">
                               N{n.nozzleNumber}{' '}
@@ -2349,7 +2356,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
 
                       {/* Product sub-totals if DU handles multiple products */}
                       {disp.byProduct.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-600">
+                        <div className="dc-product-subtotals flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-600">
                           {disp.byProduct.map((bp) => (
                             <span key={bp.productId} className="font-mono">
                               <strong>{bp.productCode}:</strong>{' '}
@@ -2364,16 +2371,19 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
               </div>
 
               {/* Product Stock & Sales Aggregation */}
-              <div className="xl:col-span-7 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-base font-bold text-slate-900">
-                      4. Product Stock &amp; Reconciliation Summary
-                    </h2>
-                    <p className="text-xs text-slate-600 mt-0.5">
-                      Earliest shift opening stock + day receipts − meter net sales = theoretical
-                      closing vs physical closing
-                    </p>
+              <div className="dc-detail-panel dc-stock-summary xl:col-span-7 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                <div className="dc-detail-heading flex flex-wrap items-center justify-between gap-3">
+                  <div className="dc-detail-title">
+                    <span className="dc-detail-icon" data-color="indigo"><Calculator size={20} aria-hidden="true" /></span>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">
+                        4. Product Stock &amp; Reconciliation Summary
+                      </h2>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Earliest shift opening stock + day receipts − meter net sales = theoretical
+                        closing vs physical closing
+                      </p>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -2384,7 +2394,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                   </button>
                 </div>
 
-                  <p className="px-4 py-2 text-xs text-amber-800" role="note">“Not recorded” means a source reading is missing, not zero. Check pending readings before final reconciliation.</p>
+                  <p className="dc-stock-note px-4 py-2 text-xs text-amber-800" role="note"><AlertTriangle size={15} aria-hidden="true" /><span>“Not recorded” means a source reading is missing, not zero. Check pending readings before final reconciliation.</span></p>
                 <div className="daily-ops-table-scroll overflow-x-auto" role="region" aria-label="Scrollable operations table" tabIndex={0}>
                   <table className="daily-ops-data-table w-full text-left border-collapse">
                     <thead>
@@ -2405,7 +2415,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                       {summary.byProduct.map((prod) => (
                         <tr key={prod.productId} className="hover:bg-slate-50">
                           <td className="py-2.5 px-3 font-sans font-bold text-slate-900">
-                            {prod.productCode}
+                            <span className="dc-detail-product">{prod.productCode}</span>
                             <div className="text-[10px] font-normal text-slate-500">
                               {prod.productName}
                             </div>
@@ -2443,8 +2453,10 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                                   : 'text-slate-700'
                             }`}
                           >
-                            {prod.varianceMilliunits > 0 && prod.missingFields.length === 0 ? '+' : ''}
-                            {displayDsrProductMetric(prod, 'variance', prod.varianceMilliunits)}
+                            <span className="dc-variance-value" data-tone={prod.missingFields.length > 0 ? 'neutral' : prod.varianceMilliunits < 0 ? 'negative' : prod.varianceMilliunits > 0 ? 'positive' : 'neutral'}>
+                              {prod.varianceMilliunits > 0 && prod.missingFields.length === 0 ? '+' : ''}
+                              {displayDsrProductMetric(prod, 'variance', prod.varianceMilliunits)}
+                            </span>
                           </td>
                         </tr>
                       ))}

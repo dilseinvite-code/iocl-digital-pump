@@ -233,8 +233,8 @@
 .daily-command .dc-admin-icon {display:grid;place-items:center;flex:none;width:36px;height:36px;border-radius:10px;background:#ffe4b4;color:#934b08;}
 .daily-command .dc-admin-badge {border-radius:6px;background:#ffe4b4;color:#75420c;font-size:10px;font-weight:800;padding:5px 7px;white-space:nowrap;}
 .daily-command .dc-admin-inner {padding:0 12px 12px;}
-.daily-command :is(#daily-tank-readings,#daily-nozzle-readings,#daily-sales-summary) {border-color:#d9e5ef;border-radius:15px;box-shadow:0 4px 16px #243e5b0b;}
-.daily-command :is(#daily-tank-readings,#daily-nozzle-readings,#daily-sales-summary)>div:first-child {background:linear-gradient(110deg,#eaf3fd,#f8fafc);border-bottom:1px solid #cdddeb;}
+.daily-command #daily-tank-readings {border-color:#d9e5ef;border-radius:15px;box-shadow:0 4px 16px #243e5b0b;}
+.daily-command #daily-tank-readings>div:first-child {background:linear-gradient(110deg,#eaf3fd,#f8fafc);border-bottom:1px solid #cdddeb;}
 .daily-command :is(.dc-primary-action,.dc-task-tile,.dc-mode-switch button,.dc-shift-notes summary,.dc-admin-tools summary):focus-visible {outline:3px solid #ed8135;outline-offset:2px;}
 @container (max-width: 1020px) {
   .daily-command .dc-context-controls {grid-template-columns:minmax(0,1.35fr) minmax(135px,.65fr) minmax(210px,auto) auto;}
@@ -286,4 +286,226 @@
 @media (prefers-reduced-motion:reduce) {
   .daily-command .dc-task-tile,.daily-command .dc-summary-chevron {transition:none;}
   .daily-command .dc-task-tile:hover:not(:disabled) {transform:none;}
+}
+
+
+/* Daily entry details: keep the existing grid, cards and quantities; refine only
+   the three lower operational sections to follow the command-centre palette. */
+.daily-command .dc-detail-panel {
+  min-width: 0;
+  border: 1px solid #d6e2ee;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 4px 16px #243e5b0b;
+}
+.daily-command .dc-detail-panel > .dc-detail-heading {
+  padding: 15px 18px;
+  background: linear-gradient(110deg, #edf4fc, #fbfcfe);
+  border-bottom: 1px solid #d6e2ee;
+}
+.daily-command .dc-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 1 1 270px;
+  min-width: 0;
+}
+.daily-command .dc-detail-title > div { min-width: 0; }
+.daily-command .dc-detail-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 39px;
+  height: 39px;
+  border-radius: 11px;
+  color: var(--tile-fg);
+  background: var(--tile-icon);
+}
+.daily-command .dc-detail-heading h2 {
+  color: var(--dc-ink);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -.015em;
+}
+.daily-command .dc-detail-heading p {
+  color: var(--dc-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.daily-command .dc-detail-heading button { min-height: 36px; white-space: nowrap; }
+.daily-command :is(#daily-nozzle-readings,.dc-stock-summary) .daily-ops-data-table th {
+  background: #e8f0fa;
+  color: #25496b;
+  font-size: 11px;
+  letter-spacing: .045em;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.daily-command :is(#daily-nozzle-readings,.dc-stock-summary) .daily-ops-data-table td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-bottom-color: #e4ecf4;
+}
+.daily-command :is(#daily-nozzle-readings,.dc-stock-summary) tbody tr:nth-child(even) > td {
+  background: #f6f9fd;
+}
+.daily-command :is(#daily-nozzle-readings,.dc-stock-summary) tbody tr:hover > td {
+  background: #edf4fb;
+}
+.daily-command .dc-detail-product {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 6px;
+  color: #234e7c;
+  background: #eaf2fc;
+  border: 1px solid #cfdef0;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.daily-command #daily-nozzle-readings .daily-ops-data-table tbody tr[data-dispenser-start="true"] > td {
+  border-top: 2px solid #cbdced;
+}
+.daily-command #daily-nozzle-readings .daily-ops-data-table tbody td:nth-child(9) {
+  color: #173c68;
+  font-weight: 800;
+}
+.daily-command #daily-nozzle-readings .daily-ops-data-table tbody td:nth-child(5) {
+  min-width: 205px;
+}
+.daily-command #daily-nozzle-readings .daily-ops-data-table :is(input[type="text"]) {
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.daily-command #daily-nozzle-readings .daily-ops-data-table input[type="text"]:disabled {
+  color: #425c77;
+  border-color: #d1deec;
+  background: #eef3f9;
+  opacity: 1;
+}
+.daily-command #daily-nozzle-readings .daily-ops-data-table .dc-continuity-note {
+  border-left: 3px solid #d9a345;
+  border-radius: 8px;
+  background: #fff7e7;
+  padding: 8px;
+  line-height: 1.4;
+}
+.daily-command #daily-nozzle-readings .dc-continuity-note input { min-height: 34px; }
+.daily-command #daily-nozzle-readings .dc-meter-status,
+.daily-command .dc-stock-summary .dc-variance-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #d6e1eb;
+  border-radius: 7px;
+  padding: 4px 7px;
+  background: #f0f4f9;
+  color: #425c74;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+.daily-command #daily-nozzle-readings .dc-meter-status svg { flex: none; }
+.daily-command #daily-nozzle-readings .dc-meter-status[data-tone="success"],
+.daily-command .dc-stock-summary .dc-variance-value[data-tone="positive"] {
+  color: #176445; border-color: #b9dfc9; background: #e6f7ed;
+}
+.daily-command #daily-nozzle-readings .dc-meter-status[data-tone="warning"] {
+  color: #845010; border-color: #ead0a0; background: #fff3da;
+}
+.daily-command #daily-nozzle-readings .dc-meter-status[data-tone="error"],
+.daily-command .dc-stock-summary .dc-variance-value[data-tone="negative"] {
+  color: #a32935; border-color: #efc5cb; background: #fcecef;
+}
+.daily-command #daily-nozzle-readings .dc-meter-status[data-tone="info"] {
+  color: #22588b; border-color: #c0d7ef; background: #e8f2ff;
+}
+.daily-command #daily-sales-summary {
+  align-items: start;
+  gap: 14px;
+}
+.daily-command .dc-dispenser-list { padding: 12px; }
+.daily-command .dc-dispenser-card {
+  border-color: #dbe5ef;
+  border-left: 3px solid #91b6d4;
+  border-radius: 10px;
+  background: #f7fafe;
+  padding: 12px;
+}
+.daily-command .dc-dispenser-head {
+  gap: 8px;
+  flex-wrap: wrap;
+  border-color: #dfe8f2;
+}
+.daily-command .dc-dispenser-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: #e5f0fc;
+  color: #244e79;
+  font-variant-numeric: tabular-nums;
+}
+.daily-command .dc-dispenser-total > span:first-child { color: #486b8c; margin: 0; }
+.daily-command .dc-dispenser-total > span:last-child { color: #193f6b; font-weight: 800; }
+.daily-command .dc-nozzle-pills {
+  grid-template-columns: repeat(auto-fit, minmax(min(142px, 100%), 1fr));
+  gap: 7px;
+}
+.daily-command .dc-nozzle-pill {
+  min-width: 0;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-color: #dbe6f1;
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-variant-numeric: tabular-nums;
+}
+.daily-command .dc-nozzle-pill > span:last-child { color: #193f64; margin-left: auto; }
+.daily-command .dc-product-subtotals { gap: 6px; }
+.daily-command .dc-product-subtotals > span {
+  background: #eaf1f8;
+  border: 1px solid #dbe5ef;
+  border-radius: 6px;
+  padding: 3px 7px;
+  color: #385674;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.daily-command .dc-stock-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 10px 12px;
+  border: 1px solid #ead6ac;
+  border-radius: 8px;
+  background: #fffaed;
+  color: #80520f;
+  line-height: 1.5;
+}
+.daily-command .dc-stock-note svg { flex: none; margin-top: 2px; }
+.daily-command .dc-stock-summary .daily-ops-data-table tbody td:first-child { min-width: 102px; }
+.daily-command .dc-stock-summary .daily-ops-data-table tbody td:first-child > div { margin-top: 4px; line-height: 1.4; }
+.daily-command .dc-stock-summary .daily-ops-data-table tbody td:nth-child(7) {
+  color: #1b4b79;
+  font-weight: 800;
+}
+.daily-command .dc-stock-summary .daily-ops-data-table tfoot td {
+  background: #e6eff9;
+  color: #193f64;
+  border-top: 2px solid #b6cce3;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  font-weight: 800;
+}
+.daily-command .dc-stock-summary .dc-variance-value { white-space: nowrap; }
+@container (max-width: 500px) {
+  .daily-command .dc-detail-panel > .dc-detail-heading { padding: 12px; }
+  .daily-command .dc-detail-heading h2 { font-size: 14px; }
+  .daily-command .dc-detail-icon { width: 34px; height: 34px; }
+  .daily-command .dc-detail-heading button { max-width: 100%; white-space: normal; min-height: 42px; height: auto; padding-top: 7px; padding-bottom: 7px; }
 }
