@@ -1375,7 +1375,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                       <select id="daily-shift-template" aria-label="Shift template"
                         value={selectedTemplateId}
                         onChange={(e) => setSelectedTemplateId(e.target.value)}
-                        className="bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#003366]"
+                        className="bg-white text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#003366] disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                       >
                         {bootstrap.shiftTemplates.map((tpl) => (
                           <option key={tpl.id} value={tpl.id}>
@@ -1397,7 +1397,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                 ) : <p className="dc-hero-guidance">{canOpenShift ? 'Shift templates unavailable.' : 'Review recorded shifts and saved status. Opening shifts requires assigned permission.'}</p>}
               </div>
             </section>
-            <aside aria-label="Attention centre" className="dc-attention" data-tone={attention?.tone || 'info'}>
+            <section aria-label="Attention centre" className="dc-attention" data-tone={attention?.tone || 'info'}>
               <div className="dc-attention-top">
                 <span className="dc-attention-icon">{attention?.tone==='clear'?<CheckCircle2 size={22}/>:attention?.tone==='attention'?<AlertTriangle size={22}/>:<CircleDot size={22}/>}</span>
                 <div><p className="dc-attention-kicker">ATTENTION CENTRE</p><p className="dc-attention-context">Saved business-day status</p></div>
@@ -1409,7 +1409,7 @@ export const DailyOperationsPage: React.FC<{onNavigate?: (tab:string)=>void}> = 
                 <Clock size={15} aria-hidden="true"/>
                 <span>{summary.shiftsCount === 0 ? 'No shift started for this date' : allOperationallyClosed ? 'All recorded shifts are operationally closed' : openCount>0 ? `${openCount} shift(s) currently open` : 'Review recorded shift status'}</span>
               </div>
-            </aside>
+            </section>
           </div>
 
           <section aria-label="Independent DSR and financial reconciliation" className="dc-status-section">

@@ -101,7 +101,7 @@
 /* Command-centre family — scoped to the Daily Operations workspace. */
 .daily-command {
   --dc-ink:#162f48; --dc-muted:#586f85; --dc-border:#d9e5ef;
-  display:grid; gap:16px; min-width:0; container-type:inline-size; color:var(--dc-ink);
+  display:grid; gap:14px; min-width:0; container-type:inline-size; color:var(--dc-ink);
 }
 .daily-command>* {min-width:0;}
 .daily-command .dc-panel {
@@ -143,11 +143,11 @@
 .daily-command .dc-hero::before {content:"";position:absolute;right:-110px;top:-165px;width:345px;height:345px;border-radius:50%;border:1px solid #ffffff24;box-shadow:0 0 0 25px #ffffff09,0 0 0 50px #ffffff07,0 0 0 75px #ffffff05;z-index:-1;pointer-events:none;}
 .daily-command .dc-hero-content {position:relative;min-width:0;}
 .daily-command .dc-hero-tag {display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#ffe1c7;border:1px solid #ffffff2c;background:#ffffff17;padding:4px 9px;border-radius:999px;line-height:1.4;}
-.daily-command .dc-hero-title {display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0 11px;}
+.daily-command .dc-hero-title {display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0 11px;padding-right:78px;min-height:48px;}
 .daily-command .dc-hero-title>div:first-child {min-width:0;flex:1;}
 .daily-command .dc-hero h2 {font-size:clamp(21px,2.3vw,28px);font-weight:800;letter-spacing:-.03em;line-height:1.2;color:white;}
 .daily-command .dc-hero p {color:#dfebf8;line-height:1.45;font-size:12px;overflow-wrap:anywhere;margin-top:4px;}
-.daily-command .dc-hero-art {display:grid;place-items:center;flex:none;width:66px;height:66px;color:#c1e2fb;opacity:.82;position:relative;margin-right:10px;}
+.daily-command .dc-hero-art {display:grid;place-items:center;flex:none;width:66px;height:66px;color:#c1e2fb;opacity:.82;position:absolute;right:10px;top:6px;}
 .daily-command .dc-hero-art::before {content:"";position:absolute;inset:-6px;border:1px solid #ffffff34;border-radius:50%;background:#ffffff0a;box-shadow:0 0 0 7px #ffffff08;z-index:-1;}
 .daily-command .dc-shift-form label {display:block;font-size:11px;color:#dcecfb;font-weight:700;margin-bottom:5px;}
 .daily-command .dc-shift-form-row {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;}
@@ -204,6 +204,7 @@
 .daily-command .dc-progress-track>span[data-tone=success] {background:#23865b;}
 .daily-command .dc-progress-track>span[data-tone=warning] {background:#df982a;}
 .daily-command .dc-progress-grid,.daily-command .dc-workbench-grid {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:13px;}
+.daily-command .dc-workbench-grid {grid-template-columns:repeat(auto-fit,minmax(min(145px,100%),1fr));}
 .daily-command .dc-progress-tile,.daily-command .dc-task-tile {min-width:0;position:relative;background:var(--tile-bg);border:1px solid var(--tile-border);border-radius:12px;padding:12px 11px;display:flex;align-items:flex-start;flex-direction:column;}
 .daily-command .dc-progress-top {display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;margin-bottom:9px;}
 .daily-command .dc-progress-top small {font-size:10px;letter-spacing:.08em;font-weight:750;color:var(--tile-fg);opacity:.77;}
@@ -237,7 +238,7 @@
 .daily-command :is(.dc-primary-action,.dc-task-tile,.dc-mode-switch button,.dc-shift-notes summary,.dc-admin-tools summary):focus-visible {outline:3px solid #ed8135;outline-offset:2px;}
 @container (max-width: 1020px) {
   .daily-command .dc-context-controls {grid-template-columns:minmax(0,1.35fr) minmax(135px,.65fr) minmax(210px,auto) auto;}
-  .daily-command .dc-progress-grid,.daily-command .dc-workbench-grid {grid-template-columns:repeat(3,minmax(0,1fr));}
+  .daily-command .dc-progress-grid {grid-template-columns:repeat(3,minmax(0,1fr));}
   .daily-command .dc-progress-tile h3 {min-height:0;}
 }
 @container (max-width: 780px) {
@@ -260,7 +261,8 @@
   .daily-command .dc-context-controls {display:flex;flex-direction:column;align-items:stretch;}
   .daily-command .dc-refresh {width:100%;}
   .daily-command .dc-hero {padding:16px;}
-  .daily-command .dc-hero-art {width:46px;height:46px;margin:0;}
+  .daily-command .dc-hero-title {padding-right:52px;}
+  .daily-command .dc-hero-art {width:46px;height:46px;right:2px;top:12px;}
   .daily-command .dc-hero-art svg {width:45px;height:45px;}
   .daily-command .dc-shift-form-row {grid-template-columns:minmax(0,1fr);}
   .daily-command .dc-progress-grid,.daily-command .dc-workbench-grid {grid-template-columns:repeat(2,minmax(0,1fr));}
@@ -269,6 +271,17 @@
   .daily-command .dc-admin-tools>summary>span:nth-child(2) {flex-basis:calc(100% - 50px);}
   .daily-command .dc-admin-badge {margin-left:44px;}
   .daily-command .dc-heading-actions .cc-task-finder-results {left:0;right:auto;}
+}
+@container (min-width: 335px) and (max-width: 500px) {
+  .daily-command .dc-hierarchy-path {grid-template-columns:repeat(2,minmax(0,1fr));}
+  .daily-command .dc-hierarchy-path li:last-child {grid-column:1/-1;}
+  .daily-command .dc-hierarchy-path li:not(:last-child)>span {display:block;}
+  .daily-command .dc-hierarchy-path li:not(:last-child)>span strong {margin-top:2px;}
+  .daily-command .dc-context-controls {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;}
+  .daily-command .dc-control-outlet {grid-column:1/-1;}
+  .daily-command .dc-control-date {grid-column:1;grid-row:2;}
+  .daily-command .dc-control-refresh {grid-column:2;grid-row:2;}
+  .daily-command .dc-control-mode {grid-column:1/-1;grid-row:3;}
 }
 @media (prefers-reduced-motion:reduce) {
   .daily-command .dc-task-tile,.daily-command .dc-summary-chevron {transition:none;}

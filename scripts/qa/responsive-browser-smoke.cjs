@@ -313,6 +313,12 @@ async function main(){
           const b=await page.locator(selector).boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1,selector+' clipped at '+w);
         }
       }
+      const attentionPanel=page.getByRole('region',{name:'Attention centre'});
+      await attentionPanel.getByText('No shift recorded',{exact:true}).waitFor();
+      for(const selector of ['.dc-attention-top','.dc-attention-footer']){
+        const background=await attentionPanel.locator(selector).evaluate(el=>getComputedStyle(el).backgroundColor);
+        assert.equal(background,'rgba(0, 0, 0, 0)','Sidebar theme leaked into attention panel');
+      }
       await page.evaluate(()=>window.scrollTo(0,0));await capture('daily-no-shift-desktop');
       await capture('daily-no-shift-progress',page.getByRole('region',{name:'Daily operations progress'}));
       await capture('daily-admin-collapsed',admin);
