@@ -77,7 +77,7 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0, operationsUi=false, stockUi=false;
+    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false;
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -92,6 +92,29 @@ async function main(){
       if(path==='/api/v1/auth/me')return route.fulfill({json:ok(auth)});
       if(path==='/api/v1/outlets')return route.fulfill({json:ok(outlets)});
       if(path==='/api/v1/users'||path==='/api/v1/hierarchy/states')return route.fulfill({json:ok([])});
+      if(cngUi){
+        if(path==='/api/v1/outlets/fixture-b/shifts')return route.fulfill({json:ok([dsrShift,historical])});
+        for(const shift of [dsrShift,historical]){
+          const prefix='/api/v1/shifts/'+shift.id, closed=shift.status==='CLOSED';
+          if(path===prefix)return route.fulfill({json:ok(shift)});
+          if(path===prefix+'/cng-log')return route.fulfill({json:ok(closed?{
+            id:'fixture-cng-log',operationalShiftId:shift.id,outletId:shift.outletId,
+            mfmOpeningKg:'10500.000',mfmClosingKg:'11250.500',netSalesKg:'750.500',
+            gridIntakeKg:'755.500',gridSalesVarianceKg:'5.000',notes:'Fixture MFM remarks'
+          }:null)});
+          if(path===prefix+'/cng-pressure-readings')return route.fulfill({json:ok(closed?[{
+            id:'fixture-pressure',operationalShiftId:shift.id,outletId:shift.outletId,
+            recordedAt:shift.businessDate+'T08:30:00Z',pressureUnit:'bar',suctionPressure:'5.000',
+            dischargePressure:'250.000',cascadePressure:null,notes:'Fixture pressure remarks'
+          }]:[])});
+        }
+        if(path==='/api/v1/outlets/fixture-b/cng/daily-summary'){
+          const date=url.searchParams.get('businessDate'), closed=date===dsrShift.businessDate;
+          return route.fulfill({json:ok({outletId:'fixture-b',businessDate:date,shiftCount:closed?1:0,
+            totalMfmSalesKg:closed?'750.500':'0.000',gridIntakeKg:closed?'755.500':null,
+            gridSalesVarianceKg:closed?'5.000':null,gridDataComplete:closed})});
+        }
+      }
       if(stockUi){
         if(path==='/api/v1/outlets/fixture-a/shifts')return route.fulfill({json:ok([])});
         if(path==='/api/v1/outlets/fixture-b/shifts')return route.fulfill({json:ok([dsrShift,historical])});
@@ -467,6 +490,51 @@ async function main(){
       await page.getByRole('button',{name:'Save OPENING Reading',exact:true}).waitFor();
       await page.getByRole('button',{name:'Cancel',exact:true}).click();
       await checkViewport(1440,900);
+      // CNG command centre: verified saved readings, read-only historical shift and editable open shift.
+      cngUi=true;
+      auth.permissions.push('cng_operations.write');
+      await page.goto(base+'/cng');
+      await page.getByRole('heading',{name:'CNG Operations',exact:true}).waitFor();
+      const cngShift=page.getByRole('combobox',{name:'CNG operational shift'});
+      await cngShift.selectOption(dsrShift.id);
+      const cngHero=page.getByRole('region',{name:'Current CNG shift'});
+      await cngHero.getByText('CLOSED',{exact:true}).waitFor();
+      await page.getByRole('list',{name:'Selected outlet hierarchy'}).getByText(outlets[1].name+' · '+outlets[1].roCode,{exact:true}).waitFor();
+      const cngPanels=page.locator('.cng-panel');
+      const mfm=cngPanels.nth(0), pressure=cngPanels.nth(1), summary=cngPanels.nth(2);
+      await mfm.getByText('750.500 kg',{exact:true}).waitFor();
+      await mfm.getByText('755.500 kg',{exact:true}).waitFor();
+      await mfm.getByText('5.000 kg',{exact:true}).waitFor();
+      await summary.getByText('750.500 kg',{exact:true}).waitFor();
+      assert.equal(await mfm.locator('#cng-mfm-opening').inputValue(),'10500.000');
+      assert(await mfm.locator('#cng-mfm-opening').isDisabled());
+      assert(await mfm.locator('#cng-mfm-closing').isDisabled());
+      assert(await mfm.locator('#cng-grid-intake').isDisabled());
+      assert(await mfm.locator('#cng-notes').isDisabled());
+      assert.equal(await page.getByRole('button',{name:/Save CNG Log|Update CNG Log|Add Pressure Reading|Edit Reading|Delete Reading/}).count(),0,'Closed CNG shift offered mutations');
+      for(const [w,h] of [[320,640],[390,844],[768,1024],[1024,768],[1440,900]]){
+        await checkViewport(w,h);
+        for(const panel of [cngHero,mfm,pressure,summary]){
+          const b=await panel.boundingBox();assert(b&&b.x>=0&&b.x+b.width<=w+1,'CNG panel clipped at '+w);
+        }
+        await pressure.locator(w<768?'.cng-pressure-card':'.cng-pressure-table').getByText('250.000',{exact:true}).waitFor();
+        if(w===390||w===1440){
+          await page.evaluate(()=>window.scrollTo(0,0));await capture('cng-command-'+w);
+          await capture('cng-mfm-'+w,mfm);await capture('cng-pressure-'+w,pressure);await capture('cng-summary-'+w,summary);
+        }
+      }
+      await cngShift.selectOption(historical.id);
+      await cngHero.getByText('OPEN',{exact:true}).waitFor();
+      await page.getByRole('region',{name:'CNG attention centre'}).getByRole('heading',{name:'MFM log not recorded',exact:true}).waitFor();
+      assert.equal(await mfm.getByText('Not recorded',{exact:true}).count(),2);
+      assert(!(await mfm.locator('#cng-mfm-opening').isDisabled()));
+      await pressure.getByText('No compressor pressure readings have been recorded.',{exact:true}).waitFor();
+      await page.getByRole('button',{name:'Save CNG Log',exact:true}).waitFor();
+      await page.getByRole('button',{name:'Add Pressure Reading',exact:true}).click();
+      await page.getByRole('dialog').waitFor();
+      await page.getByRole('button',{name:'Cancel',exact:true}).click();
+      await page.getByRole('dialog').waitFor({state:'hidden'});
+      await capture('cng-open-missing-1440',mfm);
       assert.deepEqual(errors,[],'Uncaught browser error');
       assert.deepEqual(blocked,[],'Unexpected API or external request');
       console.log('PASS: five responsive widths, mobile navigation and focus restore, outlet continuity, CNG loading/failure/retry, no historical auto-selection, DSR historical shift name, remarks validation and download, consolidated and detailed month export, responsive report coverage, dashboard and workbench independent statuses, populated operational detail panels and exact totals, closed-shift controls, no mutation or real backend requests.');

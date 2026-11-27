@@ -57,37 +57,37 @@ export const CngDailySummaryPanel: React.FC<CngDailySummaryPanelProps> = ({
   }, [outletId, selectedDate, refreshTrigger]);
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-orange-500/10 rounded-xl border border-orange-500/20 text-orange-500">
+    <div className="dc-detail-panel cng-panel">
+      <div className="dc-detail-heading cng-panel-heading">
+        <div className="dc-detail-title">
+          <div className="dc-detail-icon" data-color="blue">
             <BarChart3 className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base md:text-lg font-bold text-white tracking-tight">
+            <h2>
               Daily CNG Summary
             </h2>
-            <p className="text-xs text-slate-400">
+            <p>
               Aggregated 24-hour business date sales and custody transfer reconciliation
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
+        <div className="cng-date-controls">
+          <div className="cng-date-field">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
             <input
-              type="date"
+              type="date" aria-label="CNG summary business date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-xs text-white font-mono focus:outline-none"
+              className="cng-date-input"
             />
           </div>
           <button
             type="button"
             onClick={() => loadSummary(selectedDate)}
             disabled={loading}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors disabled:opacity-50"
+            className="cng-refresh" aria-label="Refresh daily CNG summary"
             title="Refresh Daily Summary"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -95,100 +95,108 @@ export const CngDailySummaryPanel: React.FC<CngDailySummaryPanelProps> = ({
         </div>
       </div>
 
-      {error ? (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      ) : !summary || summary.shiftCount === 0 ? (
-        <div className="py-8 text-center text-xs text-slate-500 italic bg-slate-950/40 rounded-xl border border-dashed border-slate-800">
-          No CNG operations recorded for the selected business date.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {/* Status banner */}
-          {summary.gridDataComplete ? (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center gap-2 text-xs text-emerald-400">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span className="font-semibold">Grid Data Complete:</span>
-              <span className="text-slate-300">
-                All {summary.shiftCount} shifts on {summary.businessDate} have verified grid intake recorded.
-              </span>
-            </div>
-          ) : (
-            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-2 text-xs text-amber-400">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span className="font-semibold">Incomplete Grid Intake:</span>
-              <span className="text-slate-300">
-                Grid intake data is incomplete for one or more shifts. Aggregate variance is unconfirmed.
-              </span>
-            </div>
-          )}
+      <div className="cng-panel-body">
+        {loading ? (
+          <div role="status" className="cng-pressure-empty">Loading daily CNG summary…</div>
+        ) : error ? (
+          <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        ) : !summary || summary.shiftCount === 0 ? (
+          <div className="cng-pressure-empty">
+            No CNG operations recorded for the selected business date.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Status banner */}
+            {summary.gridDataComplete ? (
+              <div className="cng-summary-banner p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center gap-2 text-xs text-emerald-400">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span className="font-semibold">Grid Data Complete:</span>
+                <span className="text-slate-300">
+                  All {summary.shiftCount} shifts on {summary.businessDate} have verified grid intake recorded.
+                </span>
+              </div>
+            ) : (
+              <div className="cng-summary-banner p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-2 text-xs text-amber-400">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span className="font-semibold">Incomplete Grid Intake:</span>
+                <span className="text-slate-300">
+                  Grid intake data is incomplete for one or more shifts. Aggregate variance is unconfirmed.
+                </span>
+              </div>
+            )}
 
-          {/* Aggregated Metrics Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                Total MFM Sales
+            {/* Aggregated Metrics Cards */}
+            <div className="cng-metrics cng-daily-metrics">
+              <div className="cng-metric" data-color="blue">
+                <span className="cng-metric-icon"><BarChart3 size={16} aria-hidden="true"/></span>
+                <div className="cng-metric-label">
+                  Total MFM Sales
+                </div>
+                <div className="cng-metric-value">
+                  {summary.totalMfmSalesKg} kg
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">Sum across {summary.shiftCount} shift(s)</div>
               </div>
-              <div className="text-xl sm:text-2xl font-black text-white font-mono mt-1">
-                {summary.totalMfmSalesKg} kg
-              </div>
-              <div className="text-[10px] text-slate-500 mt-1">Sum across {summary.shiftCount} shift(s)</div>
-            </div>
 
-            <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                Total Grid Intake
+              <div className="cng-metric" data-color="cyan">
+                <span className="cng-metric-icon"><BarChart3 size={16} aria-hidden="true"/></span>
+                <div className="cng-metric-label">
+                  Total Grid Intake
+                </div>
+                <div className="cng-metric-value">
+                  {summary.gridDataComplete && summary.gridIntakeKg != null ? (
+                    `${summary.gridIntakeKg} kg`
+                  ) : (
+                    <span className="text-amber-400 text-sm font-bold font-sans">Incomplete</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {summary.gridDataComplete ? 'Verified upstream intake' : 'Missing shift intake'}
+                </div>
               </div>
-              <div className="text-xl sm:text-2xl font-black font-mono mt-1 text-orange-400">
-                {summary.gridDataComplete && summary.gridIntakeKg != null ? (
-                  `${summary.gridIntakeKg} kg`
-                ) : (
-                  <span className="text-amber-400 text-sm font-bold font-sans">Incomplete</span>
-                )}
-              </div>
-              <div className="text-[10px] text-slate-500 mt-1">
-                {summary.gridDataComplete ? 'Verified upstream intake' : 'Missing shift intake'}
-              </div>
-            </div>
 
-            <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                Grid vs Sales Variance
+              <div className="cng-metric" data-color={!summary.gridDataComplete || summary.gridSalesVarianceKg == null ? 'neutral' : parseFloat(summary.gridSalesVarianceKg) === 0 ? 'green' : 'orange'}>
+                <span className="cng-metric-icon">{summary.gridDataComplete && summary.gridSalesVarianceKg != null && parseFloat(summary.gridSalesVarianceKg) === 0 ? <CheckCircle2 size={16} aria-hidden="true"/> : <BarChart3 size={16} aria-hidden="true"/>}</span>
+                <div className="cng-metric-label">
+                  Grid vs Sales Variance
+                </div>
+                <div
+                  className={`cng-metric-value ${
+                    summary.gridDataComplete && summary.gridSalesVarianceKg != null
+                      ? parseFloat(summary.gridSalesVarianceKg) === 0
+                        ? 'text-emerald-400'
+                        : 'text-amber-400'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  {summary.gridDataComplete && summary.gridSalesVarianceKg != null ? (
+                    `${summary.gridSalesVarianceKg} kg`
+                  ) : (
+                    <span className="text-slate-600 text-base font-normal">—</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {summary.gridDataComplete ? 'Net reconciliation balance' : 'Pending complete grid logs'}
+                </div>
               </div>
-              <div
-                className={`text-xl sm:text-2xl font-black font-mono mt-1 ${
-                  summary.gridDataComplete && summary.gridSalesVarianceKg != null
-                    ? parseFloat(summary.gridSalesVarianceKg) === 0
-                      ? 'text-emerald-400'
-                      : 'text-amber-400'
-                    : 'text-slate-600'
-                }`}
-              >
-                {summary.gridDataComplete && summary.gridSalesVarianceKg != null ? (
-                  `${summary.gridSalesVarianceKg} kg`
-                ) : (
-                  <span className="text-slate-600 text-base font-normal">—</span>
-                )}
-              </div>
-              <div className="text-[10px] text-slate-500 mt-1">
-                {summary.gridDataComplete ? 'Net reconciliation balance' : 'Pending complete grid logs'}
-              </div>
-            </div>
 
-            <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                Participating Shifts
+              <div className="cng-metric" data-color="purple">
+                <span className="cng-metric-icon"><Calendar size={16} aria-hidden="true"/></span>
+                <div className="cng-metric-label">
+                  Participating Shifts
+                </div>
+                <div className="cng-metric-value">
+                  {summary.shiftCount}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">Recorded for {summary.businessDate}</div>
               </div>
-              <div className="text-xl sm:text-2xl font-black text-white font-mono mt-1">
-                {summary.shiftCount}
-              </div>
-              <div className="text-[10px] text-slate-500 mt-1">Recorded for {summary.businessDate}</div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

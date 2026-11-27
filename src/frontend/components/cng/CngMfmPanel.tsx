@@ -132,171 +132,180 @@ export const CngMfmPanel: React.FC<CngMfmPanelProps> = ({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-orange-500/10 rounded-xl border border-orange-500/20 text-orange-500">
+    <div className="dc-detail-panel cng-panel">
+      <div className="dc-detail-heading cng-panel-heading">
+        <div className="dc-detail-title">
+          <div className="dc-detail-icon" data-color="orange">
             <Scale className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base md:text-lg font-bold text-white tracking-tight">
+            <h2>
               CNG MFM & Grid Reconciliation
             </h2>
-            <p className="text-xs text-slate-400">
+            <p>
               Mass Flow Meter dispensing log and upstream pipeline intake reconciliation
             </p>
           </div>
         </div>
 
         {!isEditable && (
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-400 text-xs font-medium rounded-lg border border-slate-700">
+          <div className="cng-readonly">
             <Info className="w-3.5 h-3.5" />
             <span>Read-only Mode</span>
           </div>
         )}
       </div>
 
-      {clientError && (
-        <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center gap-2.5 text-xs text-rose-400">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span>{clientError}</span>
-        </div>
-      )}
-
-      {/* Authoritative Server Calculated Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-            Authoritative Net Sales
-          </div>
-          <div className="text-xl md:text-2xl font-black text-white font-mono mt-1">
-            {log ? `${log.netSalesKg} kg` : <span className="text-slate-600 font-normal text-base">Not recorded</span>}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">
-            Closing − Opening (server validated)
-          </div>
-        </div>
-
-        <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-            Pipeline Grid Intake
-          </div>
-          <div className="text-xl md:text-2xl font-black text-orange-400 font-mono mt-1">
-            {log?.gridIntakeKg != null ? (
-              `${log.gridIntakeKg} kg`
-            ) : (
-              <span className="text-slate-600 font-normal text-base">Not recorded</span>
-            )}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">
-            Upstream custody meter transfer
-          </div>
-        </div>
-
-        <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-            Grid vs Sales Variance
-          </div>
-          <div
-            className={`text-xl md:text-2xl font-black font-mono mt-1 ${
-              log?.gridSalesVarianceKg != null
-                ? parseFloat(log.gridSalesVarianceKg) === 0
-                  ? 'text-emerald-400'
-                  : 'text-amber-400'
-                : 'text-slate-600 font-normal text-base'
-            }`}
-          >
-            {log?.gridSalesVarianceKg != null ? `${log.gridSalesVarianceKg} kg` : '—'}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">
-            {log?.gridSalesVarianceKg != null
-              ? parseFloat(log.gridSalesVarianceKg) === 0
-                ? 'Balanced intake vs sales'
-                : 'Variance between grid & pump'
-              : 'Requires grid intake entry'}
-          </div>
-        </div>
-      </div>
-
-      {/* Controlled Entry Form */}
-      <form onSubmit={handleSave} className="space-y-4 pt-2">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              MFM Opening Reading (kg) <span className="text-orange-500">*</span>
-            </label>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={openingKg}
-              onChange={(e) => setOpeningKg(e.target.value)}
-              disabled={!isEditable || submitting}
-              placeholder="e.g. 10500.000"
-              className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 rounded-xl px-3.5 py-2.5 text-sm text-white font-mono placeholder:text-slate-600 disabled:opacity-50 disabled:bg-slate-950/40"
-            />
-            <span className="text-[10px] text-slate-500 mt-1 block">Up to 3 decimal digits</span>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              MFM Closing Reading (kg) <span className="text-orange-500">*</span>
-            </label>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={closingKg}
-              onChange={(e) => setClosingKg(e.target.value)}
-              disabled={!isEditable || submitting}
-              placeholder="e.g. 11250.500"
-              className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 rounded-xl px-3.5 py-2.5 text-sm text-white font-mono placeholder:text-slate-600 disabled:opacity-50 disabled:bg-slate-950/40"
-            />
-            <span className="text-[10px] text-slate-500 mt-1 block">Must be ≥ Opening reading</span>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Grid Intake Reading (kg) <span className="text-slate-500">(Optional)</span>
-            </label>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={gridIntakeKg}
-              onChange={(e) => setGridIntakeKg(e.target.value)}
-              disabled={!isEditable || submitting}
-              placeholder="e.g. 750.500"
-              className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 rounded-xl px-3.5 py-2.5 text-sm text-white font-mono placeholder:text-slate-600 disabled:opacity-50 disabled:bg-slate-950/40"
-            />
-            <span className="text-[10px] text-slate-500 mt-1 block">Leave empty if not recorded</span>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-            Operational Remarks / Notes <span className="text-slate-500">(Optional)</span>
-          </label>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            disabled={!isEditable || submitting}
-            rows={2}
-            placeholder="e.g. Compressor trip observed at 14:00, grid pressure stable..."
-            className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 rounded-xl px-3.5 py-2 text-sm text-white placeholder:text-slate-600 disabled:opacity-50 disabled:bg-slate-950/40"
-          />
-        </div>
-
-        {isEditable && (
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-orange-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-            >
-              <Save className="w-4 h-4" />
-              <span>{submitting ? 'Saving MFM Log...' : log ? 'Update CNG Log' : 'Save CNG Log'}</span>
-            </button>
+      <div className="cng-panel-body">
+        {clientError && (
+          <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center gap-2.5 text-xs text-rose-400">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{clientError}</span>
           </div>
         )}
-      </form>
+
+        {/* Authoritative Server Calculated Cards */}
+        <div className="cng-metrics">
+          <div className="cng-metric" data-color="blue">
+            <span className="cng-metric-icon"><Scale size={16} aria-hidden="true"/></span>
+            <div className="cng-metric-label">
+              Authoritative Net Sales
+            </div>
+            <div className="cng-metric-value">
+              {log ? `${log.netSalesKg} kg` : <span className="text-slate-600 font-normal text-base">Not recorded</span>}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              Closing − Opening (server validated)
+            </div>
+          </div>
+
+          <div className="cng-metric" data-color="cyan">
+            <span className="cng-metric-icon"><ArrowRight size={16} aria-hidden="true"/></span>
+            <div className="cng-metric-label">
+              Pipeline Grid Intake
+            </div>
+            <div className="cng-metric-value">
+              {log?.gridIntakeKg != null ? (
+                `${log.gridIntakeKg} kg`
+              ) : (
+                <span className="text-slate-600 font-normal text-base">Not recorded</span>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              Upstream custody meter transfer
+            </div>
+          </div>
+
+          <div className="cng-metric" data-color={log?.gridSalesVarianceKg == null ? 'neutral' : parseFloat(log.gridSalesVarianceKg) === 0 ? 'green' : 'orange'}>
+            <span className="cng-metric-icon">{log?.gridSalesVarianceKg == null ? <Info size={16} aria-hidden="true"/> : parseFloat(log.gridSalesVarianceKg) === 0 ? <CheckCircle2 size={16} aria-hidden="true"/> : <AlertTriangle size={16} aria-hidden="true"/>}</span>
+            <div className="cng-metric-label">
+              Grid vs Sales Variance
+            </div>
+            <div
+              className={`cng-metric-value ${
+                log?.gridSalesVarianceKg != null
+                  ? parseFloat(log.gridSalesVarianceKg) === 0
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
+                  : 'text-slate-600 font-normal text-base'
+              }`}
+            >
+              {log?.gridSalesVarianceKg != null ? `${log.gridSalesVarianceKg} kg` : '—'}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              {log?.gridSalesVarianceKg != null
+                ? parseFloat(log.gridSalesVarianceKg) === 0
+                  ? 'Balanced intake vs sales'
+                  : 'Variance between grid & pump'
+                : 'Requires grid intake entry'}
+            </div>
+          </div>
+        </div>
+
+        {/* Controlled Entry Form */}
+        <form onSubmit={handleSave} className="cng-entry-form space-y-4">
+          <div className="cng-entry-grid">
+            <div>
+              <label htmlFor="cng-mfm-opening" className="block text-xs font-semibold text-slate-300 mb-1.5">
+                MFM Opening Reading (kg) <span className="text-orange-500">*</span>
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                id="cng-mfm-opening"
+                value={openingKg}
+                onChange={(e) => setOpeningKg(e.target.value)}
+                disabled={!isEditable || submitting}
+                placeholder={isEditable ? "e.g. 10500.000" : "Not recorded"}
+                className="cng-input font-mono"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">Up to 3 decimal digits</span>
+            </div>
+
+            <div>
+              <label htmlFor="cng-mfm-closing" className="block text-xs font-semibold text-slate-300 mb-1.5">
+                MFM Closing Reading (kg) <span className="text-orange-500">*</span>
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                id="cng-mfm-closing"
+                value={closingKg}
+                onChange={(e) => setClosingKg(e.target.value)}
+                disabled={!isEditable || submitting}
+                placeholder={isEditable ? "e.g. 11250.500" : "Not recorded"}
+                className="cng-input font-mono"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">Must be ≥ Opening reading</span>
+            </div>
+
+            <div>
+              <label htmlFor="cng-grid-intake" className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Grid Intake Reading (kg) <span className="text-slate-500">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                id="cng-grid-intake"
+                value={gridIntakeKg}
+                onChange={(e) => setGridIntakeKg(e.target.value)}
+                disabled={!isEditable || submitting}
+                placeholder={isEditable ? "e.g. 750.500" : "Not recorded"}
+                className="cng-input font-mono"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">Leave empty if not recorded</span>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="cng-notes" className="block text-xs font-semibold text-slate-300 mb-1.5">
+              Operational Remarks / Notes <span className="text-slate-500">(Optional)</span>
+            </label>
+            <textarea
+              id="cng-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              disabled={!isEditable || submitting}
+              rows={2}
+              placeholder={isEditable ? "e.g. Compressor trip observed at 14:00, grid pressure stable..." : "No remarks recorded"}
+              className="cng-input"
+            />
+          </div>
+
+          {isEditable && (
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-orange-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                <Save className="w-4 h-4" />
+                <span>{submitting ? 'Saving MFM Log...' : log ? 'Update CNG Log' : 'Save CNG Log'}</span>
+              </button>
+            </div>
+          )}
+        </form>
+      </div>
     </div>
   );
 };

@@ -1,4 +1,6 @@
 import './operationsModern.css';
+import './dailyOperationsModern.css';
+import './cngCommandCentre.css';
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -13,12 +15,15 @@ import {
   Flame,
   Building2,
   Clock,
-  Calendar,
+  GitBranch,
+  ChevronRight,
+  ArrowLeft,
+  ClipboardList,
+  AlertTriangle,
   RefreshCw,
   AlertCircle,
   CheckCircle2,
   Lock,
-  Unlock,
   ShieldAlert,
 } from 'lucide-react';
 import { CngMfmPanel } from '../components/cng/CngMfmPanel';
@@ -30,9 +35,10 @@ import { useActiveOutlet } from '../context/ActiveOutletContext';
 import { useShiftWorkbench } from '../context/ShiftWorkbenchContext';
 import { resolveWorkbenchShift, toWorkbenchSelection } from '../utils/shiftWorkbench';
 import { getLocalDateInputValue } from '../../shared/utils/dateUtils';
+import { outletHierarchy, scopeLabel } from '../utils/commandCentre';
 
 export const CngOperationsPage: React.FC = () => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, userCtx } = useAuth();
   const canRead = hasPermission(PERMISSIONS.CNG_OPERATIONS_READ);
   const canWrite = hasPermission(PERMISSIONS.CNG_OPERATIONS_WRITE);
 
@@ -247,36 +253,56 @@ export const CngOperationsPage: React.FC = () => {
     );
   }
 
-  return (
-    <div className="operations-modern space-y-6">
-      {/* Top Header & Selectors */}
-      <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-orange-500/10 rounded-xl border border-orange-500/20 text-orange-500 shadow-md shadow-orange-500/10">
-              <Flame className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="text-xl md:text-2xl font-black text-[#17365D] tracking-tight">
-                CNG Operations
-              </h1>
-              <p className="text-xs text-[#64748B]">
-                MFM sales, grid intake and compressor pressure monitoring
-              </p>
-            </div>
-          </div>
+  const attention = loadingShifts || loadingShiftData
+    ? {tone:'info', title:'Loading CNG records', detail:'Retrieving saved records for the selected outlet and shift.'}
+    : !selectedShift
+    ? {tone:'info', title:'Choose an operational shift', detail:'Select a verified shift to view its saved CNG records.'}
+    : selectedShift.status !== 'OPEN'
+    ? {tone:'info', title:'Read-only shift', detail:'Historical shift — CNG records are read-only.'}
+    : !canWrite
+    ? {tone:'info', title:'Read-only access', detail:'Read-only mode — write permission required to modify.'}
+    : !cngLog
+    ? {tone:'attention', title:'MFM log not recorded', detail:'Record opening and closing meter readings for this shift.'}
+    : cngLog.gridIntakeKg == null
+    ? {tone:'attention', title:'Grid intake not recorded', detail:'Grid intake is optional; variance cannot be confirmed without it.'}
+    : {tone:'info', title:'MFM log recorded', detail:'Review the saved meter readings and grid reconciliation below.'};
 
-          {/* Top Controls */}
-          <div className="iocl-mobile-stack flex flex-wrap items-center gap-3 min-w-0">
-            {/* Outlet Selector */}
-            <div className="flex items-center gap-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-3 py-1.5 min-w-0 sm:min-w-[200px]">
-              <Building2 className="w-4 h-4 text-[#64748B] shrink-0" />
+  return (
+    <div className="operations-modern daily-command cng-command pb-10 max-w-[1500px] mx-auto">
+      <header className="dc-heading">
+        <div>
+          <p className="dc-eyebrow"><span/> INDIANOIL WORKSPACE / DAILY WORK</p>
+          <h1>CNG Operations</h1>
+          <p className="dc-muted">MFM sales, grid intake and compressor pressure monitoring.</p>
+        </div>
+        <button type="button" onClick={handleRefresh}
+          disabled={loadingShifts||loadingShiftData||pressureModalOpen||!!deletingPressureId}
+          aria-label="Refresh CNG records" title="Refresh Shift Data" className="cng-refresh">
+          <RefreshCw className={`w-3.5 h-3.5 ${loadingShiftData ? 'animate-spin' : ''}`}/> Refresh
+        </button>
+      </header>
+
+      <section aria-label="Selected outlet and operational shift" className="dc-panel dc-context">
+        <div className="dc-hierarchy-head">
+          <span className="dc-hierarchy-icon"><GitBranch size={18} aria-hidden="true"/></span>
+          <div><h2>Organization hierarchy</h2><p>Primary access: <strong>{scopeLabel(userCtx?.primaryScope || 'UNKNOWN')}</strong> · Records apply only to the selected retail outlet and shift.</p></div>
+        </div>
+        {selectedOutlet && <ol aria-label="Selected outlet hierarchy" className="dc-hierarchy-path">
+          {outletHierarchy(selectedOutlet).map((part,i)=><li key={part.label}>
+            {i>0&&<ChevronRight size={14} className="dc-chevron" aria-hidden="true"/>}
+            <span data-selected={i===4}><small>{part.label}</small><strong>{part.name}{part.code?' · '+part.code:''}</strong></span>
+          </li>)}
+        </ol>}
+        <div className="cng-context-controls">
+            <div>
+              <label htmlFor="cng-outlet">Retail Outlet</label>
               <select
+                id="cng-outlet"
                 aria-label="CNG retail outlet"
                 value={selectedOutletId}
                 onChange={(e) => setSelectedOutletId(e.target.value)}
                 disabled={loadingOutlets}
-                className="bg-transparent text-xs text-[#17365D] font-medium focus:outline-none w-full min-w-0"
+                className="cng-select"
               >
                 {outlets.length === 0 ? (
                   <option value="">No outlets available</option>
@@ -290,10 +316,10 @@ export const CngOperationsPage: React.FC = () => {
               </select>
             </div>
 
-            {/* Shift Selector */}
-            <div className="flex items-center gap-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-3 py-1.5 min-w-0 sm:min-w-[220px]">
-              <Clock className="w-4 h-4 text-[#64748B] shrink-0" />
+            <div>
+              <label htmlFor="cng-shift">Operational Shift</label>
               <select
+                id="cng-shift"
                 aria-label="CNG operational shift"
                 value={selectedShiftId}
                 onChange={(e) => {
@@ -305,7 +331,7 @@ export const CngOperationsPage: React.FC = () => {
                 if(next)remember(toWorkbenchSelection(next));
               }}
                 disabled={loadingShifts || loadingShiftData || pressureModalOpen || !!deletingPressureId || shiftsList.length === 0}
-                className="bg-transparent text-xs text-[#17365D] font-medium focus:outline-none w-full min-w-0"
+                className="cng-select"
               >
                 {shiftsList.length === 0 ? (
                   <option value="">No shifts available</option>
@@ -319,68 +345,34 @@ export const CngOperationsPage: React.FC = () => {
               </select>
             </div>
 
-            {/* Refresh Button */}
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={loadingShifts||loadingShiftData||pressureModalOpen||!!deletingPressureId}
-              aria-label="Refresh CNG records"
-              className="p-2.5 bg-[#F1F5F9] hover:bg-[#E8EEF5] text-[#475569] rounded-xl transition-colors disabled:opacity-50"
-              title="Refresh Shift Data"
-            >
-              <RefreshCw className={`w-4 h-4 ${loadingShiftData ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
         </div>
+      </section>
 
-        {hasPermission(PERMISSIONS.SHIFTS_READ)&&<button type="button" disabled={loadingShiftData||pressureModalOpen||!!deletingPressureId} onClick={()=>navigate('daily-ops')} className="text-xs font-semibold text-[#17365D] underline disabled:opacity-50">Return to shift workbench</button>}
-        {/* Selected Shift Context Card */}
-        {selectedShift && (
-          <div className="pt-3 border-t border-[#E2E8F0]/80 flex flex-wrap items-center justify-between gap-4 text-xs">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="font-semibold text-[#17365D]">
-                {selectedOutlet?.name} <span className="font-mono text-[#64748B]">({selectedOutlet?.roCode})</span>
-              </span>
-              <span className="text-slate-600 hidden sm:inline">•</span>
-              <span className="flex items-center gap-1 text-[#475569] font-mono">
-                <Calendar className="w-3.5 h-3.5 text-[#64748B]" />
-                {selectedShift.businessDate}
-              </span>
-              <span className="text-slate-600 hidden sm:inline">•</span>
-              <span className="text-[#475569] font-medium">
-                {selectedShift.shiftTemplateName || 'Shift Template'}
-              </span>
+      <div className="dc-hero-grid">
+        <section className="dc-hero" aria-label="Current CNG shift">
+          <div className="dc-hero-content">
+            <span className="dc-hero-tag"><ClipboardList size={14} aria-hidden="true"/> {selectedShift ? 'SELECTED OPERATIONAL SHIFT' : 'CNG WORKSPACE'}</span>
+            <div className="dc-hero-title">
+              <div>
+                <h2>{selectedShift ? selectedShift.shiftTemplateName || 'Shift' : 'Select a shift to continue'}</h2>
+                <p>{selectedShift ? selectedShift.businessDate+' · '+(selectedOutlet?.name || 'Selected outlet') : 'CNG readings are linked to a verified operational shift.'}</p>
+              </div>
+              <span className="dc-hero-art" aria-hidden="true"><Flame size={58}/></span>
             </div>
-
-            <div className="flex items-center gap-2">
-              <span
-                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase font-mono ${
-                  selectedShift.status === 'OPEN'
-                    ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/30'
-                    : selectedShift.status === 'CLOSING'
-                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
-                    : selectedShift.status === 'LOCKED'
-                    ? 'bg-purple-500/10 text-purple-400 border border-purple-500/30'
-                    : 'bg-[#F1F5F9] text-[#64748B] border border-[#D7E0EA]'
-                }`}
-              >
-                {selectedShift.status}
-              </span>
-
-              {selectedShift.status !== 'OPEN' ? (
-                <div className="flex items-center gap-1 text-[11px] text-amber-700 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg">
-                  <Lock className="w-3 h-3" />
-                  <span>Historical shift — CNG records are read-only.</span>
-                </div>
-              ) : !canWrite ? (
-                <div className="flex items-center gap-1 text-[11px] text-[#64748B] bg-[#F1F5F9] px-2 py-0.5 rounded-lg">
-                  <Lock className="w-3 h-3" />
-                  <span>Read-only mode — write permission required to modify.</span>
-                </div>
-              ) : null}
+            <div className="cng-hero-footer">
+              <span className="cng-shift-status" data-tone={selectedShift?.status==='OPEN'?'open':'neutral'}>{selectedShift && selectedShift.status!=='OPEN'?<Lock size={13}/>:<Clock size={13}/>} {selectedShift?.status || (loadingShifts||loadingShiftData?'LOADING':'NO SHIFT SELECTED')}</span>
+              {hasPermission(PERMISSIONS.SHIFTS_READ)&&<button type="button" disabled={loadingShiftData||pressureModalOpen||!!deletingPressureId} onClick={()=>navigate('daily-ops')} className="cng-back-link"><ArrowLeft size={14}/> Return to shift workbench</button>}
             </div>
           </div>
-        )}
+        </section>
+        <section aria-label="CNG attention centre" className="dc-attention" data-tone={attention.tone}>
+          <div className="dc-attention-top">
+            <span className="dc-attention-icon">{attention.tone==='attention'?<AlertTriangle size={20}/>:selectedShift && selectedShift.status!=='OPEN'?<Lock size={20}/>:<ClipboardList size={20}/>}</span>
+            <div><div className="dc-attention-kicker">CNG RECORD STATUS</div><p className="dc-attention-context">Selected outlet · selected shift</p></div>
+          </div>
+          <h3>{attention.title}</h3><p>{attention.detail}</p>
+          <div className="dc-attention-footer"><ShieldAlert size={15}/><span>{selectedShift && !loadingShiftData && !loadingShifts ? `${pressureReadings.length} pressure reading${pressureReadings.length===1?'':'s'} recorded. ` : ''}Record indicators are not safety or shift-close clearance.</span></div>
+        </section>
       </div>
 
       {/* Global Alerts */}
@@ -442,7 +434,7 @@ export const CngOperationsPage: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="cng-detail-stack">
           {/* Section 1: CNG MFM & Grid Intake */}
           <CngMfmPanel
             shiftId={selectedShift.id}
