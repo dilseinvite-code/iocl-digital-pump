@@ -101,9 +101,9 @@ export function nozzleHasSavedMeters(n: DailyDispenserSummary['nozzles'][number]
     &&[n.grossSalesMilliunits,n.testingQuantityMilliunits,n.netSalesMilliunits].every(Number.isSafeInteger);
 }
 /** Recorded-only subtotals; a missing/unavailable nozzle never becomes a fabricated zero. */
-export function dsrDispenserSubtotals(dispenser: DailyDispenserSummary, units: ReadonlyMap<string,string>): DsrDispenserSubtotal[] {
+function dsrRecordedNozzleTotals(nozzles: DailyDispenserSummary['nozzles'], units: ReadonlyMap<string,string>): DsrDispenserSubtotal[] {
   const groups=new Map<string,{unit:string;nozzles:DailyDispenserSummary['nozzles']}>();
-  for(const n of dispenser.nozzles){
+  for(const n of nozzles){
     const unit=units.get(n.productId)?.trim()||'';
     const key=unit?'unit:'+unit:'unknown:'+n.productId;
     if(!groups.has(key))groups.set(key,{unit:unit||'Unknown: '+n.productCode,nozzles:[]});
@@ -115,6 +115,14 @@ export function dsrDispenserSubtotals(dispenser: DailyDispenserSummary, units: R
       recorded.length?savedQuantity(exactSum(recorded.map(n=>n[key]))):'Not recorded';
     return {unit,recorded:recorded.length,expected:nozzles.length,gross:sum('grossSalesMilliunits'),testing:sum('testingQuantityMilliunits'),net:sum('netSalesMilliunits')};
   });
+}
+
+export function dsrDispenserSubtotals(dispenser: DailyDispenserSummary, units: ReadonlyMap<string,string>): DsrDispenserSubtotal[] {
+  return dsrRecordedNozzleTotals(dispenser.nozzles,units);
+}
+/** Sum the actual meter rows once, never sum their formatted dispenser subtotals. */
+export function dsrNozzleGrandTotals(day:DailyFuelSummary, units:ReadonlyMap<string,string>):DsrDispenserSubtotal[] {
+  return dsrRecordedNozzleTotals(day.byDispenser.flatMap(d=>d.nozzles),units);
 }
 
 export function operationalShiftClosure(day:DailyFuelSummary):string {

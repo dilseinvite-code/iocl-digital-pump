@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
-import type { DailyDispenserSummary, DailyFuelSummary, DailyProductSummary, DailyTankReadingDetail } from '../src/shared/types';
-import { dsrDailyProductValues, dsrDailyUnitTotals, dsrTankPresentation, dsrDispenserSubtotals, operationalShiftClosure, savedQuantity } from '../src/frontend/utils/dsrReportLayout';
+import type { DailyDispenserSummary, DailyFuelSummary, DailyProductSummary, DailyTankReadingDetail, OperationalShift } from '../src/shared/types';
+import { dsrDailyProductValues, dsrDailyUnitTotals, dsrTankPresentation, dsrDispenserSubtotals, dsrNozzleGrandTotals, operationalShiftClosure, savedQuantity } from '../src/frontend/utils/dsrReportLayout';
 import { generateDsrPdf } from '../src/frontend/utils/dsrReportPdf';
+import { dsrShiftHeader, formatDsrIst, normalizeDsrRemark, resolveDsrShiftNames, dsrRemarkError } from '../src/frontend/utils/dsrReportMetadata';
 
 const tank=(id:string,number:string,readingType:DailyTankReadingDetail['readingType'],volume:number):DailyTankReadingDetail=>({
   tankId:id,tankNumber:number,readingType,productDipMmMilliunits:1000000,waterDipMmMilliunits:0,netProductVolumeMilliunits:volume,
@@ -16,8 +17,8 @@ const product=(overrides:Partial<DailyProductSummary>={}):DailyProductSummary=>(
   ...overrides,
 } as DailyProductSummary);
 const day=(overrides:Partial<DailyFuelSummary>={}):DailyFuelSummary=>({
-  businessDate:'2026-11-24',dayEntryStatus:'COMPLETE',status:'COMPLETE',operationalDsrStatus:'COMPLETED',
-  financialReconciliationStatus:'PENDING',shiftsCount:1,shifts:[{status:'CLOSED',shiftNumber:1,financialReconciliationStatus:'PENDING'}],
+  outletId:'fixture-outlet',businessDate:'2026-11-24',dayEntryStatus:'COMPLETE',status:'COMPLETE',operationalDsrStatus:'COMPLETED',
+  financialReconciliationStatus:'PENDING',shiftsCount:1,shifts:[{id:'shift-one',shiftTemplateId:'template-one',businessDate:'2026-11-24',status:'CLOSED',shiftNumber:1,financialReconciliationStatus:'PENDING'}],
   byProduct:[product()],byDispenser:[],missingFields:[],completion:{expectedTanks:1,openingTankReadings:1,closingTankReadings:1,
     expectedNozzles:1,nozzleMeterReadings:1,completedReceipts:0,totalReceipts:0,reconciliationComplete:true},
   ...overrides,
@@ -88,14 +89,53 @@ describe('professional DSR PDF report integrity',()=>{
     const shifts=[{status:'CLOSED'},{status:'OPEN'}] as DailyFuelSummary['shifts'];
     expect(operationalShiftClosure(day({shiftsCount:2,shifts}))).toBe('1/2 CLOSED / LOCKED');
   });
+  it('keeps recorded grand totals separate by unit and counts every listed nozzle once',()=>{
+    const d=day({byDispenser:[dispenser([nozzle(),nozzle({hasReading:false})]),dispenser([nozzle({nozzleNumber:3}),nozzle({productId:'cng',productCode:'CNG',grossSalesMilliunits:1000,testingQuantityMilliunits:0,netSalesMilliunits:1000})])]});
+    expect(dsrNozzleGrandTotals(d,new Map([['ms','LITRE'],['cng','KG']]))).toEqual([
+      {unit:'LITRE',recorded:2,expected:3,gross:'400.000',testing:'10.000',net:'390.000'},
+      {unit:'KG',recorded:1,expected:1,gross:'1.000',testing:'0.000',net:'1.000'},
+    ]);
+    const empty=dsrNozzleGrandTotals(day({byDispenser:[dispenser([nozzle({hasReading:false,openingTotalizerMilliunits:null,closingTotalizerMilliunits:null})])]}),new Map([['ms','LITRE']]));
+    expect(empty[0]).toMatchObject({recorded:0,expected:1,net:'Not recorded'});
+  });
+  it('converts timestamp to IST including midnight rollover, without changing business date',()=>{
+    expect(formatDsrIst('2026-11-26T10:52:12.123Z')).toBe('26 Nov 2026 16:22:12 IST');
+    expect(formatDsrIst('2026-11-26T19:00:00Z')).toBe('27 Nov 2026 00:30:00 IST');
+    expect(formatDsrIst('2026-11-27T00:30:00+05:30')).toBe('27 Nov 2026 00:30:00 IST');
+    expect(formatDsrIst('2026-11-26')).toBe('Time unavailable');
+  });
+  it('uses verified matching outlet/date/template shift names and retrieves a historical ID if necessary',async()=>{
+    const d=day(),s=d.shifts[0];
+    const candidate={id:s.id,outletId:d.outletId,businessDate:d.businessDate,shiftTemplateId:s.shiftTemplateId,shiftTemplateName:'General Shift'} as OperationalShift;
+    let details=0;
+    const recent=await resolveDsrShiftNames([d],d.outletId,async()=>[candidate],async()=>{details++;return candidate;});
+    expect(details).toBe(0);expect(dsrShiftHeader(d,recent)).toBe('Shift: General Shift');
+    const historical=await resolveDsrShiftNames([d],d.outletId,async()=>[{...candidate,outletId:'other'}],async id=>{expect(id).toBe(s.id);details++;return candidate;});
+    expect(details).toBe(1);expect(dsrShiftHeader(d,historical)).toBe('Shift: General Shift');
+    const unavailable=await resolveDsrShiftNames([d],d.outletId,async()=>[{...candidate,businessDate:'2026-11-25'}],async()=>({...candidate,shiftTemplateId:'unrelated'}));
+    expect(dsrShiftHeader(d,unavailable)).toBe('Shift: Shift #1 (name unavailable)');
+    expect(dsrShiftHeader(day({shiftsCount:0,shifts:[]}),new Map())).toBe('No recorded shift');
+    expect(dsrShiftHeader(day({shiftsCount:2,shifts:[s,{...s,id:'shift-two'}]}),new Map())).toBe('Shifts: 2 (see shift-wise table)');
+  });
+  it('keeps remarks optional, normalizes punctuation and rejects unsupported or excessive text',()=>{
+    expect(normalizeDsrRemark('  ')).toBe('');
+    expect(normalizeDsrRemark('Stock checked – dip confirmed.\n Follow-up scheduled.')).toBe('Stock checked - dip confirmed. Follow-up scheduled.');
+    expect(dsrRemarkError('W'.repeat(240))).toBe('');
+    expect(dsrRemarkError('W'.repeat(241))).toContain('240');
+    expect(dsrRemarkError('टिप्पणी')).toContain('English');
+  });
   it('keeps a representative five-product, seven-tank, twenty-nozzle DSR on two pages',async()=>{
     let tankNo=0;
     const products=['MS','HSD','XP100','XP95','XTRAGREEN'].map((code,i)=>product({productId:code,productCode:code,
       tankReadings:Array.from({length:i<2?2:1},()=>{const id=String(++tankNo);return [tank(id,id,'OPENING',10000000),tank(id,id,'CLOSING',8000000)];}).flat()}));
     const dispensers=Array.from({length:5},(_,i)=>({...dispenser(Array.from({length:4},(_,j)=>nozzle({nozzleNumber:j+1,productId:products[(i+j)%5].productId,productCode:products[(i+j)%5].productCode}))),dispenserNumber:i+1}));
     const d=day({byProduct:products,byDispenser:dispensers,completion:{...day().completion,expectedTanks:7,openingTankReadings:7,closingTankReadings:7,expectedNozzles:20,nozzleMeterReadings:20}});
-    const bytes=await generateDsrPdf({outletName:'Synthetic outlet',roCode:'TEST',days:[d],generatedAt:'2026-11-26T00:00:00Z',generatedBy:'QA fixture',periodLabel:'Daily'});
-    expect((await PDFDocument.load(bytes)).getPageCount()).toBe(2);
+    const options={outletName:'Synthetic outlet',roCode:'TEST',days:[d],generatedAt:'2026-11-26T00:00:00Z',retrievedAt:'2026-11-25T23:50:00Z',generatedBy:'QA fixture',periodLabel:'Daily',shiftNames:new Map([['shift-one','General Shift']])};
+    for(const remark of ['', 'Observed difference pending a second dip check and supervisor review.', 'W'.repeat(240)]){
+      const bytes=await generateDsrPdf({...options,operatorRemarks:{[d.businessDate]:remark}});
+      expect((await PDFDocument.load(bytes)).getPageCount()).toBe(2);
+    }
+    await expect(generateDsrPdf({...options,operatorRemarks:{[d.businessDate]:'W'.repeat(241)}})).rejects.toThrow('240');
   });
   it('generates a complete PDF with actual brand asset, long meter readings and multiple pages',async()=>{
     const d=day({byDispenser:[dispenser(Array.from({length:60},(_,i)=>nozzle({nozzleNumber:i+1,openingTotalizerMilliunits:9999999999999,closingTotalizerMilliunits:10000000000000,grossSalesMilliunits:1,netSalesMilliunits:1,testingQuantityMilliunits:0})))]});
