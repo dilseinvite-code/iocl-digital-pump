@@ -1,0 +1,63 @@
+name: Release hierarchy editing to production Worker
+
+# Code-only release, triggered by the reviewed workflow reaching main.
+# Existing production D1 rows, R2 objects, migrations and bindings remain intact.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-hierarchy-edit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iocl-worker-production-releases
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate hierarchy editing and deploy Worker code only
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Validate typecheck and hierarchy/security regression tests
+        run: |
+          bun run typecheck
+          bun test tests/hierarchyEditing.test.ts tests/security.test.ts
+      - name: Verify existing production Worker and D1 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const config=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          const binding=config.d1_databases?.[0];
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token=process.env.CLOUDFLARE_API_TOKEN;
+          if(!token||account!=='93888554ef9d9e0b8c18b322683a9652'||config.name!=='iocl-digital-pump-manager'||config.vars?.ENVIRONMENT!=='production'||config.d1_databases?.length!==1||binding?.binding!=='DB'||binding?.database_name!=='iocl-pump-manager-d1'||binding?.database_id!=='305f76c6-c940-443f-86a9-33c309a55578') throw Error('Production identity or credentials mismatch.');
+          const url='https://api.cloudflare.com/client/v4/accounts/'+account+'/d1/database/'+binding.database_id;
+          const headers={Authorization:'Bearer '+token,Accept:'application/json'};
+          const res=await fetch(url,{headers,signal:AbortSignal.timeout(35000)});
+          if(!res.ok)throw Error('Production D1 identity lookup failed.');
+          const data=await res.json();
+          if(!data.success||data.result?.uuid!==binding.database_id||data.result?.name!==binding.database_name||data.result?.version!=='production')throw Error('Production D1 identity mismatch.');
+          console.log('Production database identity verified; no records accessed.');
+          JS
+          result=$(npx wrangler d1 execute iocl-pump-manager-d1 --remote --config wrangler.jsonc --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('states','divisions','sales_areas','retail_outlets','user_scope_assignments','audit_logs');" --json --yes)
+          printf '%s\n' "$result" | jq -e '.[0].results | length == 6' >/dev/null
+          echo 'Existing hierarchy tables verified. No migrations or data changes.'
+      - name: Deploy reviewed Worker source
+        run: npx wrangler deploy --config wrangler.jsonc
+      - name: Report release
+        if: success()
+        run: echo 'Hierarchy editing Worker code deployed; no D1 record or schema changes.' >> "$GITHUB_STEP_SUMMARY"

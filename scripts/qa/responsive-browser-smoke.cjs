@@ -90,7 +90,9 @@ async function main(){
     page.on('pageerror',error=>errors.push(String(error)));
     let releaseFirst;
     const firstResponse=new Promise(resolve=>{releaseFirst=resolve;});
-    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false, performanceUi=false, remainingUi=false, signedOut=false;
+    let shiftAttempts=0, operationsUi=false, stockUi=false, cngUi=false, lubeUi=false, financeUi=false, performanceUi=false, remainingUi=false, signedOut=false, hierarchyEditUi=false;
+    const editedUnits={states:[{id:"fixture-state",code:"ST-01",name:"Fixture State",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"},{id:"fixture-other-state",code:"ST-02",name:"Other State",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}],divisions:[{id:"fixture-division",stateId:"fixture-state",stateName:"Fixture State",code:"DIV-01",name:"Fixture Division",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}],"sales-areas":[{id:"fixture-area",divisionId:"fixture-division",divisionName:"Fixture Division",stateId:"fixture-state",code:"SA-01",name:"Fixture Area",status:"ACTIVE",createdAt:"2000-01-01T00:00:00Z",updatedAt:"2000-01-01T00:00:00Z"}]};
+    const hierarchyPatches=[];
     const screenshotDir=process.env.QA_SCREENSHOT_DIR;
     if(screenshotDir)await fs.mkdir(screenshotDir,{recursive:true});
     const capture=async(name,locator)=>{if(screenshotDir){const options={path:screenshotDir+'/'+name+'.png',animations:'disabled'};if(locator)await locator.screenshot(options);else await page.screenshot(options);}};
@@ -100,6 +102,25 @@ async function main(){
       if(url.origin!==base){if(!['fonts.googleapis.com','fonts.gstatic.com'].includes(url.hostname))blocked.push(req.url());return route.abort();}
       if(!url.pathname.startsWith('/api/'))return route.continue();
       requests.push(url.pathname);
+      // Only the explicit hierarchy fixture edit test may perform an intercepted PATCH.
+      // All other mutations remain blocked and nothing is sent to a real API.
+      if(hierarchyEditUi && url.pathname.startsWith('/api/v1/hierarchy/')){
+        const [kind,id]=url.pathname.slice('/api/v1/hierarchy/'.length).split('/');
+        const units=editedUnits[kind];
+        if(units && !id && req.method()==='GET')return route.fulfill({json:ok(units)});
+        if(units && id && req.method()==='PATCH'){
+          const current=units.find(x=>x.id===id),body=req.postDataJSON();
+          assert(current,'Unknown hierarchy fixture');
+          assert.deepEqual(Object.keys(body).sort(),['code','expectedUpdatedAt','name']);
+          assert.equal(body.expectedUpdatedAt,current.updatedAt);
+          if(body.name==='Fixture rejected change')return route.fulfill({status:409,json:{success:false,data:null,error:{code:'DUPLICATE_CODE',message:'Another unit of this type already uses that code.'}}});
+          hierarchyPatches.push({kind,id,body});
+          Object.assign(current,{name:body.name,code:body.code,updatedAt:'2000-01-02T00:00:00Z'});
+          if(kind==='states')for(const div of editedUnits.divisions)if(div.stateId===id)div.stateName=current.name;
+          if(kind==='divisions')for(const area of editedUnits['sales-areas'])if(area.divisionId===id)area.divisionName=current.name;
+          return route.fulfill({json:ok(current)});
+        }
+      }
       if(req.method()!=='GET'){blocked.push(req.method()+' '+url.pathname);return route.abort();}
       const path=url.pathname;
       if(path==='/api/v1/auth/me')return signedOut?route.fulfill({status:401,json:fail('Signed out fixture')}):route.fulfill({json:ok(auth)});
@@ -816,6 +837,67 @@ async function main(){
         }
         console.log('PASS remaining workspace: '+routePath);
       }
+      // Hierarchy edits: fixture-only, present on each card, prefilled fields,
+      // read-only ancestry, cancellation, error, save and permissions.
+      hierarchyEditUi=true;
+      await page.goto(base+'/hierarchy');
+      const stateEdit=page.getByRole('button',{name:'Edit Fixture State',exact:true});
+      await stateEdit.waitFor();
+      await page.getByRole('button',{name:'Add Hierarchy Unit'}).click();
+      await page.getByRole('dialog',{name:'Add State Office'}).getByRole('button',{name:'Cancel',exact:true}).click();
+      await stateEdit.click();
+      let hierarchyDialog=page.getByRole('dialog',{name:'Edit State Office'});
+      await hierarchyDialog.waitFor();
+      assert.equal(await hierarchyDialog.getByLabel('Code',{exact:true}).inputValue(),'ST-01');
+      assert.equal(await hierarchyDialog.getByLabel('Name',{exact:true}).inputValue(),'Fixture State');
+      await hierarchyDialog.getByLabel('Name',{exact:true}).fill('Canceled change');
+      await hierarchyDialog.getByRole('button',{name:'Cancel',exact:true}).click();
+      await hierarchyDialog.waitFor({state:'hidden'});
+      assert.equal(hierarchyPatches.length,0);
+      await stateEdit.click();
+      await hierarchyDialog.getByLabel('Name',{exact:true}).fill('Fixture rejected change');
+      await hierarchyDialog.getByRole('button',{name:'Save Changes',exact:true}).click();
+      await hierarchyDialog.getByRole('alert').getByText('Another unit of this type already uses that code.').waitFor();
+      assert.equal(hierarchyPatches.length,0);
+      await hierarchyDialog.getByLabel('Name',{exact:true}).fill('Updated State');
+      await hierarchyDialog.getByLabel('Code',{exact:true}).fill('st-11');
+      for(const [w,h] of [[320,640],[390,844],[1440,900]]){
+        await page.setViewportSize({width:w,height:h});
+        const b=await hierarchyDialog.boundingBox();
+        assert(b&&b.x>=0&&b.x+b.width<=w+1&&b.y>=0&&b.y+b.height<=h+1,'Hierarchy edit dialog clipped at '+w);
+        if(w===390||w===1440)await capture('hierarchy-edit-dialog-'+w);
+      }
+      await hierarchyDialog.getByRole('button',{name:'Save Changes',exact:true}).click();
+      await page.getByRole('button',{name:'Edit Updated State',exact:true}).waitFor();
+      await page.getByText('State Office updated successfully.',{exact:true}).waitFor();
+      await page.getByRole('button',{name:/Divisional Offices/}).click();
+      await page.getByRole('button',{name:'Edit Fixture Division',exact:true}).click();
+      hierarchyDialog=page.getByRole('dialog',{name:'Edit Divisional Office'});
+      assert((await hierarchyDialog.locator('#hierarchy-parent').innerText()).includes('Updated State'));
+      assert.equal(await hierarchyDialog.locator('select').count(),0);
+      await hierarchyDialog.getByLabel('Name',{exact:true}).fill('Updated Division');
+      await hierarchyDialog.getByRole('button',{name:'Save Changes',exact:true}).click();
+      await page.getByRole('button',{name:'Edit Updated Division',exact:true}).waitFor();
+      await page.getByRole('button',{name:/Sales Areas/}).click();
+      await page.getByRole('button',{name:'Edit Fixture Area',exact:true}).click();
+      hierarchyDialog=page.getByRole('dialog',{name:'Edit Sales Area'});
+      assert((await hierarchyDialog.locator('#hierarchy-parent').innerText()).includes('Updated Division'));
+      assert.equal(await hierarchyDialog.locator('select').count(),0);
+      await hierarchyDialog.getByLabel('Name',{exact:true}).fill('Updated Area');
+      await hierarchyDialog.getByRole('button',{name:'Save Changes',exact:true}).click();
+      await page.getByRole('button',{name:'Edit Updated Area',exact:true}).waitFor();
+      assert.equal(hierarchyPatches.length,3);
+      assert.equal(hierarchyPatches[0].body.code,'ST-11');
+      // Strict scope gating in addition to the role permission.
+      auth.isGlobalAdmin=false;auth.isGlobalScope=false;auth.primaryScope='STATE';auth.roles=['STATE_OFFICE'];auth.permissions=['hierarchy.read','hierarchy.write','outlets.read'];auth.accessibleStateIds=['fixture-state'];auth.accessibleDivisionIds=[];auth.accessibleSalesAreaIds=[];
+      await page.goto(base+'/hierarchy');
+      await page.getByRole('button',{name:'Edit Updated State',exact:true}).waitFor();
+      assert.equal(await page.getByRole('button',{name:'Edit Other State',exact:true}).count(),0);
+      auth.permissions=['hierarchy.read','outlets.read'];
+      await page.goto(base+'/hierarchy');
+      await page.getByRole('heading',{name:'Updated State',exact:true}).waitFor();
+      assert.equal(await page.getByRole('button',{name:/^Edit /}).count(),0);
+      console.log('PASS hierarchy editing: prefill, validation/error, cancel, scoped edit permissions, save all three levels and responsive dialog.');
       // Production login is a separate public surface; do not attempt to sign in.
       signedOut=true;
       await page.goto(base+'/');
