@@ -22,6 +22,8 @@ import { useAuth } from '../context/AuthContext';
 import { PERMISSIONS } from '../../shared/constants';
 import { DailyOperationsTestDataResetPanel } from '../components/pump/DailyOperationsTestDataResetPanel';
 import './dailyOperationsModern.css';
+import { SectionTitle, StatusCard, StatusPill } from '../components/common/OperationsUi';
+import { operationalShiftClosure } from '../utils/dsrReportLayout';
 import { parseMilliunits, formatMilliunits } from '../../shared/precision';
 import { displayDsrProductMetric, displayDsrTotalMetric, displayNozzleMeterMetric, getTankSaveErrorGuidance } from '../utils/dailyReadingPresentation';
 import { getShiftCloseErrorGuidance } from '../utils/shiftCloseFeedback';
@@ -1171,24 +1173,28 @@ export const DailyOperationsPage: React.FC = () => {
   // They never gate, reorder, or change an operation.
   const progressStages = summary ? [
     {
-      label: 'Shift',
+      label: 'Shift recorded',
+      neutral: false,
       detail: summary.shiftsCount === 0 ? 'Not opened' : `${summary.shiftsCount} recorded`,
       complete: summary.shiftsCount > 0,
     },
     {
-      label: 'Tank Opening',
+      label: 'Tank opening',
+      neutral: summary.completion.expectedTanks === 0,
       detail: `${summary.completion.openingTankReadings} / ${summary.completion.expectedTanks}`,
       complete: summary.completion.expectedTanks > 0 &&
         summary.completion.openingTankReadings >= summary.completion.expectedTanks,
     },
     {
-      label: 'Nozzle Meters',
+      label: 'Nozzle meters',
+      neutral: summary.completion.expectedNozzles === 0,
       detail: `${summary.completion.nozzleMeterReadings + summary.completion.unavailableNozzles} / ${summary.completion.expectedNozzles}`,
       complete: summary.completion.expectedNozzles > 0 &&
         summary.completion.nozzleMeterReadings + summary.completion.unavailableNozzles >= summary.completion.expectedNozzles,
     },
     {
-      label: 'Receipts',
+      label: 'Fuel receipts',
+      neutral: summary.completion.totalReceipts === 0,
       detail: summary.completion.totalReceipts === 0
         ? 'None recorded'
         : `${summary.completion.completedReceipts} / ${summary.completion.totalReceipts}`,
@@ -1196,13 +1202,15 @@ export const DailyOperationsPage: React.FC = () => {
         summary.completion.pendingReceipts === 0,
     },
     {
-      label: 'Tank Closing',
+      label: 'Tank closing',
+      neutral: summary.completion.expectedTanks === 0,
       detail: `${summary.completion.closingTankReadings} / ${summary.completion.expectedTanks}`,
       complete: summary.completion.expectedTanks > 0 &&
         summary.completion.closingTankReadings >= summary.completion.expectedTanks,
     },
     {
-      label: 'Reconciliation',
+      label: 'Stock reconciliation',
+      neutral: summary.shiftsCount === 0,
       detail: summary.completion.reconciliationComplete ? 'Complete' : 'Pending',
       complete: summary.completion.reconciliationComplete,
     },
@@ -1212,13 +1220,13 @@ export const DailyOperationsPage: React.FC = () => {
     <div className="daily-ops-modern space-y-6 pb-12">
       {/* 1. TOP BAR: OUTLET, BUSINESS DATE & VIEW SWITCHER */}
       <div className="space-y-3">
-        <div className="option4-hero p-5 sm:p-7">
+        <div className="option4-hero ops-workbench-hero p-5 sm:p-7">
           <img className="option4-station-art" src="/option4-fuel-station.svg" alt="" aria-hidden="true" />
           <div className="option4-hero-content max-w-2xl">
             <span className="option4-eyebrow">Daily operations / Daily Sales Report</span>
             <div className="flex items-center gap-2.5">
               <Fuel className="w-6 h-6 text-[#003366]" />
-              <h1 className="text-xl font-bold text-slate-900">
+              <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
                 Daily Operations &amp; DSR
               </h1>
               {backgroundRefreshing && (
@@ -1228,19 +1236,21 @@ export const DailyOperationsPage: React.FC = () => {
               )}
             </div>
             <p className="text-sm text-slate-600 mt-1">
-              Manage tank dips, nozzle readings, stock reconciliation and the Daily Sales Report in one workspace.
+              Manage fuel readings, prepare the DSR, and close operations. Financial reconciliation is a separate task.
             </p>
           </div>
         </div>
 
-        <div className="option4-panel p-4 sm:p-5">
+        <div className="option4-panel p-4 sm:p-5 space-y-3">
+          <SectionTitle title="Outlet & business date" description="Check the outlet and date before working on a shift."/>
           <div className="flex flex-wrap items-end gap-3">
             {/* Outlet selector */}
-            <div className="flex flex-col">
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+            <div className="flex flex-col min-w-0 flex-1 sm:max-w-[380px]">
+              <label htmlFor="daily-outlet" className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
                 Retail Outlet
               </label>
               <select
+                id="daily-outlet"
                 value={selectedOutletId}
                 disabled={navigationBusy}
                 onChange={handleWorkbenchOutletChange}
@@ -1256,11 +1266,12 @@ export const DailyOperationsPage: React.FC = () => {
 
             {/* Business Date */}
             <div className="flex flex-col">
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+              <label htmlFor="daily-business-date" className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
                 Business Date
               </label>
               <div className="relative">
                 <input
+                  id="daily-business-date"
                   type="date"
                   value={businessDate}
                   onChange={(e) => { if(navigationBusy || (hasUnsaved && !window.confirm('Unsaved entries or notes may be lost. Change business date?'))) return; const date=e.target.value; if(!date)return; scopeRef.current={outletId:selectedOutletId,date}; requests.current++; initialSelection.current=null; setBootstrap(null); setDailySummary(null); setActiveShiftId(''); setBusinessDate(date); remember({outletId:selectedOutletId,businessDate:date,shiftId:null}); }}
@@ -1278,6 +1289,7 @@ export const DailyOperationsPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setViewMode('WORKSPACE')}
+                  aria-pressed={viewMode === 'WORKSPACE'}
                   className={`px-3 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
                     viewMode === 'WORKSPACE'
                       ? 'bg-[#003366] text-white shadow-xs'
@@ -1290,6 +1302,7 @@ export const DailyOperationsPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setViewMode('DSR')}
+                  aria-pressed={viewMode === 'DSR'}
                   className={`px-3 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
                     viewMode === 'DSR'
                       ? 'bg-[#003366] text-white shadow-xs'
@@ -1324,30 +1337,21 @@ export const DailyOperationsPage: React.FC = () => {
       {summary && (
         <div className="option4-panel p-5 sm:p-6 space-y-4">
           <div className="grid gap-4 border-b border-slate-100 pb-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,auto)] xl:items-start">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Operational DSR:
-              </span>
-              <span
-                data-testid="daily-overall-status"
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-bold border ${badge.classes}`}
-              >
-                {badge.icon}
-                {workflowStatus ? dsrStatusLabel(workflowStatus.operational) : badge.label}
-              </span>
-              <span className="text-xs text-slate-500 font-mono">
-                {selectedOutlet?.roCode} • {businessDate} • {summary.shiftsCount} Shift(s)
-              </span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-wider text-[#9a440d]">Business-day overview</p>
+              <h2 className="mt-1 text-xl font-bold text-[#17365D] break-words">{selectedOutlet?.name || 'Selected outlet'}</h2>
+              <p className="mt-1 text-xs text-slate-600">RO {selectedOutlet?.roCode} · {businessDate} · {summary.shiftsCount} recorded shift{summary.shiftsCount!==1?'s':''}</p>
             </div>
 
             {/* Shift selector / Open Shift bar */}
-            <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-3">
+            <div className="min-w-0 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-3">
+              <p className="mb-2 text-xs font-semibold text-[#17365D]">{bootstrap && bootstrap.shiftTemplates.length > 0 ? 'Open a new shift' : 'Shift templates unavailable'}</p>
               {bootstrap && bootstrap.shiftTemplates.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <select
+                <div className="flex flex-wrap items-center gap-2">
+                  <select aria-label="Shift template"
                     value={selectedTemplateId}
                     onChange={(e) => setSelectedTemplateId(e.target.value)}
-                    className="h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#003366] disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                    className="min-w-0 max-w-full flex-1 h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#003366] disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                   >
                     {bootstrap.shiftTemplates.map((tpl) => (
                       <option key={tpl.id} value={tpl.id}>
@@ -1384,53 +1388,40 @@ export const DailyOperationsPage: React.FC = () => {
             )}
           </div>
 
-          <section aria-label="Independent DSR and financial reconciliation" className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg border border-slate-200 p-3">
-                <div className="text-xs font-semibold text-slate-600">Operational DSR · all recorded shifts</div>
-                <span className={`mt-2 inline-flex rounded-md border px-2.5 py-1 text-xs font-bold ${badge.classes}`} data-testid="operational-dsr-status">
-                  {workflowStatus && dsrStatusLabel(workflowStatus.operational)}
-                </span>
-                <p className="mt-2 text-xs text-slate-600">Completed once saved fuel readings, receipts, calibration and stock reconciliation meet existing completeness checks.</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 p-3">
-                <div className="text-xs font-semibold text-slate-600">Financial Reconciliation · all recorded shifts</div>
-                <span data-testid="financial-reconciliation-status" className={`mt-2 inline-flex rounded-md border px-2.5 py-1 text-xs font-bold ${workflowStatus?.financial === 'COMPLETED' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : workflowStatus?.financial === 'REVIEW_REQUIRED' ? 'border-red-300 bg-red-50 text-red-800' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
-                  {workflowStatus && dsrStatusLabel(workflowStatus.financial)}
-                </span>
-                <p className="mt-2 text-xs text-slate-600">Finance can remain pending while the operational report is complete. Final shift closure still follows the existing financial controls.</p>
-              </div>
+          <section aria-label="Independent DSR and financial reconciliation" className="space-y-3">
+            <SectionTitle title="Three independent statuses" description="Fuel reporting, shift closure and finance are tracked separately across all recorded shifts."/>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div data-testid="daily-overall-status"><StatusCard label="Operational DSR" status={workflowStatus?dsrStatusLabel(workflowStatus.operational):badge.label} testId="operational-dsr-status"
+                description="Fuel readings, receipts, calibration and stock reconciliation."/></div>
+              <StatusCard label="Shift closure" status={operationalShiftClosure(summary)} description="Closed fuel records are locked. Open shifts may still need operational work."/>
+              <StatusCard label="Financial reconciliation" status={workflowStatus?dsrStatusLabel(workflowStatus.financial):'STATUS UNAVAILABLE'} testId="financial-reconciliation-status"
+                description="Collections and reconciliation may be completed later when deferred closure is available."/>
             </div>
-            <p className="mt-3 text-xs text-slate-600">This is a live report of saved data, not a locked or financially approved shift. The DSR remains available while finance is pending.</p>
+            <div className="flex gap-2 rounded-lg bg-[#edf4fc] border border-[#d4e2f2] p-3 text-xs leading-relaxed text-[#254967]"><FileSpreadsheet className="h-4 w-4 shrink-0"/><span>The DSR is available while finance is pending. Operational completion does not certify payment collections or financially approve a shift.</span></div>
           </section>
 
           {/* Read-only completion overview; existing data-entry workflow remains unchanged. */}
           <section aria-label="Daily operations progress" className="option4-progress p-3 sm:p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-bold text-[#17365D]">Daily workflow progress</h2>
-                <p className="text-xs text-[#64748B]">Live status from saved operational records — not a required step sequence</p>
+                <h2 className="text-base font-bold text-[#17365D]">Daily workflow progress</h2>
+                <p className="mt-1 text-xs text-[#64748B]">Live status from saved operational records — not a required step sequence</p>
               </div>
               <span className="rounded-full border border-[#C6D8FF] bg-white px-3 py-1 text-xs font-bold text-[#2354C6]">
-                {progressStages.filter(step => step.complete).length} of {progressStages.length} indicators complete
+                {progressStages.filter(step => step.complete).length} complete · {progressStages.filter(step => !step.complete&&!step.neutral).length} pending · {progressStages.filter(step => !step.complete&&step.neutral).length} no entries / not expected
               </span>
             </div>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-              {progressStages.map((step, index) => (
-                <div key={step.label} data-tone={["orange","blue","purple","green","blue","purple"][index]}
-                  className={`option4-step daily-ops-step rounded-xl border p-4 transition-colors ${
-                  step.complete ? 'border-emerald-200 bg-white' : 'border-slate-200 bg-white'
-                }`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">
-                      {String(index + 1).padStart(2, '0')}
-                    </span>
-                    {step.complete
-                      ? <CheckCircle2 className="h-4 w-4 text-emerald-700" aria-label="Complete" />
-                      : <Clock className="h-4 w-4 text-amber-700" aria-label="Not complete" />}
+              {progressStages.map((step) => (
+                <div key={step.label} data-tone={step.complete?'success':step.neutral?'neutral':'warning'}
+                  className="option4-step daily-ops-step ops-progress-card">
+                  <div className="flex items-center justify-between gap-2 ops-progress-label">
+                    <span>{step.label}</span>
+                    {step.complete?<CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700" aria-label="Complete"/>:
+                      step.neutral?<span className="text-xs text-slate-500" aria-label="No entries or not expected">—</span>:<Clock className="h-4 w-4 shrink-0 text-amber-700" aria-label="Pending"/>}
                   </div>
-                  <div className="mt-2 text-xs font-semibold text-[#17365D]">{step.label}</div>
-                  <div className="mt-1 text-xs tabular-nums text-[#526477]">{step.detail}</div>
+                  <div className="mt-3 ops-progress-detail">{step.detail}</div>
+                  <div className="mt-1 ops-progress-state">{step.complete?'Complete':step.neutral?'No entries / not expected':'Pending'}</div>
                 </div>
               ))}
             </div>
@@ -1442,7 +1433,7 @@ export const DailyOperationsPage: React.FC = () => {
             <div className="flex items-center gap-2 text-xs font-medium text-[#526477]">
               <Clock className="h-4 w-4 text-[#F47721]" />
               <span>{summary.shiftsCount === 0 ? 'No shift started for this date' :
-                summary.shifts.every(shift => shift.status === 'CLOSED') ? 'All recorded shifts are operationally closed' :
+                summary.shifts.every(shift => shift.status === 'CLOSED' || shift.status === 'LOCKED') ? 'All recorded shifts are operationally closed' :
                 `${summary.shifts.filter(shift => shift.status === 'OPEN').length} shift(s) currently open`}</span>
             </div>
             <span className="text-xs text-[#64748B]">Choose a shift below to view or enter operational data</span>
@@ -1509,8 +1500,9 @@ export const DailyOperationsPage: React.FC = () => {
         <>
           {/* Multi-shift selector tabs */}
           {bootstrap && bootstrap.shifts.length > 0 ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs space-y-3">
+              <SectionTitle title="Shift selection & actions" description="Select a recorded shift, then review stock before closing operations."/>
+              <div className="ops-shift-controls"><div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500 mr-1">
                   Shifts on {businessDate}:
                 </span>
@@ -1520,6 +1512,7 @@ export const DailyOperationsPage: React.FC = () => {
                     <button
                       key={ws.shift.id}
                       type="button"
+                      aria-pressed={isSelected}
                       onClick={() => { if(navigationBusy) return; initialSelection.current=toWorkbenchSelection(ws.shift); setActiveShiftId(ws.shift.id); remember(toWorkbenchSelection(ws.shift)); }}
                       className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors flex items-center gap-2 ${
                         isSelected
@@ -1549,7 +1542,7 @@ export const DailyOperationsPage: React.FC = () => {
               </div>
 
               {activeWorkspace && (
-                <div className="flex items-center gap-2">
+                <div className="ops-shift-actions">
                   <button
                     type="button"
                     onClick={handleComputeReconciliation}
@@ -1570,7 +1563,7 @@ export const DailyOperationsPage: React.FC = () => {
                         setAdminEmptyCloseOpen(true);
                       }}
                       disabled={closingShiftBusy}
-                      className="h-8 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
+                      className="h-8 px-3 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
                     >
                       <ShieldAlert className="w-3.5 h-3.5" />
                       Admin: Close Empty Shift
@@ -1602,6 +1595,7 @@ export const DailyOperationsPage: React.FC = () => {
                   )}
                 </div>
               )}
+              </div>
             </div>
           ) : loading ? <p role="status" className="text-sm text-slate-600">Loading saved shifts…</p> : (
             <div className="bg-white border border-slate-200 rounded-xl p-8 text-center shadow-xs">
@@ -1624,9 +1618,12 @@ export const DailyOperationsPage: React.FC = () => {
                     <h2 className="text-base font-bold text-[#17365D]">Shift workbench</h2>
                     <p className="mt-1 text-xs text-[#64748B]">Work in the same outlet, date and shift. Use any applicable task; existing closure rules still apply.</p>
                   </div>
-                  <span className="rounded-lg bg-[#F1F5F9] px-2.5 py-1 text-xs font-medium text-[#526477]">
-                    {activeWorkspace.shift.status === 'OPEN' ? 'Shift open' : activeWorkspace.shift.status === 'CLOSED' ? 'Operations closed · fuel entries locked' : 'Read-only shift'} · Finance: {dsrStatusLabel(summary?.shifts.find(shift => shift.id === activeWorkspace.shift.id)?.financialReconciliationStatus ?? 'UNKNOWN')}
-                  </span>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <span className="text-xs font-semibold text-slate-600">Selected shift</span>
+                    <StatusPill status={activeWorkspace.shift.status}/>
+                    <span className="text-xs font-semibold text-slate-600">Finance</span>
+                    <StatusPill status={dsrStatusLabel(summary?.shifts.find(shift => shift.id === activeWorkspace.shift.id)?.financialReconciliationStatus ?? 'UNKNOWN')}/>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
                   {[
@@ -1636,16 +1633,16 @@ export const DailyOperationsPage: React.FC = () => {
                   ].map(task => {
                     const Icon = task.icon;
                     return <a key={task.target} href={`#${task.target}`} className="option4-action flex flex-col items-start gap-2 p-3 text-left transition focus-visible:outline-2 focus-visible:outline-[#2354C6]">
-                      <Icon className="h-5 w-5 text-[#D86514]" />
-                      <span className="text-xs font-bold text-[#17365D]">{task.label}</span>
+                      <span className="ops-action-icon"><Icon className="h-5 w-5" /></span>
+                      <span className="text-sm font-bold text-[#17365D]">{task.label}</span>
                       <span className="text-[11px] leading-relaxed text-[#64748B]">{task.subtitle}</span>
                     </a>;
                   })}
-                  {hasPermission(PERMISSIONS.TANK_STOCK_READ) && <button type="button" disabled={navigationBusy} onClick={()=>followTask('stock-ops')} className="option4-action flex flex-col items-start gap-2 p-3 text-left disabled:opacity-50"><Fuel className="h-5 w-5 text-[#D86514]"/><span className="text-xs font-bold text-[#17365D]">Fuel receipts</span><span className="text-[11px] text-[#64748B]">Same shift · tanker &amp; decantation</span></button>}
-                  {hasPermission(PERMISSIONS.FINANCIAL_RECONCILIATION_READ) && <button type="button" disabled={navigationBusy} onClick={()=>followTask('financials')} className="option4-action flex flex-col items-start gap-2 p-3 text-left disabled:opacity-50"><Calculator className="h-5 w-5 text-[#D86514]"/><span className="text-xs font-bold text-[#17365D]">Collections &amp; finance</span><span className="text-[11px] text-[#64748B]">Same shift · payments &amp; reconciliation</span></button>}
+                  {hasPermission(PERMISSIONS.TANK_STOCK_READ) && <button type="button" disabled={navigationBusy} onClick={()=>followTask('stock-ops')} className="option4-action flex flex-col items-start gap-2 p-3 text-left disabled:opacity-50"><span className="ops-action-icon"><Fuel className="h-5 w-5"/></span><span className="text-sm font-bold text-[#17365D]">Fuel receipts</span><span className="text-[11px] text-[#64748B]">Same shift · tanker &amp; decantation</span></button>}
+                  {hasPermission(PERMISSIONS.FINANCIAL_RECONCILIATION_READ) && <button type="button" disabled={navigationBusy} onClick={()=>followTask('financials')} className="option4-action flex flex-col items-start gap-2 p-3 text-left disabled:opacity-50"><span className="ops-action-icon"><Calculator className="h-5 w-5"/></span><span className="text-sm font-bold text-[#17365D]">Collections &amp; finance</span><span className="text-[11px] text-[#64748B]">Same shift · payments &amp; reconciliation</span></button>}
                   <button type="button" onClick={() => setViewMode('DSR')} className="option4-action flex flex-col items-start gap-2 p-3 text-left transition focus-visible:outline-2 focus-visible:outline-[#2354C6]">
-                    <FileSpreadsheet className="h-5 w-5 text-[#D86514]" />
-                    <span className="text-xs font-bold text-[#17365D]">View DSR</span>
+                    <span className="ops-action-icon"><FileSpreadsheet className="h-5 w-5"/></span>
+                    <span className="text-sm font-bold text-[#17365D]">View DSR</span>
                     <span className="text-[11px] leading-relaxed text-[#64748B]">Daily Sales Report</span>
                   </button>
                 </div>

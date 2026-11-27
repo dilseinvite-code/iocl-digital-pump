@@ -6,6 +6,9 @@ import { useActiveOutlet } from '../context/ActiveOutletContext';
 import type { DailyFuelSummary } from '../../shared/types';
 import { getLocalDateInputValue } from '../../shared/utils/dateUtils';
 import { getWorkDeskIndicators } from '../utils/workDesk';
+import { StatusCard, SectionTitle } from '../components/common/OperationsUi';
+import { dsrStatusLabel, getDsrWorkflowStatus } from '../../shared/dsrWorkflowStatus';
+import { operationalShiftClosure } from '../utils/dsrReportLayout';
 import {
   Building2,
   Users,
@@ -109,8 +112,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const Icon = task.icon;
     return <button key={task.id} type="button" disabled={!onNavigate}
       onClick={() => onNavigate?.(task.id)}
-      className="group flex min-h-[84px] w-full items-center gap-3 rounded-xl border border-[#D7E0EA] bg-white px-4 py-3 text-left hover:border-[#F47721] focus-visible:outline-2 focus-visible:outline-[#2354C6] disabled:opacity-50">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F1F5F9] text-[#17365D]"><Icon className="h-5 w-5"/></span>
+      data-group={task.group} className="ops-task-card group flex min-h-[84px] w-full items-center gap-3 rounded-xl border border-[#D7E0EA] bg-white px-4 py-3 text-left hover:border-[#F47721] focus-visible:outline-2 focus-visible:outline-[#2354C6] disabled:opacity-50">
+      <span className="ops-action-icon"><Icon className="h-5 w-5"/></span>
       <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-[#17365D]">{task.label}</span><span className="mt-1 block text-xs leading-relaxed text-[#64748B]">{task.description}</span></span>
       <ChevronRight className="h-4 w-4 shrink-0 text-[#64748B] group-hover:text-[#F47721]"/>
     </button>;
@@ -119,29 +122,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
   return (
     <div className="option4-dashboard mx-auto max-w-[1500px] space-y-5 pb-10 text-[#172B4D]">
-      <header className="rounded-2xl border border-[#D7E0EA] bg-white p-5 sm:p-6">
+      <header className="ops-dashboard-hero p-5 sm:p-7">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div><p className="text-xs font-bold uppercase tracking-wider text-[#B8530D]">Outlet work desk</p><h1 className="mt-1 text-2xl font-bold tracking-tight text-[#17365D]">What would you like to do?</h1><p className="mt-1 text-sm text-[#64748B]">Start with today's outlet tasks or find saved reports and compliance records.</p></div>
-          <div className="rounded-xl bg-[#F1F5F9] px-4 py-3 text-sm"><div className="font-bold text-[#17365D]">{activeOutlet ? activeOutlet.name + ' (' + activeOutlet.roCode + ')' : outletLoading ? 'Loading outlet…' : 'No active outlet selected'}</div><div className="mt-1 text-xs text-[#64748B]">Business date: {businessDate} · Change outlet in the top bar</div></div>
+          <div className="min-w-0"><span className="ops-eyebrow">Outlet work desk</span><h1 className="mt-3 text-2xl sm:text-3xl">What would you like to do?</h1><p className="mt-2 text-sm leading-relaxed">Start with today's outlet tasks or find saved reports and compliance records.</p></div>
+          <div className="ops-hero-context text-sm"><span className="block text-[11px] font-semibold uppercase tracking-wider">Active outlet</span><div className="mt-1 font-bold">{activeOutlet ? activeOutlet.name + ' (' + activeOutlet.roCode + ')' : outletLoading ? 'Loading outlet…' : 'No active outlet selected'}</div><span className="mt-1 block text-xs">Business date: {businessDate} · Change outlet in the top bar</span></div>
         </div>
       </header>
       {canViewDaily && activeOutletId && <section aria-label="Today's operational status" className="option4-panel p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-lg font-bold text-[#17365D]">Today's operations</h2><p className="text-xs text-[#64748B]">Saved progress across all shifts for this outlet and business date.</p></div><button type="button" className="rounded-lg border border-[#D7E0EA] px-3 py-2 text-xs font-semibold text-[#17365D]" onClick={() => setRevision(v => v+1)}>Refresh status</button></div>
         {!currentStatus ? <p role="status" className="text-sm text-[#64748B]">Loading saved status…</p> : currentStatus.error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{currentStatus.error}</p> : summary && <>
-          <div className="flex flex-wrap items-center gap-3 text-sm"><span className="font-bold text-[#17365D]">{summary.dayEntryStatus === 'NO_ENTRY' ? 'No recorded shifts' : summary.status.replaceAll('_', ' ')}</span><span className="text-[#64748B]">{summary.shiftsCount} recorded · {summary.shifts.filter(x=>x.status==='OPEN').length} open</span>{summary.missingFields.length>0 && <span className="text-amber-800">{summary.missingFields.length} completion warnings</span>}</div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">{indicators.map(item=><div key={item.label} className="flex items-center justify-between gap-3 rounded-lg border border-[#E2E8F0] p-3"><div><p className="text-xs font-semibold text-[#17365D]">{item.label}</p><p className="mt-1 text-xs text-[#64748B]">{item.detail}</p></div><span className={'text-xs font-semibold '+(item.state==='complete'?'text-emerald-700':item.state==='pending'?'text-amber-800':'text-slate-500')}>{item.state==='complete'?'Complete':item.state==='pending'?'Pending':'Not recorded'}</span></div>)}</div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <StatusCard label="Operational DSR" status={dsrStatusLabel(getDsrWorkflowStatus(summary).operational)} description="Fuel reading and stock report"/>
+            <StatusCard label="Shift closure" status={operationalShiftClosure(summary)} description={summary.shiftsCount+' recorded · '+summary.shifts.filter(x=>x.status==='OPEN').length+' open'}/>
+            <StatusCard label="Financial reconciliation" status={dsrStatusLabel(getDsrWorkflowStatus(summary).financial)} description="Payment collections and finance status"/>
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">{indicators.map(item=><div key={item.label} className="ops-progress-card" data-tone={item.state==='complete'?'success':item.state==='pending'?'warning':'neutral'}><p className="ops-progress-label">{item.label}</p><p className="mt-3 ops-progress-detail">{item.detail}</p><p className="mt-1 ops-progress-state">{item.state==='complete'?'Complete':item.state==='pending'?'Pending':'Not recorded'}</p></div>)}</div>
           {summary.missingFields.length>0&&<details className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><summary className="cursor-pointer font-semibold">Show completion warnings</summary><ul className="mt-2 list-disc pl-5">{summary.missingFields.map((m,i)=><li key={i}>{m}</li>)}</ul></details>}
           <button type="button" onClick={()=>onNavigate?.('daily-ops')} className="rounded-lg bg-[#17365D] px-4 py-2.5 text-sm font-semibold text-white">{summary.shiftsCount===0?'Start daily operations':'Open shift workspace'}</button>
           <p className="text-xs text-[#64748B]">These are recorded indicators, not a mandatory sequence or a readiness-to-close decision. No data is changed here.</p>
         </>}
       </section>}
       <section aria-label="Quick actions" className="option4-panel p-5 space-y-3">
-        <div><h2 className="text-lg font-bold text-[#17365D]">Daily work</h2><p className="text-xs text-[#64748B]">Open the appropriate task once. Use the same outlet and verify the selected shift before entering data.</p></div>
+        <SectionTitle title="Daily work" description="Choose an operation, verify the selected shift, and enter the relevant records."/>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{tasks.filter(task=>task.group==='daily').map(taskCard)}</div>
         {!tasks.some(task=>task.group==='daily')&&<p className="text-sm text-[#64748B]">No daily workspaces assigned to your role.</p>}
       </section>
       <section aria-label="Work areas" className="space-y-4">
-        {tasks.some(task=>task.group==='reports')&&<div className="option4-panel p-5 space-y-3"><div><h2 className="text-lg font-bold text-[#17365D]">Reports &amp; compliance</h2><p className="text-xs text-[#64748B]">Find existing records, due dates and downloadable reports.</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{tasks.filter(task=>task.group==='reports').map(taskCard)}</div></div>}
+        {tasks.some(task=>task.group==='reports')&&<div className="option4-panel p-5 space-y-3"><SectionTitle title="Reports & compliance" description="Find existing records, due dates and downloadable reports."/><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{tasks.filter(task=>task.group==='reports').map(taskCard)}</div></div>}
         {(['support','setup'] as const).map(group=>tasks.some(task=>task.group===group)&&<details key={group} className="option4-panel group"><summary className="cursor-pointer list-none flex items-center justify-between p-5"><div><span className="block font-bold text-[#17365D]">{group==='support'?'Outlet support & maintenance':'Outlet setup & masters'}</span><span className="block mt-1 text-xs text-[#64748B]">{group==='support'?'Staff, bills, equipment and leases':'Products, tanks, calibration and outlet configuration'}</span></div><ChevronRight className="h-5 w-5 text-[#64748B] group-open:rotate-90"/></summary><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 border-t border-[#E2E8F0] p-5">{tasks.filter(task=>task.group===group).map(taskCard)}</div></details>)}
       </section>
 
